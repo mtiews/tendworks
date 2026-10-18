@@ -44,5 +44,58 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       expect(sandbox.id).toMatch(/^[a-z0-9]{1,32}$/);
       expect(Date.parse(sandbox.createdAt)).not.toBeNaN();
     });
+
+    it("runs a command and returns its output and exit code", async () => {
+      const { id } = await create();
+
+      const result = await context.api.exec(id, { command: ["echo", "hello", "sandbox"] });
+
+      expect(result).toEqual({ exitCode: 0, stdout: "hello sandbox\n", stderr: "" });
+    });
+
+    it("reports a failing command through its exit code and stderr", async () => {
+      const { id } = await create();
+
+      const result = await context.api.exec(id, { command: ["cat", "/no/such/file"] });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe("");
+      expect(result.stderr).toContain("/no/such/file");
+    });
+
+    it("reports an unknown program with exit code 127", async () => {
+      const { id } = await create();
+
+      const result = await context.api.exec(id, { command: ["no-such-program"] });
+
+      expect(result.exitCode).toBe(127);
+      expect(result.stdout).toBe("");
+    });
+
+    it("runs commands as the non-root default user", async () => {
+      const { id } = await create();
+
+      const result = await context.api.exec(id, { command: ["id", "-u"] });
+
+      expect(result.stdout).toBe("1000\n");
+    });
+
+    it("runs commands as the template's user", async () => {
+      const { id } = await create(template({ user: "4242:4242" }));
+
+      const result = await context.api.exec(id, { command: ["id", "-u"] });
+
+      expect(result.stdout).toBe("4242\n");
+    });
+
+    it("runs a command in the given working directory with the given environment", async () => {
+      const { id } = await create();
+
+      const pwd = await context.api.exec(id, { command: ["pwd"], workingDirectory: "/tmp" });
+      const env = await context.api.exec(id, { command: ["printenv", "GREETING"], env: { GREETING: "moin" } });
+
+      expect(pwd.stdout).toBe("/tmp\n");
+      expect(env.stdout).toBe("moin\n");
+    });
   });
 }
