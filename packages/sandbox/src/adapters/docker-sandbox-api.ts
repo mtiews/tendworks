@@ -1,4 +1,6 @@
+import { posix } from "node:path";
 import {
+  assertAbsolutePath,
   assertSandboxId,
   defaultIsolationClass,
   defaultSandboxUser,
@@ -8,6 +10,7 @@ import {
   type Sandbox,
   type SandboxApi,
 } from "../sandbox-api.js";
+import { firstTarEntry, tarSingleFile } from "./tar.js";
 
 export interface DockerSandboxApiOptions {
   /** Base URL of the container API, i.e. the restricted socket proxy (ADR 0001). */
@@ -55,7 +58,14 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
   const failure = async (response: Response, action: string) =>
     new Error(`${action} failed: ${response.status} ${(await response.text()).trim()}`);
 
-  return {
+  const notFound = async (response: Response, sandboxId: string, path: string) => {
+    const message = (await response.text()).toLowerCase();
+    return message.includes("no such container")
+      ? new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`)
+      : new SandboxError("file-not-found", `no file ${path} in sandbox ${sandboxId}`);
+  };
+
+  const api: SandboxApi = {
     async create(template) {
       const id = newSandboxId();
       const isolationClass = template.spec.isolationClass ?? defaultIsolationClass;
@@ -128,11 +138,30 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       if (stdout.startsWith("OCI runtime exec failed")) return { exitCode: ExitCode, stdout: "", stderr: stderr + stdout };
       return { exitCode: ExitCode, stdout, stderr };
     },
-    async readFile() {
-      throw new Error("not implemented");
+    async readFile(sandboxId, path) {
+      assertSandboxId(sandboxId);
+      assertAbsolutePath(path);
+      const response = await call("GET", `/containers/${containerName(sandboxId)}/archive?path=${encodeURIComponent(path)}`);
+      if (response.status === 404) throw await notFound(response, sandboxId, path);
+      if (!response.ok) throw await failure(response, "reading a file");
+      const entry = firstTarEntry(new Uint8Array(await response.arrayBuffer()));
+      if (entry.type !== "file") throw new SandboxError("invalid-request", `${path} is not a regular file`);
+      return entry.content;
     },
-    async writeFile() {
-      throw new Error("not implemented");
+    async writeFile(sandboxId, path, content) {
+      assertSandboxId(sandboxId);
+      assertAbsolutePath(path);
+      const directory = posix.dirname(path);
+      const created = await api.exec(sandboxId, { command: ["mkdir", "-p", directory] });
+      if (created.exitCode !== 0) throw new SandboxError("invalid-request", `cannot create ${directory}: ${created.stderr.trim()}`);
+
+      // copyUIDGID hands the file to the sandbox user.
+      const response = await call("PUT", `/containers/${containerName(sandboxId)}/archive?path=${encodeURIComponent(directory)}&copyUIDGID=true`, {
+        body: tarSingleFile(posix.basename(path), content),
+        contentType: "application/x-tar",
+      });
+      if (response.status === 404) throw await notFound(response, sandboxId, path);
+      if (!response.ok) throw await failure(response, "writing a file");
     },
     async destroy(sandboxId) {
       assertSandboxId(sandboxId);
@@ -140,4 +169,5 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       if (!response.ok && response.status !== 404) throw await failure(response, "destroying the sandbox");
     },
   };
+  return api;
 }

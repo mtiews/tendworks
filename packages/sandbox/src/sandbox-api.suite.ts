@@ -97,5 +97,39 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       expect(pwd.stdout).toBe("/tmp\n");
       expect(env.stdout).toBe("moin\n");
     });
+
+    it("writes a file that commands in the sandbox can read, creating parent directories", async () => {
+      const { id } = await create();
+
+      await context.api.writeFile(id, "/tmp/work/notes/plan.md", new TextEncoder().encode("# Plan\n"));
+      const result = await context.api.exec(id, { command: ["cat", "/tmp/work/notes/plan.md"] });
+
+      expect(result).toEqual({ exitCode: 0, stdout: "# Plan\n", stderr: "" });
+    });
+
+    it("reads back exactly the bytes written, replacing earlier content", async () => {
+      const { id } = await create();
+      const bytes = Uint8Array.from({ length: 70_000 }, (_, i) => (i * 31) % 256);
+
+      await context.api.writeFile(id, "/tmp/data.bin", new TextEncoder().encode("old"));
+      await context.api.writeFile(id, "/tmp/data.bin", bytes);
+
+      expect(await context.api.readFile(id, "/tmp/data.bin")).toEqual(bytes);
+    });
+
+    it("rejects reading a file that does not exist", async () => {
+      const { id } = await create();
+
+      await expect(context.api.readFile(id, "/tmp/missing.txt")).rejects.toMatchObject({ code: "file-not-found" });
+    });
+
+    it("keeps files of different sandboxes apart", async () => {
+      const first = await create();
+      const second = await create();
+
+      await context.api.writeFile(first.id, "/tmp/only-here.txt", new TextEncoder().encode("first"));
+
+      await expect(context.api.readFile(second.id, "/tmp/only-here.txt")).rejects.toMatchObject({ code: "file-not-found" });
+    });
   });
 }

@@ -1,4 +1,5 @@
 import {
+  assertAbsolutePath,
   assertSandboxId,
   defaultIsolationClass,
   defaultSandboxUser,
@@ -46,13 +47,17 @@ export function createFakeSandboxApi(): SandboxApi {
     async exec(sandboxId, request) {
       return run(find(sandboxId), request);
     },
-    async readFile(sandboxId) {
-      find(sandboxId);
-      throw new Error("not implemented");
+    async readFile(sandboxId, path) {
+      const { files } = find(sandboxId);
+      assertAbsolutePath(path);
+      const content = files.get(path);
+      if (!content) throw new SandboxError("file-not-found", `no file ${path} in sandbox ${sandboxId}`);
+      return content.slice();
     },
-    async writeFile(sandboxId) {
-      find(sandboxId);
-      throw new Error("not implemented");
+    async writeFile(sandboxId, path, content) {
+      const { files } = find(sandboxId);
+      assertAbsolutePath(path);
+      files.set(path, content.slice());
     },
     async destroy(sandboxId) {
       sandboxes.delete(sandboxId);
