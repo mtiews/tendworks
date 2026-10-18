@@ -9,3 +9,6 @@ packages/shared/src/generated/
 # Local secrets and settings
 .env
 .claude/settings.local.json
+
+# Agent worktrees
+.claude/worktrees/
