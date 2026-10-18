@@ -1,0 +1,2 @@
+# Normalize line endings to LF in the repository and working tree (Docker, shell, YAML)
+* text=auto eol=lf
