@@ -15,6 +15,18 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "tests/architecture/**/*.test.ts"],
+          exclude: ["**/*.integration.test.ts", "**/node_modules/**"],
+        },
+      },
+      {
+        // Adapters against their real products (e.g. Docker); needs a Docker host.
+        extends: true,
+        test: {
+          name: "integration",
+          include: ["packages/*/src/**/*.integration.test.ts"],
+          maxConcurrency: 16,
+          testTimeout: 30_000,
+          hookTimeout: 120_000,
         },
       },
       {

@@ -1,0 +1,195 @@
+openapi: 3.1.0
+info:
+  title: Tendworks Sandbox API
+  version: 0.1.0
+  description: >-
+    Internal API of the sandbox domain: create a sandbox from a sandbox
+    template, run commands in it, read and write files, destroy it. Terms
+    follow OpenSandbox so another backend can be placed behind it. Its first
+    consumer, the agent runtime, calls it in-process; snapshot, restore,
+    pause and ports follow when needed.
+paths:
+  /sandboxes:
+    post:
+      operationId: createSandbox
+      summary: Create and start a sandbox from a sandbox template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSandboxRequest"
+      responses:
+        "201":
+          description: The sandbox is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Sandbox"
+        "422":
+          description: The template cannot be honoured, e.g. its image is not on the sandbox host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /sandboxes/{sandboxId}:
+    parameters:
+      - $ref: "#/components/parameters/SandboxId"
+    delete:
+      operationId: destroySandbox
+      summary: Destroy a sandbox and everything in it
+      description: Idempotent; destroying an unknown sandbox succeeds.
+      responses:
+        "204":
+          description: The sandbox no longer exists.
+  /sandboxes/{sandboxId}/exec:
+    parameters:
+      - $ref: "#/components/parameters/SandboxId"
+    post:
+      operationId: execInSandbox
+      summary: Run a command in the sandbox and wait for it to finish
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecRequest"
+      responses:
+        "200":
+          description: The command finished; a non-zero exit code is not an error of this API.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /sandboxes/{sandboxId}/files:
+    parameters:
+      - $ref: "#/components/parameters/SandboxId"
+      - name: path
+        in: query
+        required: true
+        description: Absolute path of a regular file inside the sandbox.
+        schema:
+          $ref: "#/components/schemas/AbsolutePath"
+    get:
+      operationId: readSandboxFile
+      summary: Read a file from the sandbox
+      responses:
+        "200":
+          description: File content.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                contentMediaType: application/octet-stream
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: writeSandboxFile
+      summary: Write a file into the sandbox
+      description: >-
+        Creates missing parent directories and replaces an existing file. The
+        file is owned by the sandbox user.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              contentMediaType: application/octet-stream
+      responses:
+        "204":
+          description: The file is written.
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  parameters:
+    SandboxId:
+      name: sandboxId
+      in: path
+      required: true
+      schema:
+        $ref: "#/components/schemas/SandboxId"
+  responses:
+    NotFound:
+      description: The sandbox or the file does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    SandboxTemplate:
+      $ref: "../schemas/sandbox-template.schema.json"
+    SandboxId:
+      type: string
+      pattern: "^[a-z0-9]{1,32}$"
+    AbsolutePath:
+      type: string
+      pattern: "^/"
+    IsolationClass:
+      type: string
+      enum: [container, gvisor]
+    CreateSandboxRequest:
+      type: object
+      required: [template]
+      additionalProperties: false
+      properties:
+        template:
+          $ref: "#/components/schemas/SandboxTemplate"
+    Sandbox:
+      type: object
+      required: [id, template, isolationClass, state, createdAt]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/SandboxId"
+        template:
+          type: string
+          description: Name of the sandbox template the sandbox was created from.
+        isolationClass:
+          $ref: "#/components/schemas/IsolationClass"
+        state:
+          type: string
+          enum: [running]
+        createdAt:
+          type: string
+          format: date-time
+    ExecRequest:
+      type: object
+      required: [command]
+      additionalProperties: false
+      properties:
+        command:
+          type: array
+          minItems: 1
+          items:
+            type: string
+          description: Program and arguments; no shell is involved unless the command starts one.
+        workingDirectory:
+          $ref: "#/components/schemas/AbsolutePath"
+        env:
+          type: object
+          additionalProperties:
+            type: string
+    ExecResult:
+      type: object
+      required: [exitCode, stdout, stderr]
+      additionalProperties: false
+      properties:
+        exitCode:
+          type: integer
+        stdout:
+          type: string
+        stderr:
+          type: string
+    Error:
+      type: object
+      required: [code, message]
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          enum: [sandbox-not-found, file-not-found, image-not-found, isolation-class-unavailable, invalid-request]
+        message:
+          type: string

@@ -33,9 +33,16 @@ services:
       timeout: 5s
       retries: 30
 
-  # The only way to the Docker API (ADR 0001). Endpoints are opened per need;
-  # sandbox creation (containers, images, volumes, exec, POST) follows with the sandbox API.
+  # The only way to the Docker API (ADR 0001). Only what the sandbox adapter needs is open:
+  # /_ping, /version, /containers/** (create, start, archive, delete) and /exec/**,
+  # with POST enabling every write method on those. Images are not reachable, so
+  # sandbox images must already be on the host. Every other section is closed,
+  # including the events stream the proxy opens by default.
   # It sits on its own internal network that only the worker joins.
+  # Remaining risk: the proxy filters paths, not bodies, so whoever reaches it can
+  # still create a privileged container. Keep the worker the only client.
+  # Idle connections are cut after 10 minutes (haproxy timeout), so keep exec calls
+  # short-lived or send output regularly; long quiet attach streams will break.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     volumes:
@@ -43,6 +50,10 @@ services:
     environment:
       PING: 1
       VERSION: 1
+      CONTAINERS: 1
+      EXEC: 1
+      POST: 1
+      EVENTS: 0
     networks:
       - sandbox-backend
 

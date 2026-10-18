@@ -12,7 +12,7 @@
     }
   },
   "scripts": {
-    "generate": "openapi-typescript ../../contracts/openapi/control-plane.yaml -o src/generated/control-plane.ts && openapi-typescript ../../contracts/openapi/health.yaml -o src/generated/health.ts && json2ts -i ../../contracts/schemas/serverless-workflow.yaml -o src/generated/serverless-workflow.ts --unreachableDefinitions && json2ts -i ../../contracts/schemas/a2a.yaml -o src/generated/a2a.ts --unreachableDefinitions"
+    "generate": "openapi-typescript ../../contracts/openapi/control-plane.yaml -o src/generated/control-plane.ts && openapi-typescript ../../contracts/openapi/health.yaml -o src/generated/health.ts && openapi-typescript ../../contracts/openapi/sandbox.yaml --default-non-nullable false -o src/generated/sandbox.ts && json2ts -i ../../contracts/schemas/serverless-workflow.schema.yaml -o src/generated/serverless-workflow.ts --unreachableDefinitions && json2ts -i ../../contracts/schemas/a2a.schema.yaml -o src/generated/a2a.ts --unreachableDefinitions"
   },
   "devDependencies": {
     "json-schema-to-typescript": "16.0.0",

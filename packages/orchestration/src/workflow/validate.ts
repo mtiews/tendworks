@@ -6,7 +6,7 @@ import { parse } from "yaml";
 // Validation needs Node APIs and generated code (Ajv), so it runs before a run starts,
 // never inside the deterministic interpreter.
 
-const SCHEMA = new URL("../../../../contracts/schemas/serverless-workflow.yaml", import.meta.url);
+const SCHEMA = new URL("../../../../contracts/schemas/serverless-workflow.schema.yaml", import.meta.url);
 
 const SUPPORTED_TASKS = ["call", "do"];
 const SUPPORTED_CALLS = ["a2a"];

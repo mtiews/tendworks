@@ -1,6 +1,6 @@
 # Workflows call agent profiles with the built-in `call: a2a`
 
-A workflow hands a task to an agent profile with the DSL's built-in `call: a2a` (Serverless Workflow 1.0.3), method `message/send`, and names the profile as `agentCard.endpoint: agent://<profile>`. The interpreter resolves the profile name and sends the message through its agent task port, which follows the A2A 1.0 wire model (`contracts/schemas/a2a.yaml`). We only accept the subset of the DSL the interpreter executes (`contracts/schemas/serverless-workflow.yaml`), so unsupported tasks fail validation before a run starts instead of failing mid-run.
+A workflow hands a task to an agent profile with the DSL's built-in `call: a2a` (Serverless Workflow 1.0.3), method `message/send`, and names the profile as `agentCard.endpoint: agent://<profile>`. The interpreter resolves the profile name and sends the message through its agent task port, which follows the A2A 1.0 wire model (`contracts/schemas/a2a.schema.yaml`). We only accept the subset of the DSL the interpreter executes (`contracts/schemas/serverless-workflow.schema.yaml`), so unsupported tasks fail validation before a run starts instead of failing mid-run.
 
 ## Considered Options
 

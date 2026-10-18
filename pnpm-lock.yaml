@@ -290,6 +290,9 @@ importers:
       '@tendworks/health':
         specifier: workspace:*
         version: link:../health
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
 
   packages/shared:
     devDependencies:
