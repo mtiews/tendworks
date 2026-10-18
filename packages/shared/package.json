@@ -1,0 +1,20 @@
+{
+  "name": "@tendworks/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Types generated from contracts/. No hand-written code.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "generate": "openapi-typescript ../../contracts/openapi/control-plane.yaml -o src/generated/control-plane.ts"
+  },
+  "devDependencies": {
+    "openapi-typescript": "7.13.0"
+  }
+}

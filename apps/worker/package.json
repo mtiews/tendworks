@@ -1,0 +1,10 @@
+{
+  "name": "@tendworks/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundles orchestration, agent-runtime and mcp-platform.",
+  "scripts": {
+    "start": "node dist/main.js"
+  }
+}

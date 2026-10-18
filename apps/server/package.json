@@ -1,0 +1,16 @@
+{
+  "name": "@tendworks/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bundles control-plane, trigger-gateway and human-interaction.",
+  "scripts": {
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.3",
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/orchestration": "workspace:*",
+    "@tendworks/sandbox": "workspace:*"
+  }
+}

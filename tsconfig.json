@@ -1,0 +1,41 @@
+{
+  "files": [],
+  "references": [
+    {
+      "path": "packages/agent-runtime"
+    },
+    {
+      "path": "packages/control-plane"
+    },
+    {
+      "path": "packages/event-bus"
+    },
+    {
+      "path": "packages/human-interaction"
+    },
+    {
+      "path": "packages/mcp-platform"
+    },
+    {
+      "path": "packages/orchestration"
+    },
+    {
+      "path": "packages/sandbox"
+    },
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "packages/trigger-gateway"
+    },
+    {
+      "path": "apps/server"
+    },
+    {
+      "path": "apps/worker"
+    },
+    {
+      "path": "apps/cli"
+    }
+  ]
+}

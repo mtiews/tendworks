@@ -2,7 +2,16 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** design phase. The repo only contains docs; no code yet. Next milestone is the walking skeleton.
+**Current state:** walking skeleton milestone 1 in progress (spec: issue #1, tickets are its sub-issues). The scaffold (S0) is in place.
+
+## Commands
+
+- `pnpm install` (pnpm via corepack: `corepack enable pnpm`)
+- `pnpm check`: generate types from `contracts/`, typecheck, architecture rules (dependency-cruiser), unit tests
+- `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` against it
+- `node apps/cli/dist/main.js status` after `pnpm build`: the `tend` CLI against `http://localhost:8080` (override with `--url` or `TEND_URL`)
+
+Types in `packages/shared` are generated from `contracts/` and never committed or edited by hand. Unit tests resolve workspace packages to their TypeScript sources via the `source` export condition, so they need no build.
 
 ## Documents (read before changing anything)
 

@@ -1,0 +1,61 @@
+openapi: 3.1.0
+info:
+  title: Tendworks Control Plane API
+  version: 0.1.0
+  description: >-
+    Public API of the Tendworks control plane. The web UI, the tend CLI, the
+    meta-agent and any script use only this API.
+paths:
+  /status:
+    get:
+      operationId: getPlatformStatus
+      summary: Platform health
+      description: >-
+        Health of the platform and of each component it depends on. Answers 200
+        when the platform is healthy and 503 when it is not; both carry the same
+        body.
+      responses:
+        "200":
+          description: Platform is healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformStatus"
+        "503":
+          description: Platform is unhealthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformStatus"
+components:
+  schemas:
+    HealthState:
+      type: string
+      enum: [healthy, unhealthy]
+    PlatformStatus:
+      type: object
+      required: [status, components, checkedAt]
+      additionalProperties: false
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthState"
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentStatus"
+        checkedAt:
+          type: string
+          format: date-time
+    ComponentStatus:
+      type: object
+      required: [name, status]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Generic component name, e.g. store, execution-engine, sandbox-backend.
+        status:
+          $ref: "#/components/schemas/HealthState"
+        message:
+          type: string
+          description: Reason when the component is unhealthy.
