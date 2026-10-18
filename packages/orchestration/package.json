@@ -11,7 +11,11 @@
     }
   },
   "dependencies": {
+    "@gabrielbryk/jq-ts": "1.7.0",
     "@temporalio/client": "1.24.0",
-    "@tendworks/health": "workspace:*"
+    "@tendworks/health": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "ajv": "8.20.0",
+    "yaml": "2.9.1"
   }
 }

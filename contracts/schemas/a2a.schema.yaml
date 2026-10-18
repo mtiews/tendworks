@@ -1,0 +1,213 @@
+$id: https://tendworks.dev/schemas/v1/a2a.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: A2A
+description: >-
+  The part of the A2A task model that Tendworks uses between orchestration and agents,
+  in its JSON wire form (camelCase field names, enum values as strings).
+$comment: >-
+  Hand-transcribed from the normative A2A 1.0.1 protocol definition
+  (https://github.com/a2aproject/A2A/blob/v1.0.1/specification/a2a.proto, package lf.a2a.v1,
+  Apache License 2.0). Only messages Tendworks uses are included; fields are copied as
+  defined there. Extend from the same source when a new field or operation is needed.
+$defs:
+  sendMessageRequest:
+    title: SendMessageRequest
+    description: Request of the `SendMessage` operation.
+    type: object
+    additionalProperties: false
+    required: [message]
+    properties:
+      tenant:
+        type: string
+      message:
+        $ref: '#/$defs/message'
+      configuration:
+        $ref: '#/$defs/sendMessageConfiguration'
+      metadata:
+        $ref: '#/$defs/struct'
+  sendMessageConfiguration:
+    title: SendMessageConfiguration
+    type: object
+    additionalProperties: false
+    properties:
+      acceptedOutputModes:
+        type: array
+        items:
+          type: string
+      historyLength:
+        type: integer
+      returnImmediately:
+        type: boolean
+        description: If true, return right after the task was created; otherwise wait for a terminal or interrupted state.
+  task:
+    title: Task
+    type: object
+    additionalProperties: false
+    required: [id, status]
+    properties:
+      id:
+        type: string
+      contextId:
+        type: string
+      status:
+        $ref: '#/$defs/taskStatus'
+      artifacts:
+        type: array
+        items:
+          $ref: '#/$defs/artifact'
+      history:
+        type: array
+        items:
+          $ref: '#/$defs/message'
+      metadata:
+        $ref: '#/$defs/struct'
+  taskStatus:
+    title: TaskStatus
+    type: object
+    additionalProperties: false
+    required: [state]
+    properties:
+      state:
+        $ref: '#/$defs/taskState'
+      message:
+        $ref: '#/$defs/message'
+      timestamp:
+        type: string
+        format: date-time
+  taskState:
+    title: TaskState
+    type: string
+    enum:
+      - TASK_STATE_SUBMITTED
+      - TASK_STATE_WORKING
+      - TASK_STATE_COMPLETED
+      - TASK_STATE_FAILED
+      - TASK_STATE_CANCELED
+      - TASK_STATE_INPUT_REQUIRED
+      - TASK_STATE_REJECTED
+      - TASK_STATE_AUTH_REQUIRED
+  message:
+    title: Message
+    type: object
+    additionalProperties: false
+    required: [messageId, role, parts]
+    properties:
+      messageId:
+        type: string
+      contextId:
+        type: string
+      taskId:
+        type: string
+      role:
+        $ref: '#/$defs/role'
+      parts:
+        type: array
+        items:
+          $ref: '#/$defs/part'
+      metadata:
+        $ref: '#/$defs/struct'
+      extensions:
+        type: array
+        items:
+          type: string
+      referenceTaskIds:
+        type: array
+        items:
+          type: string
+  role:
+    title: Role
+    type: string
+    enum: [ROLE_USER, ROLE_AGENT]
+  part:
+    title: Part
+    description: Exactly one of `text`, `raw`, `url` or `data`, plus optional metadata.
+    oneOf:
+      - $ref: '#/$defs/textPart'
+      - $ref: '#/$defs/rawPart'
+      - $ref: '#/$defs/urlPart'
+      - $ref: '#/$defs/dataPart'
+  textPart:
+    title: TextPart
+    type: object
+    additionalProperties: false
+    required: [text]
+    properties:
+      text:
+        type: string
+      metadata:
+        $ref: '#/$defs/struct'
+      filename:
+        type: string
+      mediaType:
+        type: string
+  rawPart:
+    title: RawPart
+    type: object
+    additionalProperties: false
+    required: [raw]
+    properties:
+      raw:
+        type: string
+        description: Base64-encoded bytes.
+      metadata:
+        $ref: '#/$defs/struct'
+      filename:
+        type: string
+      mediaType:
+        type: string
+  urlPart:
+    title: UrlPart
+    type: object
+    additionalProperties: false
+    required: [url]
+    properties:
+      url:
+        type: string
+      metadata:
+        $ref: '#/$defs/struct'
+      filename:
+        type: string
+      mediaType:
+        type: string
+  dataPart:
+    title: DataPart
+    type: object
+    additionalProperties: false
+    required: [data]
+    properties:
+      data:
+        description: Any JSON value.
+        type: [object, array, string, number, boolean, 'null']
+      metadata:
+        $ref: '#/$defs/struct'
+      filename:
+        type: string
+      mediaType:
+        type: string
+  artifact:
+    title: Artifact
+    type: object
+    additionalProperties: false
+    required: [artifactId, parts]
+    properties:
+      artifactId:
+        type: string
+      name:
+        type: string
+      description:
+        type: string
+      parts:
+        type: array
+        items:
+          $ref: '#/$defs/part'
+      metadata:
+        $ref: '#/$defs/struct'
+      extensions:
+        type: array
+        items:
+          type: string
+  struct:
+    title: Struct
+    description: A free JSON object.
+    type: object
+    additionalProperties: true
