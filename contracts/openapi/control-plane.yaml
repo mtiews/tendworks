@@ -27,8 +27,104 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlatformStatus"
+  /runs:
+    post:
+      operationId: startRun
+      summary: Start a run of a configured workflow
+      description: >-
+        Starts a run of the workflow named `workflow` (its `document.name`) from the
+        configuration. The run executes in the background; poll `GET /runs/{runId}`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunRequest"
+      responses:
+        "201":
+          description: Run started.
+          headers:
+            Location:
+              description: URL of the new run.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "400":
+          description: The request is invalid, e.g. no workflow with this name is configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listRuns
+      summary: List runs, newest first
+      responses:
+        "200":
+          description: Runs with their status and steps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+  /runs/{runId}:
+    get:
+      operationId: getRun
+      summary: Get one run with its steps and errors
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "404":
+          description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
+    StartRunRequest:
+      type: object
+      required: [workflow]
+      additionalProperties: false
+      properties:
+        workflow:
+          type: string
+          description: Name of a configured workflow (`document.name`).
+        input:
+          type: object
+          additionalProperties: true
+          description: Workflow input; defaults to an empty object.
+    RunList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/run.schema.yaml#/$defs/run"
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [title, status]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
     HealthState:
       type: string
       enum: [healthy, unhealthy]

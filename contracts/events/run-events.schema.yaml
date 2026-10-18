@@ -1,0 +1,129 @@
+$id: https://tendworks.dev/schemas/v1/events/run-events.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: RunEvents
+description: >-
+  Events orchestration emits about runs and steps. Each `$defs` entry is the complete
+  schema of one event type: the envelope from cloudevent.schema.yaml narrowed to its
+  `type` and `data`. Run events carry `runid`; step events also carry `stepid`.
+$defs:
+  runStarted:
+    title: RunStartedEvent
+    description: A run began executing.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, data]
+    properties:
+      type:
+        const: dev.tendworks.run.started
+      data:
+        $ref: '#/$defs/runData'
+  runCompleted:
+    title: RunCompletedEvent
+    description: A run completed.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, data]
+    properties:
+      type:
+        const: dev.tendworks.run.completed
+      data:
+        $ref: '#/$defs/runData'
+  runFailed:
+    title: RunFailedEvent
+    description: A run failed; `error.instance` names the failing task.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, data]
+    properties:
+      type:
+        const: dev.tendworks.run.failed
+      data:
+        $ref: '#/$defs/runFailedData'
+  stepStarted:
+    title: StepStartedEvent
+    description: A step started.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, stepid, data]
+    properties:
+      type:
+        const: dev.tendworks.step.started
+      data:
+        $ref: '#/$defs/stepData'
+  stepCompleted:
+    title: StepCompletedEvent
+    description: A step completed.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, stepid, data]
+    properties:
+      type:
+        const: dev.tendworks.step.completed
+      data:
+        $ref: '#/$defs/stepData'
+  stepFailed:
+    title: StepFailedEvent
+    description: A step failed.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, stepid, data]
+    properties:
+      type:
+        const: dev.tendworks.step.failed
+      data:
+        $ref: '#/$defs/stepFailedData'
+  runData:
+    title: RunEventData
+    type: object
+    additionalProperties: false
+    required: [workflow]
+    properties:
+      workflow:
+        type: string
+        description: Name of the workflow the run executes.
+  runFailedData:
+    title: RunFailedEventData
+    type: object
+    additionalProperties: false
+    required: [workflow, error]
+    properties:
+      workflow:
+        type: string
+        description: Name of the workflow the run executes.
+      error:
+        $ref: '../schemas/run.schema.yaml#/$defs/workflowError'
+  stepData:
+    title: StepEventData
+    type: object
+    additionalProperties: false
+    required: [name, reference]
+    properties:
+      name:
+        type: string
+        description: Task name in the workflow.
+      reference:
+        type: string
+        description: JSON pointer of the task in the workflow; equals the event's `stepid`.
+      taskId:
+        type: string
+        description: Id of the A2A task the step handed to an agent, if any.
+  stepFailedData:
+    title: StepFailedEventData
+    type: object
+    additionalProperties: false
+    required: [name, reference, error]
+    properties:
+      name:
+        type: string
+      reference:
+        type: string
+      taskId:
+        type: string
+      error:
+        $ref: '../schemas/run.schema.yaml#/$defs/workflowError'

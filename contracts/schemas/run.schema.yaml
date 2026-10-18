@@ -1,0 +1,98 @@
+$id: https://tendworks.dev/schemas/v1/run.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Run
+description: >-
+  Runtime state of a run and its steps as orchestration reports it. Shared by the
+  public control plane API and the internal orchestration API.
+$defs:
+  run:
+    title: Run
+    description: One execution of a workflow.
+    type: object
+    additionalProperties: false
+    required: [id, workflow, status, input, steps, createdAt]
+    properties:
+      id:
+        type: string
+        description: Run id, assigned by the platform.
+      workflow:
+        type: string
+        description: Name of the workflow (`document.name`) the run executes.
+      status:
+        $ref: '#/$defs/runStatus'
+      input:
+        description: Input the run was started with.
+      output:
+        description: Output of the workflow; set when the run completed.
+      error:
+        $ref: '#/$defs/workflowError'
+      steps:
+        type: array
+        description: Steps in the order they started.
+        items:
+          $ref: '#/$defs/step'
+      createdAt:
+        type: string
+        format: date-time
+      startedAt:
+        type: string
+        format: date-time
+      finishedAt:
+        type: string
+        format: date-time
+  runStatus:
+    title: RunStatus
+    description: >-
+      `pending` until the execution engine picks the run up, `running` while steps
+      execute, then `completed` or `failed`.
+    type: string
+    enum: [pending, running, completed, failed]
+  step:
+    title: Step
+    description: One task of the workflow.
+    type: object
+    additionalProperties: false
+    required: [name, reference, status, startedAt]
+    properties:
+      name:
+        type: string
+        description: Task name in the workflow.
+      reference:
+        type: string
+        description: JSON pointer of the task in the workflow, e.g. `/do/0/implement`. Unique within a run.
+      status:
+        $ref: '#/$defs/stepStatus'
+      taskId:
+        type: string
+        description: Id of the A2A task the step handed to an agent, if any.
+      error:
+        $ref: '#/$defs/workflowError'
+      startedAt:
+        type: string
+        format: date-time
+      finishedAt:
+        type: string
+        format: date-time
+  stepStatus:
+    title: StepStatus
+    type: string
+    enum: [running, completed, failed]
+  workflowError:
+    title: WorkflowError
+    description: Why a step or run failed, as RFC 7807 problem details (Serverless Workflow error).
+    type: object
+    additionalProperties: false
+    required: [type, status, instance, title]
+    properties:
+      type:
+        type: string
+        description: Error type URI, e.g. `https://serverlessworkflow.io/spec/1.0.0/errors/runtime`.
+      status:
+        type: integer
+      instance:
+        type: string
+        description: JSON pointer of the task that raised the error.
+      title:
+        type: string
+      detail:
+        type: string

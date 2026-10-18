@@ -1,0 +1,64 @@
+$id: https://tendworks.dev/schemas/v1/agent-profile.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: AgentProfile
+description: >-
+  Frontmatter of an agent profile (`agents/<name>.md`). The Markdown body below the
+  frontmatter is the role description. Workflows address a profile as `agent://<name>`.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: AgentProfile
+  metadata:
+    type: object
+    title: AgentProfileMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name workflows use in `agent://<name>`.
+  spec:
+    title: AgentProfileSpec
+    type: object
+    required: [harness]
+    additionalProperties: false
+    properties:
+      harness:
+        type: string
+        enum: [fake]
+        description: >-
+          What answers the tasks. `fake` is the built-in fake agent for tests and demos; real
+          harnesses are added as the agent runtime learns them.
+      fake:
+        $ref: '#/$defs/fakeAgent'
+      sandbox:
+        type: string
+        description: Name of the sandbox template the agent's sandbox is created from.
+$defs:
+  fakeAgent:
+    title: FakeAgent
+    description: How the fake agent answers every task.
+    type: object
+    additionalProperties: false
+    properties:
+      outcome:
+        type: string
+        enum: [completed, failed]
+        default: completed
+        description: >-
+          `completed` answers with an artifact echoing the message parts; `failed` ends the
+          task in `TASK_STATE_FAILED`.
+      message:
+        type: string
+        description: Status message the agent answers with.
+      delaySeconds:
+        type: number
+        minimum: 0
+        maximum: 3600
+        default: 0
+        description: How long the agent works before it answers.
