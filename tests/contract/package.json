@@ -1,0 +1,14 @@
+{
+  "name": "@tendworks/contract-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Both sides of internal APIs and boundaries in one process.",
+  "dependencies": {
+    "@tendworks/agent-runtime": "workspace:*",
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/orchestration": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "openapi-fetch": "0.17.0"
+  }
+}

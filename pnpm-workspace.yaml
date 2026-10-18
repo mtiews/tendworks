@@ -9,6 +9,8 @@ saveExact: true
 # protobufjs (via the workflow engine client) only runs a version check on install.
 allowBuilds:
   protobufjs: false
+  # The workflow bundler's compiler ships prebuilt platform binaries; its script only checks them.
+  "@swc/core": false
 
 peerDependencyRules:
   allowedVersions:

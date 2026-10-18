@@ -4,6 +4,9 @@ import createClient from "openapi-fetch";
 import { stringify as stringifyYaml } from "yaml";
 
 type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
+type RunList = ControlPlane.components["schemas"]["RunList"];
+type Run = ControlPlane.components["schemas"]["run"];
+type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -47,6 +50,36 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       exitCode = report.status === "healthy" ? ExitCode.ok : ExitCode.unhealthy;
     });
 
+  const run = program.command("run").description("inspect runs");
+
+  run
+    .command("list")
+    .description("list runs, newest first")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/runs").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatRunList));
+    });
+
+  run
+    .command("get")
+    .description("show one run with its steps and errors")
+    .argument("<id>", "run id")
+    .addOption(outputOption())
+    .action(async (runId: string, options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/runs/{runId}", { params: { path: { runId } } }).catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (response.status === 404) throw new Error(`run ${runId} not found`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatRun));
+    });
+
   try {
     await program.parseAsync(args, { from: "user" });
     return exitCode;
@@ -61,6 +94,13 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
 class UnreachableError extends Error {
   constructor(baseUrl: string, cause: unknown) {
     super(`cannot reach the control plane at ${baseUrl} (${cause instanceof Error ? cause.message : String(cause)})`);
+  }
+}
+
+class AnswerError extends Error {
+  constructor(response: Response, problem?: { title?: string; detail?: string }) {
+    const reason = problem?.title ? `: ${problem.title}${problem.detail ? ` (${problem.detail})` : ""}` : "";
+    super(`unexpected answer from the control plane (HTTP ${response.status})${reason}`);
   }
 }
 
@@ -79,7 +119,39 @@ function render<T>(document: T, format: OutputFormat, table: (document: T) => st
 
 function formatTable(report: PlatformStatus): string {
   const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...report.components.map((c) => [c.name, c.status, c.message ?? ""])];
-  const widths = [0, 1].map((i) => Math.max(...rows.map((row) => row[i]!.length)));
-  const lines = rows.map((row) => row.map((cell, i) => (i < 2 ? cell.padEnd(widths[i]! + 2) : cell)).join("").trimEnd());
-  return `PLATFORM  ${report.status}\n\n${lines.join("\n")}\n`;
+  return `PLATFORM  ${report.status}\n\n${table(rows)}`;
+}
+
+function formatRunList(list: RunList): string {
+  const rows = [
+    ["ID", "WORKFLOW", "STATUS", "CREATED", "FINISHED"],
+    ...list.items.map((run) => [run.id, run.workflow, run.status, run.createdAt, run.finishedAt ?? ""]),
+  ];
+  return table(rows);
+}
+
+function formatRun(run: Run): string {
+  const describe = (error: WorkflowError) => `${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`;
+  const fields = [
+    ["RUN", run.id],
+    ["WORKFLOW", run.workflow],
+    ["STATUS", run.status],
+    ["CREATED", run.createdAt],
+    ["STARTED", run.startedAt ?? ""],
+    ["FINISHED", run.finishedAt ?? ""],
+    ...(run.error ? [["ERROR", describe(run.error)]] : []),
+  ];
+  const steps = [
+    ["STEP", "STATUS", "TASK", "STARTED", "FINISHED"],
+    ...run.steps.map((step) => [step.reference, step.status, step.taskId ?? "", step.startedAt, step.finishedAt ?? ""]),
+  ];
+  return `${table(fields)}\n${table(steps)}`;
+}
+
+/** Aligns cells in columns; the last column is not padded. */
+function table(rows: string[][]): string {
+  const columns = Math.max(...rows.map((row) => row.length));
+  const widths = Array.from({ length: columns }, (_, i) => Math.max(...rows.map((row) => (row[i] ?? "").length)));
+  const lines = rows.map((row) => row.map((cell, i) => (i < row.length - 1 ? cell.padEnd(widths[i]! + 2) : cell)).join("").trimEnd());
+  return `${lines.join("\n")}\n`;
 }

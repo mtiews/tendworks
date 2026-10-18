@@ -2,6 +2,8 @@
 # Only the control plane API is published, and only on localhost.
 # Parallel stacks (e.g. one per worktree): set COMPOSE_PROJECT_NAME, TEND_PORT and
 # TEND_ENGINE_UI_PORT, and point TEND_URL at http://localhost:$TEND_PORT.
+# Configuration (workflows, agent profiles, ...) is read from TEND_CONFIG_PATH,
+# by default the example folder in this repository.
 name: tendworks
 
 services:
@@ -65,6 +67,9 @@ services:
     environment:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
       TEND_WORKER_URL: http://worker:8081
+      TEND_CONFIG_DIR: /config
+    volumes:
+      - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
       - "127.0.0.1:${TEND_PORT:-8080}:8080"
     depends_on:
@@ -87,10 +92,16 @@ services:
     environment:
       TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
       TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
+      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
+      TEND_CONFIG_DIR: /config
+    volumes:
+      - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     networks:
       - default
       - sandbox-backend
     depends_on:
+      postgres:
+        condition: service_healthy
       temporal:
         condition: service_healthy
       docker-proxy:
