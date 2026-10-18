@@ -32,8 +32,8 @@ Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision chang
 - pnpm workspaces monorepo; one package per domain, cross-imports blocked by lint rule (e.g. dependency-cruiser)
 - Temporal (dev mode locally) + own Serverless Workflow 1.0 interpreter (subset: do, call, listen, switch, for, try, wait)
 - Postgres for state, Temporal and event bus (outbox + LISTEN/NOTIFY); NATS optional later
-- Sandbox: own small sandbox API modeled on OpenSandbox; first backend Docker + gVisor
-- `tend` CLI on a client generated from the OpenAPI contract (oclif vs. commander still open)
+- Sandbox: own small sandbox API modeled on OpenSandbox; first backend Docker with isolation class `container` by default, `gvisor` as operator opt-in (ADR 0001)
+- `tend` CLI on a client generated from the OpenAPI contract (commander)
 - Deployment: Docker Compose (`deploy/compose.yaml`, profiles), Kubernetes later
 
 ## Planned repo layout
@@ -57,14 +57,16 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 - Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`
 - TDD where it pays off: interpreter, policies, adapters, action journal — not dogmatically everywhere
 - Pin external versions (harnesses, skills); updates via PR
-- Dev skills: Matt Pocock's skills (`grill-me`, `tdd`); setup info goes to `docs/agents/` (not yet created)
+- Dev skills: Matt Pocock's skills (`grill-me`, `tdd`); setup info lives in `docs/agents/`
 
-## Walking skeleton (milestone 1)
+## Walking skeleton
 
-1. **Automated:** GitHub issue labeled "Ready for Agent" → time trigger → workflow → `developer` agent (Claude Code via ACP, gVisor sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run.
-2. **Interactive:** web UI chat starts an agent session (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`).
+1. **Milestone 1 – automated:** GitHub issue labeled `ready-for-agent` (playground repo) → time trigger → workflow → `developer` agent (Claude Code via ACP in a sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run. Clients: API and `tend` only.
+2. **Milestone 1b – interactive:** web UI chat starts an agent session (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`), plus the first web UI views.
 
-Not in the skeleton: Keycloak, NATS, S3, model gateway, OPA, observability.
+Build order (slices S0–S5) and skeleton rules: [docs/platform-implementation.md](docs/platform-implementation.md#walking-skeleton-build-order-milestone-1).
+
+Not in the skeleton: Keycloak, NATS, S3, model gateway, OPA, observability, Action Gateway.
 
 ## Agent skills
 

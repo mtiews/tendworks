@@ -39,7 +39,7 @@ flowchart TB
   AR["Agent Runtime<br/>A2A upwards, ACP to the harness<br/>profiles, sessions, chat forwarding"]
   TOOLS["Tools (MCP servers)<br/>GitHub, tickets, databases, internal APIs"]
   MG["Model gateway<br/>OpenAI / Anthropic API, budget per run"]
-  subgraph SB["Sandbox (gVisor / microVM)"]
+  subgraph SB["Sandbox (container / gVisor / microVM)"]
     H["Harness: Claude Code, Codex, Gemini"]
   end
   subgraph CC["Cross-cutting – used by all domains via standards"]
@@ -81,7 +81,7 @@ By now there is an open standard for almost every boundary. Own contracts remain
 | Agent → tools and data | **MCP** | stable | GitHub, tickets, databases, internal APIs |
 | Agent → knowledge and abilities | **Agent Skills** (SKILL.md) + **AGENTS.md** | widespread | skill libraries per role |
 | Agent / gateway → model | OpenAI-compatible API (Chat Completions / Responses) and Anthropic Messages API | de facto standard | model providers, local models (vLLM, Ollama) |
-| Runtime → sandbox | own **sandbox API** (OpenAPI), images as **OCI** | own contract | Docker + gVisor, Kata, Firecracker, OpenSandbox, k8s agent-sandbox |
+| Runtime → sandbox | own **sandbox API** (OpenAPI), images as **OCI** | own contract | Docker (runc or gVisor), Kata, Firecracker, OpenSandbox, k8s agent-sandbox |
 | Storage of artifacts and snapshots | **S3 API** + **Git** | stable | Garage, SeaweedFS, Ceph, any cloud storage |
 | Identity | **OIDC / OAuth 2.1** | stable | Keycloak, Authentik, Zitadel |
 | Secrets | secret store API behind an adapter; encrypted in Git with **SOPS** | no real standard | OpenBao, Infisical, cloud KMS |
@@ -238,11 +238,11 @@ An agent run consists of three replaceable layers: A2A upwards, ACP to the harne
 
 | Class | Technology (Docker-first) | Use |
 | --- | --- | --- |
-| `container` | Docker with rootless daemon, seccomp, no privileges | only trusted, own tools |
-| `gvisor` | Docker with the `runsc` runtime | default for coding agents |
+| `container` | Docker (runc), non-root, seccomp, no privileges | default; sufficient when the host is a dedicated isolation boundary (e.g. a VM that only runs sandboxes) and content is trusted |
+| `gvisor` | Docker with the `runsc` runtime (Linux hosts only) | opt-in; recommended when sandboxes share a host with the control plane or process untrusted content (public issues, web pages) |
 | `microvm` | Firecracker or Kata Containers on a Linux VM with KVM | builds with Docker-in-Docker, unknown code, browsers |
 
-The sandbox API is deliberately small: `create`, `exec`, `files`, `ports`, `snapshot`, `restore`, `pause`, `destroy`. As a first implementation, an adapter to the Docker API with gVisor is enough. Later, OpenSandbox (Docker and Kubernetes runtimes) or the Kubernetes project agent-sandbox (sandbox CRD with scale-to-zero and resume at the same point) can be placed behind the same API without the agent runtime noticing.
+The sandbox API is deliberately small: `create`, `exec`, `files`, `ports`, `snapshot`, `restore`, `pause`, `destroy`. As a first implementation, an adapter to the Docker API (runc, optionally `runsc`) is enough; it reaches Docker only through a restricted socket proxy, never the raw socket. Later, OpenSandbox (Docker and Kubernetes runtimes) or the Kubernetes project agent-sandbox (sandbox CRD with scale-to-zero and resume at the same point) can be placed behind the same API without the agent runtime noticing.
 
 **Harness access:** For unattended runs, API keys are the more robust route than personal subscriptions. Check each vendor's terms of use for automated usage.
 
@@ -378,7 +378,7 @@ For continuous operation without a laptop, two Linux VMs with Docker Compose are
 | Policies | Open Policy Agent | JSON in, decision out | CEL |
 | Telemetry | OpenTelemetry Collector → Grafana, Loki, Tempo, Prometheus | OTLP | SigNoz, Langfuse for LLM traces |
 | Notification | ntfy + Web Push | HTTP, W3C Push | Matrix, Gotify |
-| Sandbox host | Docker + gVisor, later Firecracker or Kata | own sandbox API, OCI | OpenSandbox, k8s agent-sandbox |
+| Sandbox host | Docker (runc, optionally gVisor), later Firecracker or Kata | own sandbox API, OCI | OpenSandbox, k8s agent-sandbox |
 | Agent runtime | own service | A2A upwards, ACP downwards | any A2A-capable agent platform |
 | Control plane API + UI | own service + web app (PWA) | OpenAPI, Server-Sent Events/WebSocket | — |
 | CLI | own tool tend | OpenAPI (generated client), OIDC device flow | any HTTP client, curl |
@@ -410,7 +410,7 @@ There is one code path and three operating profiles. From laptop to cluster only
 **Laptop profile in detail**
 
 - Compose profiles (part of the Compose spec) separate core and extras: `docker compose up` only starts the core, `--profile observability` or `--profile identity` add the Grafana stack and Keycloak.
-- On Linux, sandboxes run with gVisor just like on the server. On macOS and Windows they run in the Linux VM of Docker Desktop or Colima; isolation there is weaker and meant for development, not for foreign code.
+- Sandboxes use isolation class `container` by default on every OS. `gvisor` is available on Linux hosts only; on macOS and Windows sandboxes run in the Linux VM of Docker Desktop or Colima and are meant for development, not for foreign code.
 - A laptop can later also be attached to a server as an additional sandbox host, because it only registers via the sandbox API.
 
 **To evaluate:** whether the laptop profile uses Temporal in dev mode or a lighter durable execution engine behind the same port, and how much RAM the core actually needs without agents. Both can be measured with the walking skeleton (roadmap step 1).
@@ -421,29 +421,30 @@ The first milestone is a single end-to-end workflow across all seams; after that
 
 **Walking skeleton – refined (review of 18 Oct 2026)**
 
-The starting point is an existing project in which an agent in a Docker container already solves issues in a GitHub repo, commits and merges. The walking skeleton moves this onto the platform and proves two paths:
+The starting point is an existing project in which an agent in a Docker container already solves issues in a GitHub repo, commits and merges. The walking skeleton moves this onto the platform. It is split into two milestones so the first one stays thin:
 
-1. **Automated, end to end:** GitHub issue (label or webhook) → trigger gateway → workflow → agent in sandbox → commit, pull request, merge → notification. The merge initially goes through a gate that can be switched to automatic via policy.
-2. **Interactive:** A simple chat window in the web UI starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same chat later serves to intervene in running automated runs.
+1. **Milestone 1 – automated, end to end:** GitHub issue (label or webhook) → trigger gateway → workflow → agent in sandbox → commit, pull request, merge → notification. The merge initially goes through a gate that can be switched to automatic via policy. Clients are the API and the `tend` CLI only.
+2. **Milestone 1b – interactive and web UI:** A simple chat window in the web UI starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same chat later serves to intervene in running automated runs. 1b also brings the first web UI views (run list, run detail with transcript and cost, notifications). It starts once the agent step of milestone 1 (harness via ACP in a sandbox) works, because the chat builds on it; its open design questions (e.g. whether a chat session is a run without a workflow or only an agent session) are settled in a separate design review at that point.
 
-The walking skeleton uses GitHub instead of Forgejo; the connection goes through the same integration port.
+The walking skeleton uses GitHub instead of Forgejo; the connection goes through the same integration port. End-to-end runs target a dedicated playground repository, not `tendworks` itself, so the existing container agent and the platform never pick up the same issues; the existing agent is switched off once milestone 1 is met.
 
 **Current state and migration (automated path)**
 
-Today: a Linux Docker container with Claude Code, two secrets as environment variables (Claude access, restricted repo token), started by a cron job. The agent picks issues with the label "Ready for Agent" and works with Matt Pocock's skills.
+Today: a Linux Docker container with Claude Code, two secrets as environment variables (Claude access, restricted repo token), started by a cron job. The agent picks issues with the label `ready-for-agent` and works with Matt Pocock's skills.
 
 | Today | In the walking skeleton | Later |
 | --- | --- | --- |
 | cron job | time trigger in the trigger gateway | additionally a GitHub webhook on label change |
-| label "Ready for Agent" | filter in the TriggerBinding (`triggers/issue-ready-for-agent.yaml`) | unchanged |
+| label `ready-for-agent` | filter in the TriggerBinding (`triggers/issue-ready-for-agent.yaml`) | unchanged |
 | skills (Matt Pocock) | unchanged as `SKILL.md` under `skills/`, referenced in the developer profile | part of the factory blueprint |
-| container with Claude Code | sandbox from a SandboxTemplate, gVisor, controlled via ACP | further harnesses through the same port |
-| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS | injection via egress proxy, sandbox only sees placeholders |
-| commit and merge by the agent | pull request by the agent, merge via a gate (switchable to automatic via policy) | merge depends on the evidence bundle |
+| container with Claude Code | sandbox from a SandboxTemplate (isolation class `container`; `gvisor` verified on a Linux host), controlled via ACP | further harnesses through the same port |
+| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; a dedicated model API key with a spending limit and a fine-grained repo token limited to the playground repo, without merge rights | injection via egress proxy, sandbox only sees placeholders |
+| commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), merge as a platform workflow step behind a gate (`merge: auto \| ask` in the policy); the agent never holds merge rights | merge depends on the evidence bundle; external actions through the Action Gateway with action journal (milestone 3) |
+| — | notifications and approval requests are persisted first, then delivered through the notification port (fake adapter that only logs) | ntfy, Web Push |
 
-**Success criterion:** An issue labeled "Ready for Agent" leads to a merged pull request without manual intervention; run, transcript and cost are visible in the UI; restarting the platform mid-run resumes the run.
+**Success criterion (milestone 1):** An issue labeled `ready-for-agent` leads to a merged pull request without manual intervention; run status, transcript and cost are visible through the API and `tend run get`; restarting the platform mid-run resumes the run.
 
-**Interactive path (chat)**
+**Interactive path (chat, milestone 1b)**
 
 In the web UI, a chat window opens an agent session with a chosen profile and repository. As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Tool calls and file changes are visible live, questions are answered directly in the chat, and the session can be resumed later.
 
@@ -451,9 +452,9 @@ In the web UI, a chat window opens an agent session with a chosen profile and re
 - **Platform context via MCP:** the chat agent gets a read-only MCP server on the control plane API (first stage of the meta-agent). Example tools: `list_runs` (active and recent runs with status), `get_run` (details, steps, errors), `list_triggers` (including next scheduled execution), `list_agents` (profiles and running sessions).
 - **Example questions that must work:** "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?"
 
-**Success criterion:** A chat session can be started, work in the workspace, be interrupted and resumed, and the three example questions are answered correctly from the platform's live state.
+**Success criterion (milestone 1b):** A chat session can be started, work in the workspace, be interrupted and resumed, and the three example questions are answered correctly from the platform's live state. Runs, transcripts, cost and notifications are visible in the web UI.
 
-1. **Walking skeleton.** Automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a gVisor sandbox → PR → merge gate → notification) and interactive chat path, as refined above. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one.
+1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: interactive chat path and first web UI, as refined above. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
 2. **Visibility and intervention.** UI with run list, live stream of `agent.message` events, chat into running sessions, cost display.
 3. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
 4. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
@@ -486,7 +487,7 @@ In the web UI, a chat window opens an agent session with a chosen profile and re
 | ACP as the interface to harnesses, with a thin adapter per harness | one protocol for Claude Code, Codex, Gemini CLI and others; ACP is young, adapters evolve unevenly | compatibility is secured in three ways: (1) a conformance suite with fixed scenarios (start session, message, tool call, question, cancel, resume) runs regularly against every harness in the sandbox and checks protocol events, not model content; (2) recorded ACP sessions are replayed in CI without token cost; (3) harness versions are pinned, updates arrive via pull request (e.g. Renovate) and must pass the suite |
 | Workflows as Serverless Workflow 1.0 (YAML), executed by our own interpreter on Temporal | readability and traceability for humans and agents outweigh the effort for the translation layer; no lock-in to Temporal | the interpreter initially supports only a subset of the DSL (e.g. do, call, listen, switch, for, try, wait) and grows as needed; workflows are validated via JSON Schema so agents can write them safely |
 | Event bus as its own port with CloudEvents; first implementation on Postgres, NATS JetStream optionally later | expected load is low; one component fewer, especially in the laptop profile; clean separation is kept via the port | events are written with the outbox pattern in the same transaction as the state, delivered via LISTEN/NOTIFY and fetched from the last position; replay via the event table; domains only know the port, never the table; switching to NATS is secured by contract tests |
-| Own small sandbox API, deliberately modeled on the OpenSandbox API; start with Docker + gVisor | no established standard; OpenSandbox and agent-sandbox are candidates, outcome open | terms and operations follow OpenSandbox so a later switch or an OpenSandbox backend stays cheap; both projects are watched and reassessed at every major release |
+| Own small sandbox API, deliberately modeled on the OpenSandbox API; start with Docker, isolation class `container` by default and `gvisor` as opt-in (ADR 0001) | no established standard; OpenSandbox and agent-sandbox are candidates, outcome open | terms and operations follow OpenSandbox so a later switch or an OpenSandbox backend stays cheap; both projects are watched and reassessed at every major release |
 | Configuration readable in Git, without lock-in to a Git host | traceability and review; local experimenting must work without a server | the platform reads configuration from a Git remote (e.g. Forgejo, GitHub) or directly from a local directory; in local mode without PR approval, changes take effect immediately; Docker Compose first, Kubernetes later confirmed |
 
 The technical implementation (language, repo structure, walking skeleton components) is covered in the separate document "Tendworks – Implementation".
