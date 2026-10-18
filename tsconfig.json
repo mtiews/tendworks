@@ -2,6 +2,15 @@
   "files": [],
   "references": [
     {
+      "path": "apps/cli"
+    },
+    {
+      "path": "apps/server"
+    },
+    {
+      "path": "apps/worker"
+    },
+    {
       "path": "packages/agent-runtime"
     },
     {
@@ -9,6 +18,9 @@
     },
     {
       "path": "packages/event-bus"
+    },
+    {
+      "path": "packages/health"
     },
     {
       "path": "packages/human-interaction"
@@ -27,15 +39,6 @@
     },
     {
       "path": "packages/trigger-gateway"
-    },
-    {
-      "path": "apps/server"
-    },
-    {
-      "path": "apps/worker"
-    },
-    {
-      "path": "apps/cli"
     }
   ]
 }

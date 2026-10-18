@@ -13,12 +13,6 @@
   "references": [
     {
       "path": "../../packages/control-plane"
-    },
-    {
-      "path": "../../packages/orchestration"
-    },
-    {
-      "path": "../../packages/sandbox"
     }
   ]
 }

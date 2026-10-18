@@ -4,10 +4,17 @@ module.exports = {
     {
       name: "no-cross-domain-imports",
       comment:
-        "A domain package may not import another domain package. Use the published API or events; shared types come from @tendworks/shared, which is generated from contracts/.",
+        "A domain package may not import another domain package. Use the published API or events; shared types come from @tendworks/shared, which is generated from contracts/. @tendworks/health is a platform library, not a domain.",
       severity: "error",
       from: { path: "^packages/([^/]+)/" },
-      to: { path: "^packages/", pathNot: ["^packages/$1/", "^packages/shared/"] },
+      to: { path: "^packages/", pathNot: ["^packages/$1/", "^packages/shared/", "^packages/health/"] },
+    },
+    {
+      name: "health-is-a-leaf-library",
+      comment: "@tendworks/health may only use generated types; it must never know a domain.",
+      severity: "error",
+      from: { path: "^packages/health/" },
+      to: { path: "^(packages|apps)/", pathNot: ["^packages/health/", "^packages/shared/"] },
     },
     {
       name: "shared-is-generated-types-only",
@@ -39,7 +46,7 @@ module.exports = {
   ],
   options: {
     doNotFollow: { path: "node_modules" },
-    exclude: { path: "(^|/)(dist|node_modules)/" },
+    exclude: { path: ["(^|/)(dist|node_modules)/", "^tests/architecture/fixtures/"] },
     tsPreCompilationDeps: true,
     tsConfig: { fileName: "tsconfig.test.json" },
     enhancedResolveOptions: {

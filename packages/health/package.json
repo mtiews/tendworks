@@ -1,0 +1,18 @@
+{
+  "name": "@tendworks/health",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Platform library (not a domain): health probes and the runtime health API from contracts/openapi/health.yaml.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@tendworks/shared": "workspace:*",
+    "hono": "4.13.13"
+  }
+}

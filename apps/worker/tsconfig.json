@@ -9,5 +9,16 @@
   ],
   "exclude": [
     "src/**/*.test.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/health"
+    },
+    {
+      "path": "../../packages/orchestration"
+    },
+    {
+      "path": "../../packages/sandbox"
+    }
   ]
 }

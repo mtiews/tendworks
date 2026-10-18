@@ -37,12 +37,14 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
-      const { data, error } = await client.GET("/status").catch((cause: unknown) => {
+      const { data, error, response } = await client.GET("/status").catch((cause: unknown) => {
         throw new UnreachableError(baseUrl, cause);
       });
-      const status = (data ?? error) as PlatformStatus;
-      io.stdout(render(status, options.output, formatTable));
-      exitCode = status.status === "healthy" ? ExitCode.ok : ExitCode.unhealthy;
+      // 200 and 503 both carry a status document; anything else did not come from the control plane.
+      const report: PlatformStatus | undefined = response.status === 200 || response.status === 503 ? (data ?? error) : undefined;
+      if (!report?.components) throw new Error(`unexpected answer from the control plane (HTTP ${response.status})`);
+      io.stdout(render(report, options.output, formatTable));
+      exitCode = report.status === "healthy" ? ExitCode.ok : ExitCode.unhealthy;
     });
 
   try {
@@ -75,9 +77,9 @@ function render<T>(document: T, format: OutputFormat, table: (document: T) => st
   return table(document);
 }
 
-function formatTable(status: PlatformStatus): string {
-  const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...status.components.map((c) => [c.name, c.status, c.message ?? ""])];
+function formatTable(report: PlatformStatus): string {
+  const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...report.components.map((c) => [c.name, c.status, c.message ?? ""])];
   const widths = [0, 1].map((i) => Math.max(...rows.map((row) => row[i]!.length)));
   const lines = rows.map((row) => row.map((cell, i) => (i < 2 ? cell.padEnd(widths[i]! + 2) : cell)).join("").trimEnd());
-  return `PLATFORM  ${status.status}\n\n${lines.join("\n")}\n`;
+  return `PLATFORM  ${report.status}\n\n${lines.join("\n")}\n`;
 }

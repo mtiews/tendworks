@@ -1,3 +1,4 @@
+import { createHealthApi } from "@tendworks/health";
 import { describe, expect, it } from "vitest";
 import { createControlPlaneApi, type HealthProbe, type PlatformStatus } from "./index.js";
 
@@ -69,6 +70,49 @@ describe("GET /status", () => {
     expect(body.components).toEqual([
       { name: "sandbox-backend", status: "unhealthy", message: "no answer within 20 ms" },
       { name: "store", status: "healthy" },
+    ]);
+  });
+
+  it("includes the components a runtime bundle reports about itself", async () => {
+    const worker = createHealthApi({
+      probes: [healthy("execution-engine"), { name: "sandbox-backend", check: async () => ({ status: "unhealthy", message: "proxy down" }) }],
+    });
+
+    const api = createControlPlaneApi({
+      probes: [healthy("store")],
+      bundles: [{ name: "worker", baseUrl: "http://worker.test", fetch: (request) => worker.fetch(request) }],
+    });
+    const response = await api.fetch(new Request("http://tend.test/status"));
+    const body = (await response.json()) as PlatformStatus;
+
+    expect(response.status).toBe(503);
+    expect(body.components).toEqual([
+      { name: "store", status: "healthy" },
+      { name: "execution-engine", status: "healthy" },
+      { name: "sandbox-backend", status: "unhealthy", message: "proxy down" },
+    ]);
+  });
+
+  it("reports a runtime bundle as unhealthy when it cannot be reached", async () => {
+    const api = createControlPlaneApi({
+      probes: [healthy("store")],
+      bundles: [
+        {
+          name: "worker",
+          baseUrl: "http://worker.test",
+          fetch: async () => {
+            throw new TypeError("fetch failed");
+          },
+        },
+      ],
+    });
+    const response = await api.fetch(new Request("http://tend.test/status"));
+    const body = (await response.json()) as PlatformStatus;
+
+    expect(response.status).toBe(503);
+    expect(body.components).toEqual([
+      { name: "store", status: "healthy" },
+      { name: "worker", status: "unhealthy", message: "fetch failed" },
     ]);
   });
 });

@@ -11,8 +11,10 @@
     }
   },
   "dependencies": {
+    "@tendworks/health": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "hono": "4.13.13",
+    "openapi-fetch": "0.17.0",
     "pg": "8.23.1"
   },
   "devDependencies": {

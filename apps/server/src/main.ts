@@ -1,7 +1,5 @@
 import { serve } from "@hono/node-server";
 import { createControlPlaneApi, createStoreProbe } from "@tendworks/control-plane";
-import { createExecutionEngineProbe } from "@tendworks/orchestration";
-import { createSandboxBackendProbe } from "@tendworks/sandbox";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name] ?? fallback;
@@ -10,11 +8,8 @@ const env = (name: string, fallback?: string): string => {
 };
 
 const api = createControlPlaneApi({
-  probes: [
-    createStoreProbe(env("TEND_DATABASE_URL")),
-    createExecutionEngineProbe(env("TEND_EXECUTION_ENGINE_ADDRESS")),
-    createSandboxBackendProbe(env("TEND_SANDBOX_BACKEND_URL")),
-  ],
+  probes: [createStoreProbe(env("TEND_DATABASE_URL"))],
+  bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
 });
 
 const port = Number(env("PORT", "8080"));

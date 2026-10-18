@@ -9,8 +9,6 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",
-    "@tendworks/control-plane": "workspace:*",
-    "@tendworks/orchestration": "workspace:*",
-    "@tendworks/sandbox": "workspace:*"
+    "@tendworks/control-plane": "workspace:*"
   }
 }

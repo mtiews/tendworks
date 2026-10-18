@@ -209,6 +209,15 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+
+  apps/worker:
+    dependencies:
+      '@hono/node-server':
+        specifier: 2.1.3
+        version: 2.1.3(hono@4.13.13)
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../../packages/health
       '@tendworks/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
@@ -216,18 +225,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/sandbox
 
-  apps/worker: {}
-
   packages/agent-runtime: {}
 
   packages/control-plane:
     dependencies:
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../health
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
       hono:
         specifier: 4.13.13
         version: 4.13.13
+      openapi-fetch:
+        specifier: 0.17.0
+        version: 0.17.0
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -238,6 +251,15 @@ importers:
 
   packages/event-bus: {}
 
+  packages/health:
+    dependencies:
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
+
   packages/human-interaction: {}
 
   packages/mcp-platform: {}
@@ -247,8 +269,15 @@ importers:
       '@temporalio/client':
         specifier: 1.24.0
         version: 1.24.0
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../health
 
-  packages/sandbox: {}
+  packages/sandbox:
+    dependencies:
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../health
 
   packages/shared:
     devDependencies:

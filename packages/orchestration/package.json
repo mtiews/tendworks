@@ -11,6 +11,7 @@
     }
   },
   "dependencies": {
-    "@temporalio/client": "1.24.0"
+    "@temporalio/client": "1.24.0",
+    "@tendworks/health": "workspace:*"
   }
 }

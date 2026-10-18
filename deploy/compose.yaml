@@ -33,6 +33,7 @@ services:
 
   # The only way to the Docker API (ADR 0001). Endpoints are opened per need;
   # sandbox creation (containers, images, volumes, exec, POST) follows with the sandbox API.
+  # It sits on its own internal network that only the worker joins.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     volumes:
@@ -40,6 +41,8 @@ services:
     environment:
       PING: 1
       VERSION: 1
+    networks:
+      - sandbox-backend
 
   server:
     build:
@@ -48,17 +51,14 @@ services:
       target: server
     environment:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
-      TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
-      TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
+      TEND_WORKER_URL: http://worker:8081
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
-      temporal:
+      worker:
         condition: service_healthy
-      docker-proxy:
-        condition: service_started
     healthcheck:
       # Liveness only: the API answers. Platform health is GET /status itself.
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/status').then(() => process.exit(0), () => process.exit(1))"]
@@ -71,9 +71,27 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: worker
+    environment:
+      TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
+      TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
+    networks:
+      - default
+      - sandbox-backend
     depends_on:
       temporal:
         condition: service_healthy
+      docker-proxy:
+        condition: service_started
+    healthcheck:
+      # Liveness only: the internal health API answers.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8081/health').then(() => process.exit(0), () => process.exit(1))"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+networks:
+  sandbox-backend:
+    internal: true
 
 volumes:
   postgres-data:

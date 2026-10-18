@@ -1,10 +1,11 @@
 import { Connection } from "@temporalio/client";
+import type { HealthProbe } from "@tendworks/health";
 
-/** Checks that the durable execution engine answers. Shape matches the control plane's health probe. */
-export function createExecutionEngineProbe(address: string) {
+/** Checks that the durable execution engine answers. */
+export function createExecutionEngineProbe(address: string): HealthProbe {
   return {
     name: "execution-engine",
-    async check(): Promise<{ status: "healthy" }> {
+    async check() {
       const connection = await Connection.connect({ address, connectTimeout: 1_500 });
       try {
         await connection.workflowService.getSystemInfo({});

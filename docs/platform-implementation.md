@@ -47,16 +47,17 @@ tendworks/
     event-bus/               # port + Postgres implementation
     mcp-platform/            # read-only MCP server on the control plane API
     shared/                  # only types generated from contracts/
+    health/                  # platform library, not a domain: health probes and the runtime health API
   apps/
     server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction
-    worker/                  # walking skeleton: bundles orchestration, agent-runtime, mcp-platform
+    worker/                  # walking skeleton: bundles orchestration, agent-runtime (mcp-platform from milestone 1b)
     web/                     # web UI: run list, chat
     cli/                     # tend CLI on the generated API client
   images/
     sandbox-claude-code/     # Dockerfile: Claude Code + ACP adapter
   deploy/
     compose.yaml
-    profiles/laptop.env
+    .env.example             # laptop profile settings and secrets, copied to deploy/.env
   tests/
     contract/
     e2e/
@@ -103,7 +104,7 @@ Rules for the skeleton:
 ## Open items
 
 - [x] Define the build order of the walking skeleton
-- [ ] Write the concrete `compose.yaml`
+- [x] Write the concrete `compose.yaml`
 - [ ] Example configuration for the existing issue agent (trigger, profile, skills, sandbox template)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token

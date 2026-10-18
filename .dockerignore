@@ -6,4 +6,4 @@ packages/shared/src/generated
 .agents
 .claude
 docs
-deploy/.env
+**/.env

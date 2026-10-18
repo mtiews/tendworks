@@ -70,6 +70,20 @@ describe("tend status", () => {
     expect(stderr).toContain("cannot reach the control plane at http://tend.invalid:8080");
   });
 
+  it("exits 1 with a message when the answer is not a status document", async () => {
+    let stdout = "";
+    let stderr = "";
+    const exitCode = await runTend(["status"], {
+      fetch: async () => new Response("Bad Gateway", { status: 502 }),
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("unexpected answer from the control plane (HTTP 502)");
+  });
+
   it("exits 1 with a message on an unknown output format", async () => {
     const { exitCode, stdout, stderr } = await tend(["status", "-o", "xml"], [probe("store", "healthy")]);
 
