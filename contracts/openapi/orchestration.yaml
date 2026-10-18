@@ -34,6 +34,13 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The execution engine did not accept the run. The run is recorded as failed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
     get:
       operationId: listRuns
       summary: List runs, newest first

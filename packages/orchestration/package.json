@@ -25,7 +25,6 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@temporalio/testing": "1.24.0",
     "@types/pg": "8.23.1"
   }
 }
