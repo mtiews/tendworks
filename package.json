@@ -12,6 +12,7 @@
     "typecheck": "pnpm generate && tsc -b && tsc -p tsconfig.test.json",
     "lint": "depcruise packages apps tests",
     "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
     "e2e": "docker compose -f deploy/compose.yaml up -d --build --wait && vitest run --project e2e",
     "check": "pnpm typecheck && pnpm lint && pnpm test"
   },
