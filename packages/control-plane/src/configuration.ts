@@ -100,7 +100,8 @@ export function loadConfiguration(dir: string): Configuration {
     const kind = isObject(document) ? document.kind : undefined;
     const schemaFile = typeof kind === "string" ? KINDS[kind] : undefined;
     if (schemaFile === undefined) {
-      issues.push(`${file}: unknown kind '${String(kind)}' (known: ${Object.keys(KINDS).join(", ")})`);
+      const known = `known: ${Object.keys(KINDS).join(", ")}`;
+      issues.push(typeof kind === "string" ? `${file}: unknown kind '${kind}' (${known})` : `${file}: neither a workflow nor a document with a kind (${known})`);
       continue;
     }
     check(file, schemaFile, document);
