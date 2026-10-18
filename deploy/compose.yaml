@@ -41,6 +41,8 @@ services:
   # It sits on its own internal network that only the worker joins.
   # Remaining risk: the proxy filters paths, not bodies, so whoever reaches it can
   # still create a privileged container. Keep the worker the only client.
+  # Idle connections are cut after 10 minutes (haproxy timeout), so keep exec calls
+  # short-lived or send output regularly; long quiet attach streams will break.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     volumes:

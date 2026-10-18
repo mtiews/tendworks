@@ -81,7 +81,9 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
           HostConfig: {
             Runtime: runtimes[isolationClass],
             Init: true,
-            Privileged: false,
+            Privileged: false, // always set explicitly: the socket proxy cannot stop a privileged container (it filters paths, not bodies)
+            Binds: [], // no host mounts; sandbox volumes are added here explicitly when needed
+            Mounts: [],
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],
             PidsLimit: pids,
