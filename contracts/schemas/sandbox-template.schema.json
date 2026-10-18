@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tendworks.dev/schemas/v1/sandbox-template.schema.json",
+  "title": "SandboxTemplate",
+  "description": "The declarative recipe a sandbox is created from: image, isolation class and resources. The egress allowlist follows with the egress proxy.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": { "const": "tendworks.dev/v1" },
+    "kind": { "const": "SandboxTemplate" },
+    "metadata": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$",
+          "description": "Name other kinds refer to, e.g. an agent profile's sandbox field."
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["image"],
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "OCI image reference, pinned to an exact tag or digest. The image must provide `sleep` and must already be present on the sandbox host; the platform does not pull images at runtime."
+        },
+        "isolationClass": {
+          "type": "string",
+          "enum": ["container", "gvisor"],
+          "default": "container",
+          "description": "How strongly the sandbox is separated from its host (ADR 0001). `container` shares the host kernel; `gvisor` needs a Linux host with the gVisor runtime installed."
+        },
+        "user": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*(:[1-9][0-9]*)?$",
+          "default": "1000:1000",
+          "description": "Numeric uid[:gid] every process in the sandbox runs as. Root (0) is not allowed."
+        },
+        "resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "cpus": { "type": "number", "exclusiveMinimum": 0, "description": "CPU cores, fractions allowed." },
+            "memoryMb": { "type": "integer", "minimum": 64, "description": "Memory limit in MiB." },
+            "pids": { "type": "integer", "minimum": 16, "default": 1024, "description": "Maximum number of processes." }
+          }
+        }
+      }
+    }
+  }
+}
