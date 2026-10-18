@@ -1,0 +1,81 @@
+# CLAUDE.md — Tendworks
+
+Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
+
+**Current state:** design phase. The repo only contains docs; no code yet. Next milestone is the walking skeleton.
+
+## Documents (read before changing anything)
+
+| Doc | Content |
+| --- | --- |
+| [docs/platform-architecture.md](docs/platform-architecture.md) | domains, seams/standards, data model, event catalog, security, scaling, roadmap, decisions |
+| [docs/platform-implementation.md](docs/platform-implementation.md) | tech stack, repo structure, walking skeleton components, open items |
+| [docs/software-factory.md](docs/software-factory.md) | first application on Tendworks: value stream, roles, quality gates, autonomy levels |
+
+Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision changes, update the docs in the same change.
+
+## Non-negotiable principles
+
+- **Platform stays generic.** Nothing application-specific (e.g. software factory) goes into platform code; it is configuration in `tendworks-config`.
+- **A domain owns its data.** No shared tables, no cross-domain imports. Access only via published API or events.
+- **Every boundary is a contract.** Sync: OpenAPI 3.1 + JSON Schema. Async: CloudEvents (AsyncAPI 3). Agent boundary: A2A task model. Harness: ACP. Tools: MCP.
+- **Contract-first.** Change `contracts/` first, in the same PR as the services. Contract tests on both sides.
+- **Ports and adapters.** Products (Temporal, Postgres, Docker, Claude, NATS …) only behind adapters. Product names never appear in contracts or event types.
+- **Every port has ≥ 2 implementations** (the second may be a fake used in tests).
+- **UI and CLI are just clients** of the public control plane API. No private endpoints, no CLI-only endpoints.
+- **Everything declarative and human-readable.** Config as YAML with `apiVersion/kind/metadata/spec` envelope (agent profiles: Markdown + frontmatter, skills: `SKILL.md`, policies: Rego + tests). Runtime state must be exportable (`-o yaml|json`).
+- **Agents are untrusted.** No real secrets in sandboxes (target: egress proxy injection), egress allowlist, external actions via Action Gateway with action journal; unclassified tools count as irreversible.
+
+## Tech stack
+
+- TypeScript throughout, Node.js LTS
+- pnpm workspaces monorepo; one package per domain, cross-imports blocked by lint rule (e.g. dependency-cruiser)
+- Temporal (dev mode locally) + own Serverless Workflow 1.0 interpreter (subset: do, call, listen, switch, for, try, wait)
+- Postgres for state, Temporal and event bus (outbox + LISTEN/NOTIFY); NATS optional later
+- Sandbox: own small sandbox API modeled on OpenSandbox; first backend Docker + gVisor
+- `tend` CLI on a client generated from the OpenAPI contract (oclif vs. commander still open)
+- Deployment: Docker Compose (`deploy/compose.yaml`, profiles), Kubernetes later
+
+## Planned repo layout
+
+```text
+contracts/   openapi/, events/ (CloudEvent JSON Schemas), schemas/ (per kind)
+packages/    control-plane, trigger-gateway, orchestration, agent-runtime, sandbox,
+             human-interaction, event-bus, mcp-platform, shared (generated types only)
+apps/        server, worker, web, cli   (bundles only, no domain logic)
+images/      sandbox-claude-code
+deploy/      compose.yaml, profiles/
+tests/       contract/, e2e/
+docs/adr/
+```
+
+Domain logic lives in `packages/`; `apps/` only wire packages together.
+
+## Conventions
+
+- **Language: always English** for code, comments, commit messages, docs, ADRs, issues and PRs — even when the conversation with the user is in German.
+- Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`
+- TDD where it pays off: interpreter, policies, adapters, action journal — not dogmatically everywhere
+- Pin external versions (harnesses, skills); updates via PR
+- Dev skills: Matt Pocock's skills (`grill-me`, `tdd`); setup info goes to `docs/agents/` (not yet created)
+
+## Walking skeleton (milestone 1)
+
+1. **Automated:** GitHub issue labeled "Ready for Agent" → time trigger → workflow → `developer` agent (Claude Code via ACP, gVisor sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run.
+2. **Interactive:** web UI chat starts an agent session (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`).
+
+Not in the skeleton: Keycloak, NATS, S3, model gateway, OPA, observability.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues on `mtiews/tendworks` (via `gh` CLI). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
