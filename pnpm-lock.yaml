@@ -353,6 +353,24 @@ importers:
 
   packages/trigger-gateway: {}
 
+  tests/contract:
+    dependencies:
+      '@tendworks/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@tendworks/control-plane':
+        specifier: workspace:*
+        version: link:../../packages/control-plane
+      '@tendworks/orchestration':
+        specifier: workspace:*
+        version: link:../../packages/orchestration
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      openapi-fetch:
+        specifier: 0.17.0
+        version: 0.17.0
+
   tests/e2e:
     dependencies:
       '@tendworks/shared':

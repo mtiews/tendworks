@@ -58,6 +58,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
     get:
       operationId: listRuns
       summary: List runs, newest first
@@ -68,6 +74,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunList"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /runs/{runId}:
     get:
       operationId: getRun
@@ -87,6 +99,12 @@ paths:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
         "404":
           description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
           content:
             application/json:
               schema:

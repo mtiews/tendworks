@@ -1,11 +1,13 @@
 import { createHealthApi } from "@tendworks/health";
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, type HealthProbe, type PlatformStatus } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, type HealthProbe, type PlatformStatus } from "./index.js";
+
+const noRuns = { configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [] }, runs: createInMemoryRuns() };
 
 const healthy = (name: string): HealthProbe => ({ name, check: async () => ({ status: "healthy" }) });
 
 async function getStatus(probes: HealthProbe[]) {
-  const api = createControlPlaneApi({ probes });
+  const api = createControlPlaneApi({ probes, ...noRuns });
   const response = await api.fetch(new Request("http://tend.test/status"));
   return { code: response.status, body: (await response.json()) as PlatformStatus };
 }
@@ -62,7 +64,7 @@ describe("GET /status", () => {
   it("reports a component as unhealthy when its check does not answer in time", async () => {
     const hanging: HealthProbe = { name: "sandbox-backend", check: () => new Promise(() => {}) };
 
-    const api = createControlPlaneApi({ probes: [hanging, healthy("store")], probeTimeoutMs: 20 });
+    const api = createControlPlaneApi({ probes: [hanging, healthy("store")], probeTimeoutMs: 20, ...noRuns });
     const response = await api.fetch(new Request("http://tend.test/status"));
     const body = (await response.json()) as PlatformStatus;
 
@@ -79,6 +81,7 @@ describe("GET /status", () => {
     });
 
     const api = createControlPlaneApi({
+      ...noRuns,
       probes: [healthy("store")],
       bundles: [{ name: "worker", baseUrl: "http://worker.test", fetch: (request) => worker.fetch(request) }],
     });
@@ -95,6 +98,7 @@ describe("GET /status", () => {
 
   it("reports a runtime bundle as unhealthy when it cannot be reached", async () => {
     const api = createControlPlaneApi({
+      ...noRuns,
       probes: [healthy("store")],
       bundles: [
         {

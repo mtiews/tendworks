@@ -1,5 +1,12 @@
 import { serve } from "@hono/node-server";
-import { createControlPlaneApi, createStoreProbe } from "@tendworks/control-plane";
+import {
+  ConfigurationError,
+  createControlPlaneApi,
+  createOrchestrationClient,
+  createStoreProbe,
+  loadConfiguration,
+  type Configuration,
+} from "@tendworks/control-plane";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name] ?? fallback;
@@ -7,9 +14,23 @@ const env = (name: string, fallback?: string): string => {
   return value;
 };
 
+let configuration: Configuration;
+try {
+  configuration = loadConfiguration(env("TEND_CONFIG_DIR"));
+} catch (error) {
+  // Invalid configuration stops the platform before it accepts any request.
+  if (!(error instanceof ConfigurationError)) throw error;
+  console.error(error.message);
+  process.exit(1);
+}
+console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
+
+const workerUrl = env("TEND_WORKER_URL");
 const api = createControlPlaneApi({
   probes: [createStoreProbe(env("TEND_DATABASE_URL"))],
-  bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
+  bundles: [{ name: "worker", baseUrl: workerUrl }],
+  configuration,
+  runs: createOrchestrationClient({ baseUrl: workerUrl }),
 });
 
 const port = Number(env("PORT", "8080"));

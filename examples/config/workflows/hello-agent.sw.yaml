@@ -1,0 +1,24 @@
+# Smallest useful workflow: hand one task to an agent profile and return its answer.
+# Start it with: POST /runs {"workflow": "hello-agent", "input": {"issue": {"number": 1, "title": "Say hello"}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: hello-agent
+  version: '0.1.0'
+  summary: Hands an issue to the fake developer agent.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+              - kind: data
+                data: '${ .issue // {} }'
+      output:
+        as: '${ { taskId: .id, state: .status.state, reply: .status.message.parts[0].text } }'
