@@ -1,0 +1,11 @@
+{
+  "name": "@tendworks/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end tests against the compose stack through the generated client.",
+  "dependencies": {
+    "@tendworks/shared": "workspace:*",
+    "openapi-fetch": "0.17.0"
+  }
+}

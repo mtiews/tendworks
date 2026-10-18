@@ -1,0 +1,23 @@
+{
+  "name": "@tendworks/control-plane",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@tendworks/health": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "hono": "4.13.13",
+    "openapi-fetch": "0.17.0",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

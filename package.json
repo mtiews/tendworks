@@ -1,0 +1,25 @@
+{
+  "name": "tendworks",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.9.1",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "generate": "pnpm --filter @tendworks/shared generate",
+    "build": "pnpm generate && tsc -b",
+    "typecheck": "pnpm generate && tsc -b && tsc -p tsconfig.test.json",
+    "lint": "depcruise packages apps tests",
+    "test": "vitest run --project unit",
+    "e2e": "docker compose -f deploy/compose.yaml up -d --build --wait && vitest run --project e2e",
+    "check": "pnpm typecheck && pnpm lint && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "dependency-cruiser": "18.5.0",
+    "typescript": "6.0.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}

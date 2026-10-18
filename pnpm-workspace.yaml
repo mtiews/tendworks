@@ -1,0 +1,16 @@
+packages:
+  - packages/*
+  - apps/*
+  - tests/*
+
+# Pin exact versions; updates go through pull requests.
+saveExact: true
+
+# protobufjs (via the workflow engine client) only runs a version check on install.
+allowBuilds:
+  protobufjs: false
+
+peerDependencyRules:
+  allowedVersions:
+    # openapi-typescript declares ^5 but works with the TypeScript 6 JS API.
+    openapi-typescript>typescript: "6"

@@ -1,0 +1,57 @@
+openapi: 3.1.0
+info:
+  title: Tendworks Runtime Health API
+  version: 0.1.0
+  description: >-
+    Internal API every runtime bundle (server, worker) exposes so the control
+    plane can report platform health. Not part of the public API.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health of this bundle's components
+      responses:
+        "200":
+          description: All components are healthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+        "503":
+          description: At least one component is unhealthy.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthReport"
+components:
+  schemas:
+    HealthState:
+      type: string
+      enum: [healthy, unhealthy]
+    HealthReport:
+      type: object
+      required: [status, components, checkedAt]
+      additionalProperties: false
+      properties:
+        status:
+          $ref: "#/components/schemas/HealthState"
+        components:
+          type: array
+          items:
+            $ref: "#/components/schemas/ComponentStatus"
+        checkedAt:
+          type: string
+          format: date-time
+    ComponentStatus:
+      type: object
+      required: [name, status]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Generic component name, e.g. store, execution-engine, sandbox-backend.
+        status:
+          $ref: "#/components/schemas/HealthState"
+        message:
+          type: string
+          description: Reason when the component is unhealthy.

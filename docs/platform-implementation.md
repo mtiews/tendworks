@@ -8,7 +8,9 @@ This document describes the concrete technical implementation. Concepts, domains
 
 | Topic | Decision | Rationale |
 | --- | --- | --- |
-| Language | TypeScript throughout (Node.js LTS) | one language for services, UI and adapters; official SDKs for Temporal, A2A and MCP; ACP adapter for Claude Code is written in TypeScript |
+| Language | TypeScript throughout (Node.js LTS), TypeScript 6 for now | one language for services, UI and adapters; official SDKs for Temporal, A2A and MCP; ACP adapter for Claude Code is written in TypeScript; TypeScript 7 (native compiler) has no stable JS API yet, which code generators such as openapi-typescript need |
+| Contracts in code | OpenAPI types generated with openapi-typescript into `packages/shared`, client via openapi-fetch, HTTP server on Hono | generated types keep server and clients on the contract; Hono serves a plain fetch handler, so the API can be tested in-process |
+| Tests | Vitest; unit tests per package, end-to-end tests against the compose stack in `tests/e2e` | one runner for both levels |
 | Repos | monorepo `tendworks` for code and contracts, separate repo `tendworks-config` for configuration | contracts change in the same pull request as the services; configuration has its own approvals |
 | Package management | pnpm workspaces | fast, clean monorepo without an extra build system |
 | Boundaries in code | one package per domain, cross-imports forbidden by lint rule (e.g. dependency-cruiser) | domain separation is checked automatically |
@@ -45,16 +47,17 @@ tendworks/
     event-bus/               # port + Postgres implementation
     mcp-platform/            # read-only MCP server on the control plane API
     shared/                  # only types generated from contracts/
+    health/                  # platform library, not a domain: health probes and the runtime health API
   apps/
     server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction
-    worker/                  # walking skeleton: bundles orchestration, agent-runtime, mcp-platform
+    worker/                  # walking skeleton: bundles orchestration, agent-runtime (mcp-platform from milestone 1b)
     web/                     # web UI: run list, chat
     cli/                     # tend CLI on the generated API client
   images/
     sandbox-claude-code/     # Dockerfile: Claude Code + ACP adapter
   deploy/
     compose.yaml
-    profiles/laptop.env
+    .env.example             # laptop profile settings and secrets, copied to deploy/.env
   tests/
     contract/
     e2e/
@@ -101,7 +104,7 @@ Rules for the skeleton:
 ## Open items
 
 - [x] Define the build order of the walking skeleton
-- [ ] Write the concrete `compose.yaml`
+- [x] Write the concrete `compose.yaml`
 - [ ] Example configuration for the existing issue agent (trigger, profile, skills, sandbox template)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token

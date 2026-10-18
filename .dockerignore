@@ -1,0 +1,9 @@
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+packages/shared/src/generated
+.git
+.agents
+.claude
+docs
+**/.env

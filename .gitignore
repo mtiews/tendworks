@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+
+# Generated from contracts/ at build time
+packages/shared/src/generated/
+
+# Local secrets and settings
+.env
+.claude/settings.local.json
