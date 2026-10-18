@@ -1,5 +1,7 @@
 # Laptop profile of Tendworks: `docker compose -f deploy/compose.yaml up --wait`.
 # Only the control plane API is published, and only on localhost.
+# Parallel stacks (e.g. one per worktree): set COMPOSE_PROJECT_NAME, TEND_PORT and
+# TEND_ENGINE_UI_PORT, and point TEND_URL at http://localhost:$TEND_PORT.
 name: tendworks
 
 services:
@@ -24,7 +26,7 @@ services:
     volumes:
       - temporal-data:/home/temporal # mounted on the existing home so the volume is owned by the engine user
     ports:
-      - "127.0.0.1:8233:8233" # engine web UI for debugging
+      - "127.0.0.1:${TEND_ENGINE_UI_PORT:-8233}:8233" # engine web UI for debugging
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
       interval: 2s
@@ -53,7 +55,7 @@ services:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
       TEND_WORKER_URL: http://worker:8081
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${TEND_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
