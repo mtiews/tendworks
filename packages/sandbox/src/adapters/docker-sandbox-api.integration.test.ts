@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
-import { afterAll, beforeAll } from "vitest";
-import { createDockerSandboxApi } from "../index.js";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createDockerSandboxApi, type SandboxApi, type SandboxTemplate } from "../index.js";
 import { describeSandboxApi } from "../sandbox-api.suite.js";
 
 /*
@@ -50,7 +50,89 @@ afterAll(async () => {
   if (leftovers) await docker("rm", "-f", "-v", ...leftovers.split(/\s+/));
 });
 
-describeSandboxApi("Docker adapter through the socket proxy", () => ({
-  api: createDockerSandboxApi({ url: proxyUrl, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } }),
-  image,
-}));
+const createApi = () => createDockerSandboxApi({ url: proxyUrl, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
+
+describeSandboxApi("Docker adapter through the socket proxy", () => ({ api: createApi(), image }));
+
+describe.concurrent("Docker adapter", () => {
+  const created: string[] = [];
+  let api: SandboxApi;
+
+  beforeAll(() => {
+    api = createApi();
+  });
+
+  afterAll(async () => {
+    await Promise.all(created.map((id) => api.destroy(id)));
+  });
+
+  const template = (spec: Partial<SandboxTemplate["spec"]> = {}): SandboxTemplate => ({
+    apiVersion: "tendworks.dev/v1",
+    kind: "SandboxTemplate",
+    metadata: { name: "docker-only" },
+    spec: { image, ...spec },
+  });
+
+  const create = async (t = template()) => {
+    const sandbox = await api.create(t);
+    created.push(sandbox.id);
+    return sandbox;
+  };
+
+  const sh = async (id: string, script: string) => (await api.exec(id, { command: ["sh", "-c", script] })).stdout;
+
+  it("runs sandboxes without capabilities, without privilege escalation and under seccomp", async () => {
+    const { id } = await create();
+
+    const status = await sh(id, "grep -E '^(CapEff|CapPrm|NoNewPrivs|Seccomp):' /proc/self/status");
+
+    expect(status).toMatch(/^CapPrm:\s+0{16}$/m);
+    expect(status).toMatch(/^CapEff:\s+0{16}$/m);
+    expect(status).toMatch(/^NoNewPrivs:\s+1$/m);
+    expect(status).toMatch(/^Seccomp:\s+2$/m);
+  });
+
+  it("hands written files to the sandbox user", async () => {
+    const { id } = await create(template({ user: "4242:4343" }));
+
+    await api.writeFile(id, "/tmp/owned/file.txt", new TextEncoder().encode("x"));
+
+    expect(await sh(id, "stat -c %u:%g /tmp/owned/file.txt /tmp/owned")).toBe("4242:4343\n4242:4343\n");
+  });
+
+  it("applies the template's resource limits", async () => {
+    const { id } = await create(template({ resources: { memoryMb: 128, pids: 64, cpus: 0.5 } }));
+
+    expect(await sh(id, "cat /sys/fs/cgroup/memory.max /sys/fs/cgroup/pids.max /sys/fs/cgroup/cpu.max")).toBe(
+      `${128 * 1024 * 1024}\n64\n50000 100000\n`,
+    );
+  });
+
+  it("rejects a template whose image is not on the host", async () => {
+    await expect(api.create(template({ image: "tendworks.invalid/not-pulled:0.0.0" }))).rejects.toMatchObject({ code: "image-not-found" });
+  });
+
+  it("maps isolation class gvisor to the gVisor runtime", async () => {
+    const runtimes = JSON.parse(await docker("info", "--format", "{{json .Runtimes}}")) as Record<string, unknown>;
+
+    if ("runsc" in runtimes) {
+      const { id, isolationClass } = await create(template({ isolationClass: "gvisor" }));
+      expect(isolationClass).toBe("gvisor");
+      expect(await sh(id, "dmesg 2>/dev/null | head -n 1")).toContain("gVisor");
+    } else {
+      await expect(api.create(template({ isolationClass: "gvisor" }))).rejects.toMatchObject({
+        code: "isolation-class-unavailable",
+        message: expect.stringContaining("runsc"),
+      });
+    }
+  });
+});
+
+describe("socket proxy", () => {
+  it.each(["/images/json", "/info", "/events", "/networks", "/volumes", "/system/df"])("refuses %s, which the adapter does not need", async (path) => {
+    const response = await fetch(new URL(path, proxyUrl), { signal: AbortSignal.timeout(2_000) });
+    await response.body?.cancel();
+
+    expect(response.status).toBe(403);
+  });
+});

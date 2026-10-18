@@ -2,7 +2,7 @@ import {
   assertAbsolutePath,
   assertSandboxId,
   defaultIsolationClass,
-  defaultSandboxUser,
+  sandboxUser,
   newSandboxId,
   SandboxError,
   type ExecRequest,
@@ -41,7 +41,7 @@ export function createFakeSandboxApi(): SandboxApi {
         state: "running",
         createdAt: new Date().toISOString(),
       };
-      sandboxes.set(sandbox.id, { sandbox, user: template.spec.user ?? defaultSandboxUser, files: new Map() });
+      sandboxes.set(sandbox.id, { sandbox, user: sandboxUser(template), files: new Map() });
       return sandbox;
     },
     async exec(sandboxId, request) {

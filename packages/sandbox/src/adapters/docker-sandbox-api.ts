@@ -3,7 +3,7 @@ import {
   assertAbsolutePath,
   assertSandboxId,
   defaultIsolationClass,
-  defaultSandboxUser,
+  sandboxUser,
   newSandboxId,
   SandboxError,
   type IsolationClass,
@@ -44,7 +44,7 @@ function demultiplex(raw: Uint8Array): { stdout: string; stderr: string } {
 export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOptions): SandboxApi {
   const call = (method: string, path: string, init: { json?: unknown; body?: Uint8Array; contentType?: string } = {}) => {
     const headers: Record<string, string> = {};
-    let body: BodyInit | undefined;
+    let body: RequestInit["body"];
     if (init.json !== undefined) {
       headers["content-type"] = "application/json";
       body = JSON.stringify(init.json);
@@ -76,7 +76,7 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
           Image: template.spec.image,
           Entrypoint: ["sleep", "infinity"],
           Cmd: [],
-          User: template.spec.user ?? defaultSandboxUser,
+          User: sandboxUser(template),
           Labels: { ...labels, "dev.tendworks.sandbox": id, "dev.tendworks.sandbox-template": template.metadata.name },
           HostConfig: {
             Runtime: runtimes[isolationClass],
@@ -93,7 +93,16 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       if (created.status === 404) {
         throw new SandboxError("image-not-found", `image ${template.spec.image} is not on the sandbox host`);
       }
-      if (!created.ok) throw await failure(created, "creating the sandbox");
+      if (!created.ok) {
+        const message = (await created.text()).trim();
+        if (/runtime/i.test(message)) {
+          throw new SandboxError(
+            "isolation-class-unavailable",
+            `isolation class ${isolationClass} needs the ${runtimes[isolationClass]} runtime on the sandbox host: ${message}`,
+          );
+        }
+        throw new Error(`creating the sandbox failed: ${created.status} ${message}`);
+      }
 
       const started = await call("POST", `/containers/${containerName(id)}/start`);
       if (!started.ok) {

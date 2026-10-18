@@ -46,6 +46,14 @@ export function assertSandboxId(sandboxId: string): void {
   if (!sandboxIdPattern.test(sandboxId)) throw new SandboxError("sandbox-not-found", `no sandbox ${JSON.stringify(sandboxId)}`);
 }
 
+/** The template's user as numeric uid:gid, refusing root (also as group) and names that could resolve to it. */
+export function sandboxUser(template: SandboxTemplate): string {
+  const user = template.spec.user ?? defaultSandboxUser;
+  const match = /^([1-9][0-9]*)(?::([1-9][0-9]*))?$/.exec(user);
+  if (!match) throw new SandboxError("invalid-request", `sandbox user must be a numeric non-root uid[:gid], got ${JSON.stringify(user)}`);
+  return `${match[1]}:${match[2] ?? match[1]}`;
+}
+
 export function assertAbsolutePath(path: string): void {
   if (!path.startsWith("/")) throw new SandboxError("invalid-request", `path must be absolute: ${path}`);
 }

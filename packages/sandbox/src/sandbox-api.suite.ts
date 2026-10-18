@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SandboxApi, SandboxTemplate } from "./sandbox-api.js";
 
 export interface SandboxApiSuiteContext {
@@ -12,7 +12,8 @@ export interface SandboxApiSuiteContext {
  * adapters and the fake, so the fake stays a faithful stand-in.
  */
 export function describeSandboxApi(name: string, setup: () => Promise<SandboxApiSuiteContext> | SandboxApiSuiteContext) {
-  describe(`sandbox API: ${name}`, () => {
+  // Concurrent: every case uses its own sandbox, which keeps real backends fast.
+  describe.concurrent(`sandbox API: ${name}`, () => {
     let context: SandboxApiSuiteContext;
     const created: string[] = [];
 
@@ -20,8 +21,8 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       context = await setup();
     });
 
-    afterEach(async () => {
-      await Promise.all(created.splice(0).map((id) => context.api.destroy(id)));
+    afterAll(async () => {
+      await Promise.all(created.map((id) => context.api.destroy(id)));
     });
 
     const template = (spec: Partial<SandboxTemplate["spec"]> = {}, templateName = "suite"): SandboxTemplate => ({
@@ -88,6 +89,10 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       expect(result.stdout).toBe("4242\n");
     });
 
+    it.each(["0", "0:0", "root", "1000:0", "node"])("refuses to create a sandbox whose user is %j", async (user) => {
+      await expect(context.api.create(template({ user }))).rejects.toMatchObject({ code: "invalid-request" });
+    });
+
     it("runs a command in the given working directory with the given environment", async () => {
       const { id } = await create();
 
@@ -121,6 +126,34 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       const { id } = await create();
 
       await expect(context.api.readFile(id, "/tmp/missing.txt")).rejects.toMatchObject({ code: "file-not-found" });
+    });
+
+    it("destroys a sandbox so it can no longer be used", async () => {
+      const { id } = await create();
+
+      await context.api.destroy(id);
+
+      await expect(context.api.exec(id, { command: ["echo"] })).rejects.toMatchObject({ code: "sandbox-not-found" });
+      await expect(context.api.readFile(id, "/tmp/x")).rejects.toMatchObject({ code: "sandbox-not-found" });
+      await expect(context.api.writeFile(id, "/tmp/x", new Uint8Array())).rejects.toMatchObject({ code: "sandbox-not-found" });
+    });
+
+    it("treats destroying an unknown or already destroyed sandbox as done", async () => {
+      const { id } = await create();
+      await context.api.destroy(id);
+
+      await expect(context.api.destroy(id)).resolves.toBeUndefined();
+      await expect(context.api.destroy("doesnotexist")).resolves.toBeUndefined();
+    });
+
+    it("rejects ids that are not sandbox ids", async () => {
+      await expect(context.api.exec("../containers/foo", { command: ["echo"] })).rejects.toMatchObject({ code: "sandbox-not-found" });
+    });
+
+    it("rejects relative file paths", async () => {
+      const { id } = await create();
+
+      await expect(context.api.writeFile(id, "notes.md", new Uint8Array())).rejects.toMatchObject({ code: "invalid-request" });
     });
 
     it("keeps files of different sandboxes apart", async () => {

@@ -24,6 +24,7 @@ export default defineConfig({
         test: {
           name: "integration",
           include: ["packages/*/src/**/*.integration.test.ts"],
+          maxConcurrency: 16,
           testTimeout: 30_000,
           hookTimeout: 120_000,
         },
