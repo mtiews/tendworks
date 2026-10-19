@@ -12,25 +12,29 @@ URL="${TEND_URL:-http://localhost:8080}"
 : "${TEND_API_TOKEN:?export TEND_API_TOKEN first (the same value as in deploy/.env)}"
 compose() { docker compose -f deploy/compose.yaml "$@"; }
 
-# Prints one field of the JSON on stdin, e.g. `field 'r.steps[0]?.transcript'`.
+# Prints one field of the JSON on stdin, e.g. `field 'r.steps[0]?.transcript'`; prints nothing
+# for empty or non-JSON input, so polling loops keep waiting instead of failing.
 field() {
   node -e '
     let d = "";
     process.stdin.on("data", (c) => (d += c)).on("end", () => {
-      const r = JSON.parse(d);
+      let r;
+      try { r = JSON.parse(d); } catch { return; }
       const v = new Function("r", "return " + process.argv[1])(r);
       process.stdout.write(v === undefined || v === null ? "" : String(v));
     });' "$1"
 }
 
-get_run() { curl -fsS "$URL/runs/$RUN_ID"; }
-transcript() { compose exec -T worker cat "$TRANSCRIPT" 2>/dev/null || true; }
-session_of() { transcript | grep "\"type\":\"$1\"" | head -1 | field 'r.sessionId'; }
+get_run() { curl -fsS "$URL/runs/$RUN_ID" -H "authorization: Bearer $TEND_API_TOKEN" || true; }
+# MSYS_NO_PATHCONV keeps Git Bash on Windows from rewriting the container path.
+transcript() { MSYS_NO_PATHCONV=1 compose exec -T worker cat "$TRANSCRIPT" 2>/dev/null || true; }
+session_of() { { transcript | grep "\"type\":\"$1\"" || true; } | head -1 | field 'r.sessionId'; }
 
 echo "Starting restart-developer ..."
 RUN_ID=$(curl -fsS -X POST "$URL/runs" \
   -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' \
   -d '{"workflow":"restart-developer"}' | field 'r.id')
+[ -n "$RUN_ID" ] || { echo "FAIL: the run did not start"; exit 1; }
 echo "Run $RUN_ID"
 
 echo "Waiting for the ACP session (up to 3 minutes) ..."
@@ -38,7 +42,7 @@ TRANSCRIPT=""
 SESSION=""
 for _ in $(seq 1 90); do
   if [ -z "$TRANSCRIPT" ]; then
-    TRANSCRIPT=$(get_run | field 'r.steps.find((s) => s.transcript)?.transcript' | sed 's|^file://||')
+    TRANSCRIPT=$(get_run | field 'r.steps?.find((s) => s.transcript)?.transcript' | sed 's|^file://||')
   fi
   if [ -n "$TRANSCRIPT" ]; then
     SESSION=$(session_of acp-session)
@@ -46,7 +50,7 @@ for _ in $(seq 1 90); do
   fi
   sleep 2
 done
-[ -n "$SESSION" ] || { echo "FAIL: no ACP session after 3 minutes"; get_run; exit 1; }
+[ -n "$SESSION" ] || { echo "FAIL: no ACP session after 3 minutes (transcript: ${TRANSCRIPT:-<none yet>})"; get_run; echo; exit 1; }
 echo "ACP session $SESSION is running; transcript $TRANSCRIPT"
 
 sleep 5 # let the agent get into its task before pulling the worker away
@@ -76,6 +80,6 @@ echo
 if [ "$STATUS" = completed ] && [ "$RESUMED_SESSION" = "$SESSION" ]; then
   echo "PASS: the run survived the restart and resumed ACP session $SESSION"
 else
-  echo "FAIL: see above; full transcript with: docker compose -f deploy/compose.yaml exec worker cat $TRANSCRIPT"
+  echo "FAIL: see above; full transcript with: MSYS_NO_PATHCONV=1 docker compose -f deploy/compose.yaml exec worker cat $TRANSCRIPT"
   exit 1
 fi
