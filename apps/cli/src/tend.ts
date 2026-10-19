@@ -477,6 +477,76 @@ type ControlPlaneClient = Client<ControlPlane.paths>;
 
 const TERMINAL_RUN: ReadonlySet<Run["status"]> = new Set(["completed", "failed"]);
 
+/** Waiting as `io` does it: as a test says, or for real. */
+const sleepOf = (io: TendIo) => io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+/**
+ * Follows a transcript stream (ADR 0017) after position `after`, handing each entry to
+ * `onEntry`. A broken connection is resumed with `Last-Event-ID` after the last entry, so
+ * no entry is missed or handed over twice; `CONNECT_ATTEMPTS` failures in a row give up.
+ * Ends when the stream says the task ended, when `signal` aborts (`stopped`), or when
+ * there is no such stream (`missing`).
+ */
+async function followTranscript({
+  open,
+  after,
+  signal,
+  sleep,
+  unreachable,
+  onEntry,
+}: {
+  /** Opens the stream, continuing after the entry the header names, if any. */
+  open: (
+    header: { "Last-Event-ID"?: string },
+    signal: AbortSignal,
+  ) => Promise<{ data?: ReadableStream<Uint8Array> | null | undefined; error?: { title?: string; detail?: string } | undefined; response: Response }>;
+  after: number;
+  signal: AbortSignal;
+  sleep: (ms: number) => Promise<void>;
+  unreachable: (cause: unknown) => never;
+  onEntry: (entry: TranscriptEntry) => void;
+}): Promise<"ended" | "stopped" | "missing"> {
+  const stopped = new Promise<"stopped">((resolve) => signal.addEventListener("abort", () => resolve("stopped"), { once: true }));
+  let last = after;
+  for (let failures = 0; !signal.aborted; ) {
+    let answer;
+    try {
+      answer = await open(last < 0 ? {} : { "Last-Event-ID": String(last) }, signal);
+    } catch (cause) {
+      if (signal.aborted) break;
+      if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
+      await sleep(POLL_MS);
+      continue;
+    }
+    const { data, error, response } = answer;
+    if (response.status === 404) return "missing";
+    if (!response.ok || !data) throw new AnswerError(response, error);
+    const events = readServerSentEvents(data);
+    try {
+      for (;;) {
+        const next = await Promise.race([events.next(), stopped]);
+        if (next === "stopped") {
+          void events.return(undefined);
+          return next;
+        }
+        if (next.done) break;
+        failures = 0;
+        if (next.value.event === "end") return "ended";
+        if (next.value.event !== "entry") continue;
+        const entry = JSON.parse(next.value.data) as TranscriptEntry;
+        last = entry.position;
+        onEntry(entry);
+      }
+    } catch {
+      // The connection broke; resumed below.
+    }
+    if (signal.aborted) break;
+    if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
+    await sleep(POLL_MS);
+  }
+  return "stopped";
+}
+
 /**
  * `tend run logs --follow`: the agent steps of a run one after another, each streamed
  * live (ADR 0017) until its task ends, until the run ends. A broken stream is resumed
@@ -484,7 +554,7 @@ const TERMINAL_RUN: ReadonlySet<Run["status"]> = new Set(["completed", "failed"]
  * what is left of a step is read from its transcript instead of waiting for its stream.
  */
 async function followRun({ runId, client, baseUrl, output, io }: { runId: string; client: ControlPlaneClient; baseUrl: string; output: OutputFormat; io: TendIo }) {
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = sleepOf(io);
   const unreachable = (cause: unknown): never => {
     throw new UnreachableError(baseUrl, cause);
   };
@@ -499,7 +569,6 @@ async function followRun({ runId, client, baseUrl, output, io }: { runId: string
   /** Streams a step's transcript after `last` until its task ends or the run ends. */
   async function followStep(taskId: string, print: (entry: TranscriptEntry) => void, last: () => number): Promise<"ended" | "run-ended" | "missing"> {
     const stop = new AbortController();
-    const runEnded = new Promise<"run-ended">((resolve) => stop.signal.addEventListener("abort", () => resolve("run-ended"), { once: true }));
     let following = true;
     void (async () => {
       while (following) {
@@ -510,43 +579,15 @@ async function followRun({ runId, client, baseUrl, output, io }: { runId: string
       }
     })();
     try {
-      for (let failures = 0; ; ) {
-        let answer;
-        try {
-          answer = await client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
-            params: { path: { runId, taskId }, header: last() < 0 ? {} : { "Last-Event-ID": String(last()) } },
-            parseAs: "stream",
-            signal: stop.signal,
-          });
-        } catch (cause) {
-          if (stop.signal.aborted) return "run-ended";
-          if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
-          await sleep(POLL_MS);
-          continue;
-        }
-        const { data, error, response } = answer;
-        if (response.status === 404) return "missing";
-        if (!response.ok || !data) throw new AnswerError(response, error);
-        const events = readServerSentEvents(data);
-        try {
-          for (;;) {
-            const next = await Promise.race([events.next(), runEnded]);
-            if (next === "run-ended") {
-              void events.return(undefined);
-              return next;
-            }
-            if (next.done) break;
-            failures = 0;
-            if (next.value.event === "end") return "ended";
-            if (next.value.event === "entry") print(JSON.parse(next.value.data) as TranscriptEntry);
-          }
-        } catch {
-          // The connection broke; resumed below.
-        }
-        if (stop.signal.aborted) return "run-ended";
-        if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
-        await sleep(POLL_MS);
-      }
+      const outcome = await followTranscript({
+        open: (header, signal) => client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId, taskId }, header }, parseAs: "stream", signal }),
+        after: last(),
+        signal: stop.signal,
+        sleep,
+        unreachable,
+        onEntry: print,
+      });
+      return outcome === "stopped" ? "run-ended" : outcome;
     } finally {
       following = false;
     }
@@ -724,7 +765,7 @@ async function converse({
   /** Messages this client sent whose echo in the transcript is not printed again, as they are on the screen already. */
   sent: string[];
 }) {
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const sleep = sleepOf(io);
   const unreachable = (cause: unknown): never => {
     throw new UnreachableError(baseUrl, cause);
   };
@@ -757,40 +798,16 @@ async function converse({
 
   /** Follows the transcript live after `last`, as events, until the chat ends or this client leaves. */
   const follow = async (last: number) => {
-    for (let failures = 0; !stop.signal.aborted; ) {
-      let answer;
-      try {
-        answer = await client.GET("/chats/{chatId}/transcript/stream", {
-          params: { path: { chatId }, header: last < 0 ? {} : { "Last-Event-ID": String(last) } },
-          parseAs: "stream",
-          signal: stop.signal,
-        });
-      } catch (cause) {
-        if (stop.signal.aborted) return;
-        if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
-        await sleep(POLL_MS);
-        continue;
-      }
-      if (!answer.response.ok || !answer.data) throw new AnswerError(answer.response, answer.error);
-      try {
-        for await (const event of readServerSentEvents(answer.data)) {
-          failures = 0;
-          if (event.event === "end") {
-            events.push({ kind: "ended" });
-            return;
-          }
-          if (event.event !== "entry") continue;
-          const entry = JSON.parse(event.data) as TranscriptEntry;
-          last = entry.position;
-          events.push({ kind: "entry", entry });
-        }
-      } catch {
-        // The connection broke (or this client left); resumed below.
-      }
-      if (stop.signal.aborted) return;
-      if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
-      await sleep(POLL_MS);
-    }
+    const outcome = await followTranscript({
+      open: (header, signal) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream", signal }),
+      after: last,
+      signal: stop.signal,
+      sleep,
+      unreachable,
+      onEntry: (entry) => events.push({ kind: "entry", entry }),
+    });
+    if (outcome === "missing") throw new Error(`chat ${chatId} not found`);
+    if (outcome === "ended") events.push({ kind: "ended" });
   };
 
   /** Asks the agent to stop the running turn; the transcript shows when it did. */

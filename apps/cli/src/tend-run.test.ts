@@ -345,7 +345,9 @@ describe("tend run logs --follow", () => {
     agentRuntime.append("task-live", entry.hel);
     await vi.waitFor(() => expect(out()).toContain("Hel"));
     // The connection breaks; tend reconnects after the last entry it printed.
+    const streams = () => requests.filter((request) => request.url.endsWith("/transcript/stream"));
     agentRuntime.drop();
+    await vi.waitFor(() => expect(streams()).toHaveLength(2));
     agentRuntime.append("task-live", entry.lo);
     agentRuntime.append("task-live", entry.ended);
     agentRuntime.end("task-live");
@@ -366,9 +368,7 @@ describe("tend run logs --follow", () => {
         "",
       ].join("\n"),
     );
-    const streams = requests.filter((request) => request.url.endsWith("/transcript/stream"));
-    expect(streams.length).toBeGreaterThanOrEqual(2);
-    expect(streams.at(-1)!.headers.get("last-event-id")).toBe("2");
+    expect(streams().at(-1)!.headers.get("last-event-id")).toBe("2");
   });
 
   it("follows the agent steps of a run one after another, also steps that start later", async () => {
