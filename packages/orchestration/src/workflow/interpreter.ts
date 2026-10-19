@@ -38,6 +38,8 @@ export interface Step {
   transcript?: string;
   /** What the agent session cost, as the agent reported it. */
   cost?: { amount: number; currency: string };
+  /** Links the agent reported as artifacts of its task, e.g. a pull request. */
+  artifacts?: { name: string; url: string; description?: string }[];
   error?: WorkflowError;
 }
 
@@ -263,11 +265,19 @@ function detail(parts: A2A.Part[] | undefined): { detail?: string } {
   return text ? { detail: text } : {};
 }
 
-/** Transcript reference and cost from the task's metadata; values of the wrong shape are left out. */
-function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost"> {
+/**
+ * Transcript reference and cost from the task's metadata, and the artifacts that are
+ * links; values of the wrong shape are left out.
+ */
+function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost" | "artifacts"> {
   const transcript = task.metadata?.[TRANSCRIPT];
   const cost = task.metadata?.[COST] as { amount?: unknown; currency?: unknown } | undefined;
+  const artifacts = (task.artifacts ?? []).flatMap(({ name, description, parts }) => {
+    const url = parts.flatMap((part) => ("url" in part && typeof part.url === "string" ? [part.url] : []))[0];
+    return name && url ? [{ name, url, ...(description === undefined ? {} : { description }) }] : [];
+  });
   return {
+    ...(artifacts.length > 0 ? { artifacts } : {}),
     ...(typeof transcript === "string" ? { transcript } : {}),
     ...(typeof cost?.amount === "number" && typeof cost.currency === "string" ? { cost: { amount: cost.amount, currency: cost.currency } } : {}),
   };
