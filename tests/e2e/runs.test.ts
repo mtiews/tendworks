@@ -32,6 +32,9 @@ describe("runs on the compose stack", () => {
       output: { state: "TASK_STATE_COMPLETED", reply: "Pretended to implement the issue." },
     });
     expect(run.steps[0]?.taskId).toBeTruthy();
+    // The agent runtime keeps the session's transcript on its own volume and reports the cost.
+    expect(run.steps[0]?.transcript).toBe(`file:///var/lib/tendworks/transcripts/${run.steps[0]?.taskId}.jsonl`);
+    expect(run.steps[0]?.cost).toEqual({ amount: 0, currency: "USD" });
     const { data: list } = await client.GET("/runs");
     expect(list?.items.map((item) => item.id)).toContain(run.id);
   });

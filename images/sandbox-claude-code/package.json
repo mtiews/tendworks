@@ -1,0 +1,8 @@
+{
+  "name": "tendworks-sandbox-claude-code",
+  "private": true,
+  "description": "Pinned harness of the sandbox-claude-code image: Claude Code (via the Claude Agent SDK) behind its ACP adapter. Updates go through pull requests.",
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.85.1"
+  }
+}

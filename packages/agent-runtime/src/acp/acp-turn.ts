@@ -102,13 +102,16 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
     observer.record({ type: "acp-stop", stopReason: ended.stopReason });
     return { outcome: "stopped", sessionId, stopReason: ended.stopReason, reply: reply.trim(), ...(cost ? { cost } : {}) };
   } catch (error) {
-    // The harness ended or broke the protocol; its error output says why.
+    if (!(error instanceof HarnessClosed) && !connection.signal.aborted) {
+      // The harness answered with an error, e.g. missing authentication.
+      return { outcome: "error", error: redact(`the harness failed: ${error instanceof Error ? error.message : String(error)}`) };
+    }
+    // The harness ended; its exit code and error output say why.
     const exitCode = await Promise.race([process.exited.catch(() => undefined), sleep(1_000).then(() => undefined)]);
     await Promise.race([stderr.done, sleep(1_000)]);
-    const reason = error instanceof HarnessClosed ? "the harness ended unexpectedly" : `the harness failed: ${error instanceof Error ? error.message : String(error)}`;
     const code = exitCode === undefined ? "" : ` (exit code ${exitCode})`;
     const output = stderr.tail();
-    return { outcome: "error", error: redact(`${reason}${code}${output ? `: ${output}` : ""}`) };
+    return { outcome: "error", error: redact(`the harness ended unexpectedly${code}${output ? `: ${output}` : ""}`) };
   } finally {
     clearInterval(keepAlive);
     clearTimeout(timeout);
