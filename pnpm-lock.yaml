@@ -199,6 +199,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -521,6 +524,9 @@ importers:
       '@tendworks/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../../packages/shared

@@ -1,7 +1,7 @@
 import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
 
-const baseUrl = process.env.TEND_URL ?? "http://localhost:8080";
+export const baseUrl = process.env.TEND_URL ?? "http://localhost:8080";
 
 /** The compose stack's API token: deploy/.env, or the laptop profile's default in deploy/compose.yaml. */
 export const API_TOKEN = process.env.TEND_API_TOKEN || "laptop-only-insecure-api-token";

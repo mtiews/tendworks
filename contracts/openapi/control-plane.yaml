@@ -217,6 +217,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /runs/{runId}/tasks/{taskId}/transcript/stream:
+    get:
+      operationId: streamRunTaskTranscript
+      summary: Follow the transcript of a step's agent session live
+      description: >-
+        The transcript of the agent session behind task `taskId` of run `runId` as
+        Server-Sent Events (ADR 0017), passed through from the agent runtime: first the
+        entries recorded so far, then each new entry as it is recorded, until the task
+        ends; then an `end` event, and the stream closes. Each entry event's id is the
+        entry's position; a client that reconnects with `Last-Event-ID` continues right
+        after that entry, without gaps or duplicates. Secrets the session was given are
+        redacted.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: >-
+            The live transcript. The schema describes each event of the stream, as a
+            client parses it (the role of OpenAPI 3.2's `itemSchema`).
+          content:
+            text/event-stream:
+              schema:
+                $ref: "../schemas/transcript-entry.schema.yaml#/$defs/streamEvent"
+        "400":
+          description: "`Last-Event-ID` is not the position of an entry."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id, no step of the run with this task, or no such task in the agent runtime.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, or the agent runtime, which owns transcripts, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /agents:
     get:
       operationId: listAgents
@@ -528,6 +590,14 @@ components:
       schema:
         type: string
         pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: Position of the last entry the client received; the stream continues after it.
+      schema:
+        type: string
+        pattern: "^(0|[1-9][0-9]*)$"
   schemas:
     TranscriptEntryList:
       type: object

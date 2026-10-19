@@ -4,6 +4,7 @@ import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessage
 import { createFakeHarness } from "./fake-agent.js";
 import type { Harness, HarnessResult } from "./harness.js";
 import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
+import { createLiveTranscripts } from "./transcripts/live-transcripts.js";
 import { createInMemoryTranscriptStore, type TranscriptEntry, type TranscriptRecord, type TranscriptStore } from "./transcripts/transcript-store.js";
 
 /** Task metadata key: how often the runtime resumed the task after an interruption. */
@@ -35,6 +36,14 @@ const TERMINAL: ReadonlySet<A2A.TaskState> = new Set([
 export interface AgentRuntime extends AgentTasks {
   /** The transcript of a task's agent session so far, or undefined for a task without one. */
   transcript(taskId: string): Promise<TranscriptEntry[] | undefined>;
+  /**
+   * Follows the transcript of a task's agent session live (ADR 0017): the entries after
+   * position `after` recorded so far, then each new one as it is recorded, until the task
+   * ends; undefined for a task it does not know. A task that has not ended is followed
+   * also while nobody works on it, e.g. until it is resumed after a restart. Ending the
+   * iteration early (`return()`) stops following at once.
+   */
+  follow(taskId: string, options?: { after?: number }): Promise<AsyncIterableIterator<TranscriptEntry> | undefined>;
 }
 
 /**
@@ -57,6 +66,7 @@ export function createAgentRuntime({
   const inProgress = new Map<string, Promise<A2A.Task>>();
   // Progress of running tasks; only the start and the end are written to the store.
   const working = new Map<string, A2A.Task>();
+  const live = createLiveTranscripts();
 
   async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest, { onTask }: SendMessageOptions = {}): Promise<A2A.Task> {
     const startedAt = now();
@@ -91,7 +101,7 @@ export function createAgentRuntime({
     let writes = Promise.resolve();
     const record = (entry: TranscriptRecord) => {
       const stamped = { time: now().toISOString(), ...entry };
-      writes = writes.then(async () => void (await transcript.append(stamped)));
+      writes = writes.then(async () => live.recorded(id, await transcript.append(stamped)));
     };
     const withStatus = (state: A2A.TaskState, text: string): A2A.Task => ({
       ...claimed.task,
@@ -135,6 +145,7 @@ export function createAgentRuntime({
     if (result.cost) metadata = { ...metadata, [COST]: { ...result.cost } };
     const done: A2A.Task = { ...withStatus(result.state, result.message), ...(result.artifacts ? { artifacts: result.artifacts } : {}) };
     await store.update(done);
+    live.ended(id);
     return done;
   }
 
@@ -159,6 +170,23 @@ export function createAgentRuntime({
     async transcript(taskId) {
       const ref = (await store.get(taskId))?.metadata?.[TRANSCRIPT];
       return typeof ref === "string" ? transcripts.read(ref) : undefined;
+    },
+    async follow(taskId, { after = -1 } = {}) {
+      // Subscribed before reading, so nothing recorded in between is missed.
+      const following = live.follow(taskId, after);
+      try {
+        const stored = await store.get(taskId);
+        if (!stored) {
+          following.close();
+          return undefined;
+        }
+        const ref = stored.metadata?.[TRANSCRIPT];
+        const history = typeof ref === "string" ? ((await transcripts.read(ref)) ?? []) : [];
+        return following.start(history, TERMINAL.has(stored.status.state));
+      } catch (error) {
+        following.close();
+        throw error;
+      }
     },
   };
 }

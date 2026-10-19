@@ -1,6 +1,6 @@
 import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type Run, type TranscriptEntry } from "@tendworks/control-plane";
-import { describe, expect, it } from "vitest";
-import { parse } from "yaml";
+import { describe, expect, it, vi } from "vitest";
+import { parse, parseAllDocuments } from "yaml";
 import { runTend } from "./tend.js";
 
 const completed: Run = {
@@ -287,5 +287,169 @@ describe("tend run logs", () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain("run nope not found");
+  });
+});
+
+describe("tend run logs --follow", () => {
+  const step = (reference: string, taskId: string, status: Run["steps"][number]["status"] = "running") => ({
+    name: reference.split("/").at(-1)!,
+    reference,
+    status,
+    taskId,
+    startedAt: at("13:00:00"),
+  });
+  const live: Run = { ...running, id: "run-live", steps: [step("/do/0/implement", "task-live")] };
+  const entry = {
+    started: { position: 0, time: at("13:00:01"), type: "task-started", agent: "developer", message: { messageId: "m-1", role: "ROLE_USER", parts: [{ text: "Say hello" }] } },
+    tool: { position: 1, time: at("13:00:02"), type: "tool-call", toolCallId: "tool-1", title: "Write hello.txt" },
+    hel: { position: 2, time: at("13:00:03"), type: "message-chunk", text: "Hel" },
+    lo: { position: 3, time: at("13:00:03"), type: "message-chunk", text: "lo\nthere" },
+    ended: { position: 4, time: at("13:00:04"), type: "task-ended", state: "TASK_STATE_COMPLETED", message: "Hello" },
+  } satisfies Record<string, TranscriptEntry>;
+
+  function follow(args: string[], run: Run = live) {
+    const runs = createInMemoryRuns();
+    runs.runs.set(run.id, structuredClone(run));
+    const agentRuntime = createInMemoryAgentRuntime();
+    const api = createControlPlaneApi({
+      agentRuntime,
+      probes: [],
+      configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+      apiToken: "test-token",
+      readToken: "test-read-token",
+      runs,
+    });
+    const requests: Request[] = [];
+    let stdout = "";
+    let stderr = "";
+    const exitCode = runTend(["--token", "test-read-token", "run", "logs", run.id, "--follow", ...args], {
+      fetch: (request) => {
+        requests.push(request.clone());
+        return api.fetch(request);
+      },
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 1)),
+    });
+    const update = (change: (run: Run) => void) => change(runs.runs.get(run.id)!);
+    return { exitCode, agentRuntime, update, requests, out: () => stdout, err: () => stderr };
+  }
+
+  it("streams the entries of a running step as they come, reconnects without gaps or duplicates and stops when the run ends", async () => {
+    const { exitCode, agentRuntime, update, requests, out } = follow([]);
+    agentRuntime.transcripts.set("task-live", [entry.started]);
+    agentRuntime.running.add("task-live");
+
+    await vi.waitFor(() => expect(out()).toContain("Say hello"));
+    agentRuntime.append("task-live", entry.tool);
+    agentRuntime.append("task-live", entry.hel);
+    await vi.waitFor(() => expect(out()).toContain("Hel"));
+    // The connection breaks; tend reconnects after the last entry it printed.
+    agentRuntime.drop();
+    agentRuntime.append("task-live", entry.lo);
+    agentRuntime.append("task-live", entry.ended);
+    agentRuntime.end("task-live");
+    update((run) => {
+      run.status = "completed";
+      run.steps[0]!.status = "completed";
+    });
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toBe(
+      [
+        "== /do/0/implement (task-live)",
+        "13:00:01  task       developer: Say hello",
+        "13:00:02  tool       Write hello.txt",
+        "13:00:03  agent      Hello",
+        "                     there",
+        "13:00:04  ended      TASK_STATE_COMPLETED: Hello",
+        "",
+      ].join("\n"),
+    );
+    const streams = requests.filter((request) => request.url.endsWith("/transcript/stream"));
+    expect(streams.length).toBeGreaterThanOrEqual(2);
+    expect(streams.at(-1)!.headers.get("last-event-id")).toBe("2");
+  });
+
+  it("follows the agent steps of a run one after another, also steps that start later", async () => {
+    const { exitCode, agentRuntime, update, out } = follow([], { ...live, steps: [step("/do/0/implement", "task-1", "completed")] });
+    agentRuntime.transcripts.set("task-1", [entry.started, entry.ended]);
+    agentRuntime.transcripts.set("task-2", [{ ...entry.started, agent: "reviewer", message: { ...entry.started.message, parts: [{ text: "Review it" }] } }]);
+    agentRuntime.running.add("task-2");
+
+    await vi.waitFor(() => expect(out()).toContain("TASK_STATE_COMPLETED"));
+    update((run) => run.steps.push(step("/do/1/review", "task-2")));
+    await vi.waitFor(() => expect(out()).toContain("Review it"));
+    agentRuntime.end("task-2");
+    update((run) => void (run.status = "failed"));
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toBe(
+      [
+        "== /do/0/implement (task-1)",
+        "13:00:01  task       developer: Say hello",
+        "13:00:04  ended      TASK_STATE_COMPLETED: Hello",
+        "",
+        "== /do/1/review (task-2)",
+        "13:00:01  task       reviewer: Review it",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("stops when the run ended, even if a step's stream stays open", async () => {
+    const { exitCode, agentRuntime, update, out } = follow([]);
+    agentRuntime.transcripts.set("task-live", [entry.started]);
+    agentRuntime.running.add("task-live");
+
+    await vi.waitFor(() => expect(out()).toContain("Say hello"));
+    update((run) => void (run.status = "failed"));
+
+    expect(await exitCode).toBe(0);
+  });
+
+  it("prints one JSON document per line with -o json", async () => {
+    const { exitCode, agentRuntime, out } = follow(["-o", "json"], { ...live, status: "completed" });
+    agentRuntime.transcripts.set("task-live", [entry.started, entry.ended]);
+
+    expect(await exitCode).toBe(0);
+    expect(out().trimEnd().split("\n").map((line) => JSON.parse(line) as unknown)).toEqual([
+      { step: "/do/0/implement", taskId: "task-live", entry: entry.started },
+      { step: "/do/0/implement", taskId: "task-live", entry: entry.ended },
+    ]);
+  });
+
+  it("prints one YAML document per entry with -o yaml", async () => {
+    const { exitCode, agentRuntime, out } = follow(["-o", "yaml"], { ...live, status: "completed" });
+    agentRuntime.transcripts.set("task-live", [entry.started]);
+
+    expect(await exitCode).toBe(0);
+    expect(parseAllDocuments(out()).map((document) => document.toJS() as unknown)).toEqual([{ step: "/do/0/implement", taskId: "task-live", entry: entry.started }]);
+  });
+
+  it("says so for a step without a transcript and goes on", async () => {
+    const { exitCode, out } = follow([], { ...live, status: "completed" });
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toBe("== /do/0/implement (task-live)\n(no transcript)\n");
+  });
+
+  it("gives up with a message when the control plane cannot be reached again", async () => {
+    let calls = 0;
+    let stderr = "";
+    const exitCode = await runTend(["--token", "test-token", "run", "logs", "run-live", "--follow"], {
+      fetch: async (request) => {
+        calls++;
+        if (new URL(request.url).pathname === "/runs/run-live") return Response.json(live);
+        throw new TypeError("fetch failed");
+      },
+      stdout: () => {},
+      stderr: (text) => (stderr += text),
+      sleep: async () => {},
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/cannot reach the control plane at http:\/\/localhost:8080 \(fetch failed\)/);
+    expect(calls).toBeGreaterThan(2);
   });
 });

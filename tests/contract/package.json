@@ -10,6 +10,7 @@
     "@tendworks/health": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",
     "ajv": "8.20.0",
