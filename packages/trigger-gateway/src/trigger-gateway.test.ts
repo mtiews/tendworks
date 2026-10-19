@@ -115,8 +115,8 @@ describe("trigger gateway", () => {
     await gateway.check("ready-issues");
 
     expect(runs.started).toEqual([
-      { workflow: "implement-issue", input: { issue: { number: 1, title: "Issue 1" }, mode: "auto" } },
-      { workflow: "implement-issue", input: { issue: { number: 5, title: "Issue 5" }, mode: "auto" } },
+      expect.objectContaining({ workflow: "implement-issue", input: { issue: { number: 1, title: "Issue 1" }, mode: "auto" } }),
+      expect.objectContaining({ workflow: "implement-issue", input: { issue: { number: 5, title: "Issue 5" }, mode: "auto" } }),
     ]);
   });
 
@@ -125,7 +125,7 @@ describe("trigger gateway", () => {
 
     await gateway.check("ready-issues");
 
-    expect(runs.started).toEqual([{ workflow: "implement-issue", input: { issue: issue(1) } }]);
+    expect(runs.started).toEqual([expect.objectContaining({ workflow: "implement-issue", input: { issue: issue(1) } })]);
   });
 
   it("never starts a second run for an issue, also after a restart", async () => {
@@ -163,6 +163,16 @@ describe("trigger gateway", () => {
         },
       },
     ]);
+  });
+
+  it("starts each run in the trace of its trigger.fired event", async () => {
+    const { runs, store, gateway } = setup([binding([issue(1), issue(2)])]);
+
+    await gateway.check("ready-issues");
+
+    const events = await store.publisher.events();
+    expect(runs.started.map((run) => run.traceparent)).toEqual(events.map((event) => event.traceparent));
+    expect(events[0]!.traceparent).not.toBe(events[1]!.traceparent);
   });
 
   it("records no event for an issue whose run could not be started", async () => {

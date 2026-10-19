@@ -5,8 +5,8 @@ import type { ApprovalRequest } from "./approval-store.js";
 /** The CloudEvent source of human interaction's events. */
 export const HUMAN_INTERACTION_SOURCE = "/tendworks/human-interaction";
 
-// Human interaction does not know the trace of the run it serves yet, so each approval
-// request starts its own trace.
+// An approval request belongs to the trace of the run that waits for it; a request
+// recorded without one (before runs had a trace) starts its own.
 function envelope(request: ApprovalRequest, kind: "requested" | "decided", time: string) {
   return eventEnvelope({
     // Deterministic, so a repeated write is recognisable.
@@ -15,7 +15,7 @@ function envelope(request: ApprovalRequest, kind: "requested" | "decided", time:
     subject: `approval-requests/${request.id}`,
     time,
     runId: request.runId,
-    traceparent: newTraceparent(),
+    traceparent: request.traceparent ?? newTraceparent(),
   });
 }
 

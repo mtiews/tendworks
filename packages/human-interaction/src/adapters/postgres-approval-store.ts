@@ -15,6 +15,7 @@ interface ApprovalRow {
   policy: string;
   question: string;
   status: ApprovalRequest["status"];
+  traceparent: string | null;
   created_at: Date;
   decided_at: Date | null;
 }
@@ -53,9 +54,12 @@ export function createPostgresApprovalStore({ pool, publisher }: PostgresApprova
     async open(request, event) {
       return transaction(async (tx) => {
         const inserted = await tx.query(
-          `insert into human_interaction.approval_requests (id, run_id, workflow, action, pull_request, policy, question, status, created_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (run_id, action, pull_request) do nothing`,
-          [request.id, request.runId, request.workflow, request.action, request.pullRequest ?? "", request.policy, request.question, request.status, request.createdAt],
+          `insert into human_interaction.approval_requests (id, run_id, workflow, action, pull_request, policy, question, status, traceparent, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (run_id, action, pull_request) do nothing`,
+          [
+            request.id, request.runId, request.workflow, request.action, request.pullRequest ?? "", request.policy, request.question, request.status,
+            request.traceparent ?? null, request.createdAt,
+          ],
         );
         if (inserted.rowCount === 1) {
           await publisher.publish(tx, event(request));
@@ -97,6 +101,7 @@ function toRequest(row: ApprovalRow): ApprovalRequest {
     policy: row.policy,
     question: row.question,
     status: row.status,
+    ...(row.traceparent === null ? {} : { traceparent: row.traceparent }),
     createdAt: row.created_at.toISOString(),
     ...(row.decided_at === null ? {} : { decidedAt: row.decided_at.toISOString() }),
   };

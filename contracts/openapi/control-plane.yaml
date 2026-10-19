@@ -34,6 +34,11 @@ paths:
       description: >-
         Starts a run of the workflow named `workflow` (its `document.name`) from the
         configuration. The run executes in the background; poll `GET /runs/{runId}`.
+        A caller that traces its work (e.g. the trigger gateway) passes its W3C
+        `traceparent`; the run and all its events then belong to that trace. Without
+        one the run starts a new trace.
+      parameters:
+        - $ref: "#/components/parameters/Traceparent"
       requestBody:
         required: true
         content:
@@ -53,7 +58,9 @@ paths:
               schema:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
         "400":
-          description: The request is invalid, e.g. no workflow with this name is configured.
+          description: >-
+            The request is invalid, e.g. no workflow with this name is configured or the
+            traceparent is malformed.
           content:
             application/json:
               schema:
@@ -300,6 +307,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 components:
+  parameters:
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context of the caller (version 00).
+      schema:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
   schemas:
     ApprovalRequestList:
       type: object

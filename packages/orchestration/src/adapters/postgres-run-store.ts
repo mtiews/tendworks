@@ -37,6 +37,7 @@ create table if not exists orchestration.steps (
 alter table orchestration.steps add column if not exists transcript text;
 alter table orchestration.steps add column if not exists cost jsonb;
 alter table orchestration.steps add column if not exists artifacts jsonb;
+alter table orchestration.runs add column if not exists traceparent text;
 create table if not exists orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
@@ -87,6 +88,7 @@ interface RunRow {
   workflow: string;
   status: Run["status"];
   input: unknown;
+  traceparent: string | null;
   output: unknown;
   error: NonNullable<Run["error"]> | null;
   created_at: Date;
@@ -149,9 +151,12 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
   return {
     async create(run) {
       await pool.query(
-        `insert into orchestration.runs (id, workflow, status, input, output, error, created_at, started_at, finished_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [run.id, run.workflow, run.status, json(run.input), json(run.output), json(run.error), run.createdAt, run.startedAt ?? null, run.finishedAt ?? null],
+        `insert into orchestration.runs (id, workflow, status, input, traceparent, output, error, created_at, started_at, finished_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          run.id, run.workflow, run.status, json(run.input), run.traceparent ?? null, json(run.output), json(run.error), run.createdAt,
+          run.startedAt ?? null, run.finishedAt ?? null,
+        ],
       );
     },
     async updateRun(runId: string, patch: RunPatch, events) {
@@ -202,6 +207,7 @@ function toRun(row: RunRow, steps: StepRow[]): Run {
     workflow: row.workflow,
     status: row.status,
     input: row.input,
+    ...(row.traceparent === null ? {} : { traceparent: row.traceparent }),
     ...(row.output === null ? {} : { output: row.output }),
     ...(row.error === null ? {} : { error: row.error }),
     steps: steps.map(toStep),

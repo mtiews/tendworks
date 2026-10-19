@@ -1,3 +1,4 @@
+import { newTraceparent } from "@tendworks/platform";
 import type { TriggerBinding, TriggerGateway as Contract } from "@tendworks/shared";
 import type { FiringStore } from "./firings/firing-store.js";
 import { mapInput } from "./input.js";
@@ -64,9 +65,11 @@ export function createTriggerGateway({
     for (const issue of issues) {
       const key = { binding: name, item: itemKey(issue) };
       if (!(await store.claim(key))) continue;
+      // A firing starts a trace; the run and all its events belong to it.
+      const traceparent = newTraceparent();
       let runId: string;
       try {
-        runId = (await runs.start({ workflow, input: mapInput(input, { issue }) as Record<string, unknown> })).id;
+        runId = (await runs.start({ workflow, input: mapInput(input, { issue }) as Record<string, unknown>, traceparent })).id;
       } catch (error) {
         await store.release(key);
         result.failed.push({ issue: key.item, error: error instanceof Error ? error.message : String(error) });
@@ -74,7 +77,7 @@ export function createTriggerGateway({
       }
       // From here on the run exists: the claim is never released again, so no second run starts.
       const reference = { repository: issue.repository, number: issue.number, title: issue.title, url: issue.url };
-      await store.fired(key, runId, triggerFired({ ...key, workflow, runId, issue: reference, time: now().toISOString() }));
+      await store.fired(key, runId, triggerFired({ ...key, workflow, runId, issue: reference, time: now().toISOString(), traceparent }));
       result.fired.push({ issue: key.item, runId });
     }
     return result;

@@ -28,6 +28,7 @@ export function describeApprovalStore(name: string, setup: () => Promise<Approva
       policy: "careful",
       question: "Merge it?",
       status: "pending",
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       createdAt: "2026-10-19T10:00:00.000Z",
       ...overrides,
     });

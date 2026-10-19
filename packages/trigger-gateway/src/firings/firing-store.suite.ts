@@ -30,6 +30,7 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
         runId,
         issue: { repository: "acme/playground", number: 7, url: "https://issues.example/7" },
         time: "2026-10-18T10:00:00.000Z",
+        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       });
 
     it("lets a key be claimed once", async () => {

@@ -16,4 +16,4 @@ Executions fall on multiples of the binding's interval since the Unix epoch, so 
 
 - An issue never starts a second run for the same binding, also across restarts and several server instances (the claim is an insert on the primary key).
 - A crash between starting the run and recording the firing leaves a claim without a run id: the issue does not fire again and no `trigger.fired` is recorded for that run. Closing the gap needs an idempotency key on `POST /runs`.
-- The run gets its own trace (orchestration creates the traceparent); `trigger.fired` and the run are linked by `runid` only until `POST /runs` accepts a traceparent.
+- A firing starts a trace: the gateway passes its `traceparent` header on `POST /runs`, the control plane hands it on to orchestration, which records it on the run, so `trigger.fired`, the run and step events and the approval events of the run share one trace. A run started without a `traceparent` starts its own.

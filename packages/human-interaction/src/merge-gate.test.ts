@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { approvalDecided } from "./approvals/approval-events.js";
 import { createInMemoryApprovalStore } from "./approvals/approval-store.js";
+import { createApprovals } from "./approvals/approvals.js";
 import { createMergeGate, type GatedRun } from "./merge-gate.js";
 import type { Policy } from "./policy.js";
 import { createFakePullRequests, type PullRequests } from "./pull-requests/pull-requests.js";
@@ -79,6 +80,19 @@ describe("merge gate", () => {
           subject: "approval-requests/approval-1",
           data: approvalRequest,
         }),
+      ]);
+    });
+
+    it("announces the approval request and its decision in the trace of the run", async () => {
+      const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+      const { gate, approvals } = setup({ runs: [running({ id: "run-2", workflow: "careful-issue", traceparent })] });
+
+      await gate.merge({ run: "run-2", pullRequest: PR });
+      await createApprovals({ store: approvals }).decide("approval-1", "approve");
+
+      expect(approvals.published.map((event) => [event.type, event.traceparent])).toEqual([
+        ["dev.tendworks.approval.requested", traceparent],
+        ["dev.tendworks.approval.decided", traceparent],
       ]);
     });
 

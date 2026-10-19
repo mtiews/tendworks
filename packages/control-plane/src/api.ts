@@ -1,3 +1,4 @@
+import { isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
@@ -70,11 +71,13 @@ export function createControlPlaneApi({
     if (body.input !== undefined && (body.input === null || typeof body.input !== "object" || Array.isArray(body.input))) {
       return problem(400, "Invalid request", "`input` must be an object");
     }
+    const traceparent = c.req.header("traceparent");
+    if (traceparent !== undefined && !isTraceparent(traceparent)) return problem(400, "Invalid request", "`traceparent` must be a W3C traceparent (version 00)");
     const definition = configuration.workflow(body.workflow);
     if (!definition) {
       return problem(400, "Unknown workflow", `no workflow '${body.workflow}' is configured (configured: ${configuration.workflowNames.join(", ") || "none"})`);
     }
-    const run = await runs.start({ workflow: definition as unknown as Record<string, unknown>, input: body.input ?? {} });
+    const run = await runs.start({ workflow: definition as unknown as Record<string, unknown>, input: body.input ?? {} }, traceparent ? { traceparent } : {});
     return c.json(run satisfies Schemas["run"], 201, { location: `/runs/${run.id}` });
   });
 

@@ -25,6 +25,8 @@ export interface GatedRun {
   status: "pending" | "running" | "completed" | "failed";
   /** Links the run's agents reported; pull requests are named `pull-request`. */
   artifacts: { name: string; url: string }[];
+  /** W3C trace context of the run; the events of its approval requests carry it. */
+  traceparent?: string;
 }
 
 /** What the gate needs from a run as the control plane API describes it. */
@@ -34,6 +36,7 @@ export function toGatedRun(run: Schemas["run"]): GatedRun {
     workflow: run.workflow,
     status: run.status,
     artifacts: run.steps.flatMap((step) => (step.artifacts ?? []).map(({ name, url }) => ({ name, url }))),
+    ...(run.traceparent === undefined ? {} : { traceparent: run.traceparent }),
   };
 }
 
@@ -120,6 +123,7 @@ export function createMergeGate({
             policy,
             question: `Merge ${pullRequest} for run ${run.id} of ${run.workflow}?`,
             status: "pending",
+            ...(run.traceparent === undefined ? {} : { traceparent: run.traceparent }),
             createdAt: time,
           },
           (request) => approvalRequested(request, time),

@@ -1,4 +1,4 @@
-import { eventEnvelope, newTraceparent } from "@tendworks/platform";
+import { eventEnvelope } from "@tendworks/platform";
 import type { TriggerEvents } from "@tendworks/shared";
 
 export type TriggerFiredEvent = TriggerEvents.TriggerFiredEvent;
@@ -24,6 +24,8 @@ export function triggerFired(firing: {
   runId: string;
   issue: TriggerEvents.IssueReference;
   time: string;
+  /** The trace the firing starts; the run it started belongs to it too. */
+  traceparent: string;
 }): TriggerFiredEvent {
   return {
     ...eventEnvelope({
@@ -33,7 +35,7 @@ export function triggerFired(firing: {
       subject: `triggers/${firing.binding}`,
       time: firing.time,
       runId: firing.runId,
-      traceparent: newTraceparent(),
+      traceparent: firing.traceparent,
     }),
     type: "dev.tendworks.trigger.fired",
     data: { binding: firing.binding, workflow: firing.workflow, issue: firing.issue },

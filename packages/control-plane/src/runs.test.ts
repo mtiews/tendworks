@@ -31,11 +31,12 @@ do:
 
 function setup(runs: RunsPort = createInMemoryRuns()) {
   const api = createControlPlaneApi({ probes: [], configuration: configuration(), runs });
-  const request = async (method: string, path: string, body?: unknown) => {
+  const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const response = await api.fetch(
       new Request(`http://tend.test${path}`, {
         method,
-        ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+        headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     );
     return { status: response.status, headers: response.headers, body: (await response.json()) as never };
@@ -55,6 +56,28 @@ describe("runs API", () => {
     expect(run).toMatchObject({ workflow: "build", status: "pending", input: { issue: 7 } });
     expect(headers.get("location")).toBe(`/runs/${run.id}`);
     expect(runs.started).toEqual([{ workflow: expect.objectContaining({ document: expect.objectContaining({ name: "build" }) }), input: { issue: 7 } }]);
+  });
+
+  it("hands the caller's traceparent to orchestration, so the run joins the caller's trace", async () => {
+    const runs = createInMemoryRuns();
+    const { request } = setup(runs);
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+    const { status } = await request("POST", "/runs", { workflow: "build" }, { traceparent });
+
+    expect(status).toBe(201);
+    expect(runs.started).toEqual([expect.objectContaining({ traceparent })]);
+  });
+
+  it("rejects a malformed traceparent", async () => {
+    const runs = createInMemoryRuns();
+    const { request } = setup(runs);
+
+    const { status, body } = await request("POST", "/runs", { workflow: "build" }, { traceparent: "00-xyz" });
+
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ title: "Invalid request" });
+    expect(runs.started).toEqual([]);
   });
 
   it("rejects a workflow name that is not configured", async () => {
