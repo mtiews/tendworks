@@ -294,7 +294,18 @@ importers:
         specifier: 4.13.13
         version: 4.13.13
 
-  packages/human-interaction: {}
+  packages/human-interaction:
+    dependencies:
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/mcp-platform: {}
 
