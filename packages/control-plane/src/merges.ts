@@ -5,14 +5,9 @@ export type MergeRequest = Schemas["MergePullRequestRequest"];
 export type PullRequestMerge = Schemas["PullRequestMerge"];
 
 /** Why the gate did not merge; see `POST /pull-requests/merge` for the status each maps to. */
-export interface MergeRefusal {
-  reason: "invalid" | "rejected" | "conflict" | "refused" | "unavailable";
-  title: string;
-  detail: string;
-}
-
+export type MergeRefusal = Schemas["MergeRefusal"];
 /** `pending`: the merge waits for its approval request; nothing is merged yet. */
-export type MergeOutcome = { merged: PullRequestMerge } | { pending: PullRequestMerge } | { refused: MergeRefusal };
+export type MergeOutcome = Schemas["MergeOutcome"];
 
 /**
  * Port to human interaction's merge gate, which decides by the run's policies and its

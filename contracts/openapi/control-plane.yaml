@@ -379,6 +379,49 @@ components:
         approvalRequest:
           $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
           description: With decision `ask`, the approval request the merge waits for or merged after.
+    MergeRefusal:
+      type: object
+      description: >-
+        Why the merge gate did not merge, as human interaction answers the control plane;
+        `POST /pull-requests/merge` maps the reason to its status. `invalid` (400): the
+        request cannot be served (no or unreported pull request, not from the run's
+        workspace, unknown run, no applicable policy, unknown host). `rejected` (403): the
+        approval request was rejected. `conflict` (409): the run is not running.
+        `refused` (409): the repository refused. `unavailable` (502): the repository could
+        not be asked.
+      required: [reason, title, detail]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [invalid, rejected, conflict, refused, unavailable]
+        title:
+          type: string
+        detail:
+          type: string
+    MergeOutcome:
+      description: >-
+        What the merge gate did: `merged`, `pending` (the policy asks and the approval
+        request is not decided yet; nothing is merged) or `refused`.
+      oneOf:
+        - type: object
+          required: [merged]
+          additionalProperties: false
+          properties:
+            merged:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [pending]
+          additionalProperties: false
+          properties:
+            pending:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [refused]
+          additionalProperties: false
+          properties:
+            refused:
+              $ref: "#/components/schemas/MergeRefusal"
     StartRunRequest:
       type: object
       required: [workflow]

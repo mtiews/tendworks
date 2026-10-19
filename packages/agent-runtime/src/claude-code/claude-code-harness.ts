@@ -7,7 +7,7 @@ import type { Harness, HarnessResult } from "../harness.js";
 import type { Sandboxes, SandboxTemplate } from "../sandboxes.js";
 import type { SkillFile } from "../skills.js";
 import { checkoutCommand, workspaceOf } from "../workspace.js";
-import type { ClaudeCodeCredential } from "./credentials.js";
+import { CREDENTIAL_VARIABLES, type ClaudeCodeCredential } from "./credentials.js";
 
 export interface ClaudeCodeHarnessOptions {
   sandboxes: Sandboxes;
@@ -41,11 +41,6 @@ const ADAPTER = "claude-agent-acp";
 const CONTINUE =
   "The platform restarted while you were working on this task, and your last turn was interrupted. " +
   "Check the state of the workspace, then continue the task where you left off and finish it.";
-
-const credentialVariables: Record<ClaudeCodeCredential["kind"], string> = {
-  "oauth-token": "CLAUDE_CODE_OAUTH_TOKEN",
-  "api-key": "ANTHROPIC_API_KEY",
-};
 
 /** What every session is told about the platform, after the profile's role description. */
 const PLATFORM_INSTRUCTIONS = `You work unattended in a sandbox; nobody answers questions during the session.
@@ -140,7 +135,7 @@ export function createClaudeCodeHarness({
             CLAUDE_CONFIG_DIR: CONFIG_DIR,
             DISABLE_AUTOUPDATER: "1", // versions are pinned in the image
             TENDWORKS_ARTIFACTS: ARTIFACTS,
-            [credentialVariables[credential.kind]]: credential.value,
+            [CREDENTIAL_VARIABLES[credential.kind]]: credential.value,
             ...(baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: baseUrl }),
           },
         });

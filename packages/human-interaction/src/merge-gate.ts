@@ -8,21 +8,16 @@ type Schemas = ControlPlane.components["schemas"];
 export type MergeRequest = Schemas["MergePullRequestRequest"];
 export type PullRequestMerge = Schemas["PullRequestMerge"];
 
-/**
- * Why a merge did not happen. `invalid`: the request cannot be served (no or unreported
- * pull request, unknown run, no applicable policy, unknown host). `rejected`: the
- * approval request was rejected. `conflict`: the run is not running. `refused`: the
- * repository refused. `unavailable`: the repository could not be asked.
- */
-export type MergeRefusal = { reason: "invalid" | "rejected" | "conflict" | "refused" | "unavailable"; title: string; detail: string };
+/** Why a merge did not happen (contracts/openapi/control-plane.yaml, `MergeRefusal`). */
+export type MergeRefusal = Schemas["MergeRefusal"];
 /** `pending`: the policy asks and the approval request is not decided yet; nothing is merged. */
-export type MergeOutcome = { merged: PullRequestMerge } | { pending: PullRequestMerge } | { refused: MergeRefusal };
+export type MergeOutcome = Schemas["MergeOutcome"];
 
 /** What the gate needs to know about a run, from orchestration's record of it. */
 export interface GatedRun {
   id: string;
   workflow: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: Schemas["runStatus"];
   /**
    * Links the run's agents reported; pull requests are named `pull-request`. Each with
    * the workspace its step handed to the agent, as the run's workflow set it.

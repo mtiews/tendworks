@@ -4,7 +4,8 @@ export interface ClaudeCodeCredential {
   value: string;
 }
 
-const variables: Record<ClaudeCodeCredential["kind"], string> = {
+/** The variable Claude Code reads each kind of credential from. */
+export const CREDENTIAL_VARIABLES: Record<ClaudeCodeCredential["kind"], string> = {
   "oauth-token": "CLAUDE_CODE_OAUTH_TOKEN",
   "api-key": "ANTHROPIC_API_KEY",
 };
@@ -24,7 +25,7 @@ export function claudeCodeCredentialFromEnv(
       problem: `TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key${kind ? `, got ${JSON.stringify(kind)}` : " but is not set"}`,
     };
   }
-  const value = env[variables[kind]];
-  if (!value) return { problem: `TEND_CLAUDE_CODE_CREDENTIAL selects ${kind}, but ${variables[kind]} is empty` };
+  const value = env[CREDENTIAL_VARIABLES[kind]];
+  if (!value) return { problem: `TEND_CLAUDE_CODE_CREDENTIAL selects ${kind}, but ${CREDENTIAL_VARIABLES[kind]} is empty` };
   return { credential: { kind, value } };
 }
