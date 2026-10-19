@@ -9,6 +9,32 @@ export default defineConfig({
   resolve: { conditions },
   ssr: { resolve: { conditions } },
   test: {
+    // Measured over unit + integration tests together (`pnpm coverage`), because adapters are
+    // only exercised against their real products. Thresholds sit just below the measured
+    // baseline (2026-10-19: lines 94.7 %, statements 91.7 %, functions 90.2 %, branches 81.1 %)
+    // so coverage cannot silently drop; raise them when coverage improves, never lower them
+    // without a reason in the pull request.
+    coverage: {
+      provider: "v8",
+      include: ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
+      exclude: [
+        "**/*.test.ts",
+        "**/*.suite.ts",
+        "**/*.stub.ts",
+        "packages/shared/**", // generated types only
+        "apps/*/src/main.ts", // wiring, covered by the end-to-end tests
+      ],
+      reporter: ["text-summary", "html", "json-summary"],
+      thresholds: {
+        lines: 92,
+        statements: 90,
+        functions: 88,
+        branches: 79,
+        // Every domain package must stay well covered on its own, not only on average.
+        "packages/*/src/**": { lines: 88, branches: 72 },
+        "apps/cli/src/**": { lines: 88, branches: 72 },
+      },
+    },
     projects: [
       {
         extends: true,

@@ -18,10 +18,10 @@ jobs:
           node-version: 24
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck, architecture rules, contract tests, unit tests
+      - name: Typecheck, lint, architecture rules, contract tests, unit tests
         run: pnpm check
-      - name: Adapter integration tests against real products
-        run: pnpm test:integration
+      - name: Unit and adapter integration tests with coverage thresholds
+        run: pnpm coverage
       - name: End-to-end tests on the compose stack
         run: pnpm e2e
         env:

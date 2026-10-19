@@ -138,6 +138,19 @@ After the agent step the platform merges the pull request as the workflow's `mer
 13. Failure: run `develop-issue` for an issue the agent cannot finish, or set the token to an invalid value and restart the server. The run fails at `/do/1/merge` with a readable title and detail (e.g. "No pull request to merge", "Repository unavailable: GitHub answered 401: Bad credentials ..."); nothing is merged.
 14. Approval: add `develop-issue` to `workflows` of `examples/config/policies/ask-before-merge.yaml` and restart the server. After the agent step the run waits: `tend status` shows `PENDING APPROVALS 1`, `tend notification list` an `approval.requested` notification, `tend approval list --pending` the request with the pull request in its question, and the pull request stays open. A platform restart (`docker compose -f deploy/compose.yaml restart server worker`) changes nothing. `tend approval approve <id>` lets the run merge and complete (`decision: ask`, `approval: approve` under OUTPUT); `tend approval reject <id>` ends the run without a merge (`merged: false`). The regular suites cover both with `fake-develop-and-ask`.
 
+## Quality gates
+
+| Gate | Where | Enforced by |
+| --- | --- | --- |
+| Type check (strict), generated contract types | `pnpm check` | CI, required status check on `main` |
+| Lint: ESLint with type-aware rules (`no-floating-promises`, `no-misused-promises`, exhaustive switches) | `pnpm check` | CI |
+| Architecture rules: domain boundaries (dependency-cruiser), product names, ≥ 2 implementations per port | `pnpm check` | CI |
+| Contract tests: OpenAPI requests/responses, CloudEvent schemas | `pnpm check` | CI |
+| Unit, integration and end-to-end tests | `pnpm check`, `pnpm coverage`, `pnpm e2e` | CI |
+| Coverage thresholds (global and per package, measured over unit + integration tests) | `pnpm coverage` | CI; thresholds only go up |
+| Secret scanning of staged changes (Betterleaks) | pre-commit hook | locally, against accidents (`--no-verify` skips it); GitHub secret scanning with push protection on the server |
+| Changes reach `main` only through a pull request with green CI, no force push, no deletion | repository ruleset | GitHub, no bypass |
+
 ## Open items
 
 - [x] Define the build order of the walking skeleton
