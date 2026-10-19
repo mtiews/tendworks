@@ -64,7 +64,7 @@ describe("loadConfiguration", () => {
     });
 
     expect(issuesOf(dir)).toEqual([
-      "agents/developer.md: /spec/harness: must be equal to one of the allowed values (fake)",
+      "agents/developer.md: /spec/harness: must be equal to one of the allowed values (fake, claude-code)",
       "sandboxes/node.yaml: /spec: must have required property 'image'",
       "workflows/build.sw.yaml: /do/0/implement/with/method: must be 'message/send'",
     ]);

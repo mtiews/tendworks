@@ -3,12 +3,15 @@ import type { A2A } from "@tendworks/shared";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import type { AgentTasks } from "./agent-tasks.js";
+import { COST, TRANSCRIPT, type AgentTasks } from "./agent-tasks.js";
+import type { TranscriptStore } from "./transcripts/transcript-store.js";
 
 export interface AgentTasksSuiteContext {
   agents: AgentTasks;
   /** An agent profile that completes a simple task. */
   agent: string;
+  /** Where the agent runtime keeps transcripts. */
+  transcripts: TranscriptStore;
 }
 
 const schema = parse(readFileSync(new URL("../../../contracts/schemas/a2a.schema.yaml", import.meta.url), "utf8"));
@@ -33,6 +36,19 @@ export function describeAgentTasks(name: string, setup: () => Promise<AgentTasks
 
       expect(isTask(task), JSON.stringify(isTask.errors)).toBe(true);
       expect(task.status.state).toBe("TASK_STATE_COMPLETED");
+    });
+
+    it("reports where the transcript of the agent session is kept and what the session cost", async () => {
+      const { agents, agent, transcripts } = await setup();
+
+      const task = await agents.sendMessage(agent, request());
+
+      const ref = task.metadata?.[TRANSCRIPT];
+      expect(ref).toEqual(expect.any(String));
+      expect(task.metadata?.[COST]).toEqual({ amount: expect.any(Number), currency: "USD" });
+      const entries = await transcripts.read(ref as string);
+      expect(entries?.[0]).toMatchObject({ type: "task", message: { parts: [{ text: "Say hello" }] } });
+      expect(entries?.at(-1)).toMatchObject({ type: "result", state: "TASK_STATE_COMPLETED", cost: task.metadata?.[COST] });
     });
 
     it("returns the existing task when the same message is sent again", async () => {
