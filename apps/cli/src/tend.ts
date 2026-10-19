@@ -7,6 +7,7 @@ type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
 type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
+type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -80,6 +81,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatRun));
     });
 
+  const notification = program.command("notification").description("inspect notifications");
+
+  notification
+    .command("list")
+    .description("list notifications, newest first, with their delivery status")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/notifications").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatNotificationList));
+    });
+
   try {
     await program.parseAsync(args, { from: "user" });
     return exitCode;
@@ -146,6 +162,20 @@ function formatRun(run: Run): string {
     ...run.steps.map((step) => [step.reference, step.status, step.taskId ?? "", step.startedAt, step.finishedAt ?? ""]),
   ];
   return `${table(fields)}\n${table(steps)}`;
+}
+
+function formatNotificationList(list: NotificationList): string {
+  const rows = [
+    ["CREATED", "KIND", "RUN", "DELIVERY", "TITLE"],
+    ...list.items.map((n) => [
+      n.createdAt,
+      n.kind,
+      n.runId,
+      n.delivery.error ? `${n.delivery.status}: ${n.delivery.error}` : n.delivery.status,
+      n.title,
+    ]),
+  ];
+  return table(rows);
 }
 
 /** Aligns cells in columns; the last column is not padded. */

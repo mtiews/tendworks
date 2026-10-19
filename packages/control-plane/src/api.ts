@@ -1,6 +1,7 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { Configuration } from "./configuration.js";
+import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
 
@@ -18,6 +19,8 @@ export interface ControlPlaneApiOptions {
   configuration: Configuration;
   /** Orchestration, which owns runs. */
   runs: RunsPort;
+  /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
+  notifications?: NotificationsPort;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -27,6 +30,7 @@ export function createControlPlaneApi({
   probeTimeoutMs,
   configuration,
   runs,
+  notifications,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   const app = new Hono();
   const problem = (status: 400 | 404 | 503, title: string, detail?: string): Response =>
@@ -59,6 +63,15 @@ export function createControlPlaneApi({
   app.get("/runs/:runId", async (c) => {
     const run = await runs.get(c.req.param("runId"));
     return run ? c.json(run satisfies Schemas["run"], 200) : problem(404, "Run not found");
+  });
+
+  app.get("/notifications", async (c) => {
+    if (!notifications) return problem(503, "Notifications unavailable", "no notification store is configured");
+    try {
+      return c.json({ items: await notifications.list() } satisfies Schemas["NotificationList"], 200);
+    } catch (error) {
+      return problem(503, "Notifications unavailable", error instanceof Error ? error.message : String(error));
+    }
   });
 
   app.onError((error) => {
