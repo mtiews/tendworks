@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, type MergeOutcome, type MergesPort } from "./index.js";
+import { createControlPlaneApi, createFakeMerges, createInMemoryRuns, type MergesPort } from "./index.js";
 
 const PR = "https://git.example/acme/app/pull/7";
 
@@ -16,20 +16,9 @@ async function merge(body: unknown, merges?: MergesPort) {
   return { status: response.status, body: await response.json() };
 }
 
-const answering = (outcome: MergeOutcome): MergesPort & { requests: unknown[] } => {
-  const requests: unknown[] = [];
-  return {
-    requests,
-    async merge(request) {
-      requests.push(request);
-      return outcome;
-    },
-  };
-};
-
 describe("pull request merge API", () => {
   it("merges through the gate and answers with the merge", async () => {
-    const merges = answering({ merged: { pullRequest: PR, policy: "merge-gate", decision: "allow", merged: true, commit: "abc" } });
+    const merges = createFakeMerges({ merged: { pullRequest: PR, policy: "merge-gate", decision: "allow", merged: true, commit: "abc" } });
 
     const { status, body } = await merge({ run: "run-1", pullRequest: PR }, merges);
 
@@ -50,7 +39,7 @@ describe("pull request merge API", () => {
       status: "pending" as const,
       createdAt: "2026-10-19T10:00:00.000Z",
     };
-    const merges = answering({ pending: { pullRequest: PR, policy: "careful", decision: "ask", merged: false, approvalRequest } });
+    const merges = createFakeMerges({ pending: { pullRequest: PR, policy: "careful", decision: "ask", merged: false, approvalRequest } });
 
     const { status, body } = await merge({ run: "run-1", pullRequest: PR }, merges);
 
@@ -65,7 +54,7 @@ describe("pull request merge API", () => {
     ["refused", 409],
     ["unavailable", 502],
   ] as const)("answers a merge refused as %s with %i and the reason", async (reason, expected) => {
-    const merges = answering({ refused: { reason, title: "Pull request cannot be merged", detail: "it has conflicts" } });
+    const merges = createFakeMerges({ refused: { reason, title: "Pull request cannot be merged", detail: "it has conflicts" } });
 
     const { status, body } = await merge({ run: "run-1", pullRequest: PR }, merges);
 
@@ -74,7 +63,7 @@ describe("pull request merge API", () => {
   });
 
   it("passes a missing pull request (null) on to the gate, which explains it", async () => {
-    const merges = answering({ refused: { reason: "invalid", title: "No pull request to merge", detail: "`pullRequest` is null" } });
+    const merges = createFakeMerges({ refused: { reason: "invalid", title: "No pull request to merge", detail: "`pullRequest` is null" } });
 
     const { status } = await merge({ run: "run-1", pullRequest: null }, merges);
 
@@ -87,7 +76,7 @@ describe("pull request merge API", () => {
     ["no run", { pullRequest: PR }],
     ["a policy chosen by the caller", { run: "run-1", pullRequest: PR, policy: "merge-gate" }],
   ])("rejects a request with %s with 400 without asking the gate", async (_, request) => {
-    const merges = answering({ refused: { reason: "invalid", title: "x", detail: "x" } });
+    const merges = createFakeMerges({ refused: { reason: "invalid", title: "x", detail: "x" } });
 
     const { status, body } = await merge(request, merges);
 

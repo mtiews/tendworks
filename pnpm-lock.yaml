@@ -436,6 +436,33 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
+  tests/architecture:
+    dependencies:
+      '@tendworks/agent-runtime':
+        specifier: workspace:*
+        version: link:../../packages/agent-runtime
+      '@tendworks/control-plane':
+        specifier: workspace:*
+        version: link:../../packages/control-plane
+      '@tendworks/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../../packages/health
+      '@tendworks/human-interaction':
+        specifier: workspace:*
+        version: link:../../packages/human-interaction
+      '@tendworks/orchestration':
+        specifier: workspace:*
+        version: link:../../packages/orchestration
+      '@tendworks/sandbox':
+        specifier: workspace:*
+        version: link:../../packages/sandbox
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
+
   tests/contract:
     dependencies:
       '@tendworks/agent-runtime':
@@ -444,6 +471,9 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@tendworks/health':
+        specifier: workspace:*
+        version: link:../../packages/health
       '@tendworks/human-interaction':
         specifier: workspace:*
         version: link:../../packages/human-interaction
@@ -456,9 +486,18 @@ importers:
       '@tendworks/trigger-gateway':
         specifier: workspace:*
         version: link:../../packages/trigger-gateway
+      ajv:
+        specifier: 8.20.0
+        version: 8.20.0
+      ajv-formats:
+        specifier: 3.0.1
+        version: 3.0.1(ajv@8.20.0)
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
 
   tests/e2e:
     dependencies:

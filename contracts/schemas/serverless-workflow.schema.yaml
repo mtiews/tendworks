@@ -1,4 +1,4 @@
-$id: https://tendworks.dev/schemas/v1/serverless-workflow.schema.yaml
+$id: https://tendworks.dev/schemas/v1/schemas/serverless-workflow.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Workflow
 description: >-

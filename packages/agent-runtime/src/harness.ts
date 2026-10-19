@@ -52,6 +52,8 @@ export interface HarnessObserver {
  * sandbox, or the fake agent. Agent-level failures end in a result with state
  * `TASK_STATE_FAILED`; the promise rejects only when the session could not be
  * attempted at all.
+ *
+ * @port
  */
 export interface Harness {
   run(task: HarnessTask, observer: HarnessObserver): Promise<HarnessResult>;

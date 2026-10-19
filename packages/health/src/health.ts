@@ -5,10 +5,19 @@ export type HealthState = Health.components["schemas"]["HealthState"];
 export type ComponentStatus = Health.components["schemas"]["ComponentStatus"];
 export type HealthReport = Health.components["schemas"]["HealthReport"];
 
-/** A component a runtime bundle depends on, checked on every health request. */
+/**
+ * A component a runtime bundle depends on, checked on every health request.
+ *
+ * @port
+ */
 export interface HealthProbe {
   name: string;
   check(): Promise<Omit<ComponentStatus, "name">>;
+}
+
+/** A probe that always reports `result`; for tests and demos. */
+export function createStaticHealthProbe(name: string, result: Omit<ComponentStatus, "name">): HealthProbe {
+  return { name, check: async () => ({ ...result }) };
 }
 
 export interface HealthOptions {

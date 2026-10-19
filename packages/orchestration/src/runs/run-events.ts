@@ -13,6 +13,8 @@ export type RunEvent =
  * Port through which orchestration emits its events. `tx` is the transaction that
  * writes the state the event describes, so state and event commit together (outbox).
  * Publishing an event whose id is already known is a no-op.
+ *
+ * @port
  */
 export interface EventPublisher<Tx> {
   publish(tx: Tx, event: RunEvent): Promise<void>;

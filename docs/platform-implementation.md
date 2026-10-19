@@ -96,7 +96,7 @@ Every slice ends with a working `docker compose up`. Configuration lives in `exa
 Rules for the skeleton:
 
 - **Fakes first.** Each seam gets its fake before its real adapter; the fake stays as the second implementation of the port.
-- **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5.
+- **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5 (ADR 0013 (contract-and-port-fitness-functions)): `tests/contract` checks the HTTP APIs and events against their contracts, `tests/architecture` checks product names and ports.
 - **Interpreter grows with demand.** `listen` and `switch` are added when the merge gate needs them, test-driven.
 - **Event bus with its first consumer.** The control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker). Run and step events go onto the event bus in the transaction of the run state (ADR 0003, ADR 0005); the first consumer is human interaction, which records a notification for every completed or failed run and every approval request before delivering it. Human interaction publishes `approval.requested` and `approval.decided` the same way; orchestration consumes every other domain's event that names a run and hands it to that run's `listen` tasks.
 - **Resume is tested from S1 on**, not at the end.

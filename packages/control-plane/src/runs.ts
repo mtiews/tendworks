@@ -7,6 +7,8 @@ export type StartRunRequest = Orchestration.components["schemas"]["StartRunReque
 /**
  * Port to orchestration, which owns runs. The control plane does not keep run data;
  * it reads it through this port on every request.
+ *
+ * @port
  */
 export interface RunsPort {
   /** Starts a run; rejects with {@link RunRejectedError} when orchestration refuses it. */

@@ -14,6 +14,8 @@ export interface ApprovalSubject {
 /**
  * Port through which human interaction emits its events. `tx` is the transaction that
  * writes the approval request, so state and event commit together (outbox).
+ *
+ * @port
  */
 export interface ApprovalEventPublisher<Tx> {
   publish(tx: Tx, event: ApprovalEvent): Promise<void>;
@@ -21,7 +23,11 @@ export interface ApprovalEventPublisher<Tx> {
 
 export type DecideOutcome = { decided: ApprovalRequest } | { conflict: ApprovalRequest };
 
-/** Human interaction's record of approval requests. */
+/**
+ * Human interaction's record of approval requests.
+ *
+ * @port
+ */
 export interface ApprovalStore {
   /**
    * Records a pending approval request and publishes `event(request)` with it. When the

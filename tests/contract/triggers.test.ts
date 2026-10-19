@@ -11,12 +11,15 @@ import {
 } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { guardedContracts } from "./support/guarded-contracts.js";
 
 /*
  * Both sides of the trigger APIs in one process: the trigger gateway starts runs through
  * the public control plane API, and the control plane lists triggers through the trigger
  * gateway's internal API. Bindings come from the example configuration.
  */
+
+const contracts = guardedContracts("orchestration", "control-plane", "trigger-gateway");
 
 function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
@@ -26,17 +29,17 @@ function platform() {
   const gateway = createTriggerGateway({
     bindings: configuration.triggerBindings,
     store: createInMemoryFiringStore(),
-    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", fetch: (request) => controlPlane.fetch(request) }),
+    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }),
     now: () => new Date("2026-10-18T10:00:05.000Z"),
   });
   const gatewayApi = createTriggerGatewayApi(gateway);
   const controlPlane = createControlPlaneApi({
     probes: [],
     configuration,
-    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: (request) => orchestration.fetch(request) }),
-    triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: (request) => gatewayApi.fetch(request) }),
+    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
+    triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: contracts["trigger-gateway"].guard((request) => gatewayApi.fetch(request)) }),
   });
-  return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: (request) => controlPlane.fetch(request) }) };
+  return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
 }
 
 describe("triggers through the control plane and the trigger gateway", () => {

@@ -20,6 +20,7 @@ import {
 import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { guardedContracts } from "./support/guarded-contracts.js";
 
 /*
  * The merge step across its seams in one process: orchestration's `call: http` reaches
@@ -29,6 +30,8 @@ import { describe, expect, it } from "vitest";
  * the waiting run as the worker's event bus subscription would hand them over.
  */
 
+const contracts = guardedContracts("orchestration", "control-plane");
+
 type Run = ControlPlane.components["schemas"]["run"];
 const PR = "https://git.example/example/playground/pull/1"; // examples/config/agents/fake-pr-developer.md
 
@@ -37,10 +40,10 @@ function platform({ pullRequests = [{ url: PR, state: "open" }] }: { pullRequest
   const repository = createFakePullRequests(pullRequests);
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
-  const http = createFetchHttpExecutor({ allowedOrigin: "http://tend.test", fetch: (request) => controlPlane.fetch(request) });
+  const http = createFetchHttpExecutor({ allowedOrigin: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
   const engine = createInProcessRunEngine(createRunActivities({ store, agents, http }));
   const orchestration = createOrchestrationApi({ store, engine, runtime: { name: "tendworks", metadata: { controlPlaneUrl: "http://tend.test" } } });
-  const runs = createOrchestrationClient({ baseUrl: "http://worker.test", fetch: (request) => orchestration.fetch(request) });
+  const runs = createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) });
   const approvalStore = createInMemoryApprovalStore();
   const controlPlane = createControlPlaneApi({
     probes: [],
@@ -57,7 +60,7 @@ function platform({ pullRequests = [{ url: PR, state: "open" }] }: { pullRequest
     }),
     approvals: createApprovals({ store: approvalStore }),
   });
-  const client = createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: (request) => controlPlane.fetch(request) });
+  const client = createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
   const forwarder = createRunEventForwarder(engine);
   let forwarded = 0;
 

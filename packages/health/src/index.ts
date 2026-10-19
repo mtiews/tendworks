@@ -1,6 +1,7 @@
 export {
   checkComponents,
   createHealthApi,
+  createStaticHealthProbe,
   overallState,
   type ComponentStatus,
   type HealthOptions,

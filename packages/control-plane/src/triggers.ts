@@ -6,10 +6,17 @@ export type Trigger = ControlPlane.components["schemas"]["trigger"];
 /**
  * Port to the trigger gateway, which owns the schedule. The control plane keeps no
  * trigger state; it reads it through this port on every request.
+ *
+ * @port
  */
 export interface TriggersPort {
   /** Triggers, ordered by name, with their next scheduled execution. */
   list(): Promise<Trigger[]>;
+}
+
+/** Triggers in memory, for tests and a platform without a trigger gateway. */
+export function createInMemoryTriggers(triggers: Trigger[] = []): TriggersPort {
+  return { list: async () => structuredClone(triggers) };
 }
 
 /** Reaches the trigger gateway through its internal API (contracts/openapi/trigger-gateway.yaml). */

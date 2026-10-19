@@ -5,6 +5,8 @@ export type Notification = ControlPlane.components["schemas"]["notification"];
 /**
  * Port to the channel that brings a notification to the human (later ntfy or Web Push).
  * Rejects when delivery failed. The same notification may arrive more than once.
+ *
+ * @port
  */
 export interface NotificationChannel {
   deliver(notification: Notification): Promise<void>;

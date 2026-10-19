@@ -3,6 +3,8 @@ import type { A2A } from "@tendworks/shared";
 /**
  * Port through which the interpreter hands a task to an agent profile, following the
  * A2A task model (`SendMessage`).
+ *
+ * @port
  */
 export interface AgentTaskExecutor {
   /**

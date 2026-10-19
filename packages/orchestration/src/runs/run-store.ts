@@ -17,6 +17,8 @@ export type RunPatch = Partial<Pick<Run, "status" | "output" | "error" | "starte
  * event is lost or emitted for a change that did not happen.
  * Writes are idempotent: repeating one (e.g. a retried activity) changes nothing and
  * emits no duplicate events, because events are keyed by their id.
+ *
+ * @port
  */
 export interface RunStore {
   /** Records a new run. */

@@ -6,7 +6,7 @@ import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
-import type { TriggersPort } from "./triggers.js";
+import { createInMemoryTriggers, type TriggersPort } from "./triggers.js";
 
 type StatusResponse = ControlPlane.paths["/status"]["get"]["responses"];
 type Schemas = ControlPlane.components["schemas"];
@@ -39,7 +39,7 @@ export function createControlPlaneApi({
   probeTimeoutMs,
   configuration,
   runs,
-  triggers = { list: async () => [] },
+  triggers = createInMemoryTriggers(),
   notifications,
   merges,
   approvals,

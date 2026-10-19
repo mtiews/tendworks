@@ -1,5 +1,20 @@
+import { readFileSync } from "node:fs";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { SandboxApi, SandboxTemplate } from "./sandbox-api.js";
+import { parse } from "yaml";
+import { SandboxError, type SandboxApi, type SandboxTemplate } from "./sandbox-api.js";
+
+// The sandbox API contract (contracts/openapi/sandbox.yaml). The port has no HTTP binding
+// yet, so the suite checks what every backend answers against the contract's schemas.
+const contracts = new URL("../../../contracts/", import.meta.url);
+const SANDBOX_CONTRACT = "https://tendworks.dev/schemas/v1/openapi/sandbox.yaml";
+const ajv = new Ajv2020({ strict: false, validateFormats: false })
+  .addSchema(JSON.parse(readFileSync(new URL("schemas/sandbox-template.schema.json", contracts), "utf8")))
+  .addSchema(parse(readFileSync(new URL("openapi/sandbox.yaml", contracts), "utf8")), SANDBOX_CONTRACT);
+const violations = (schema: string, value: unknown) => {
+  const validate = ajv.getSchema(`${SANDBOX_CONTRACT}#/components/schemas/${schema}`)!;
+  return validate(value) ? [] : validate.errors;
+};
 
 export interface SandboxApiSuiteContext {
   api: SandboxApi;
@@ -46,6 +61,21 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       expect(sandbox).toMatchObject({ template: "node-dev", isolationClass: "container", state: "running" });
       expect(sandbox.id).toMatch(/^[a-z0-9]{1,32}$/);
       expect(Date.parse(sandbox.createdAt)).not.toBeNaN();
+    });
+
+    it("answers in the shapes of the sandbox API contract", async () => {
+      const sandbox = await create();
+      const result = await context.api.exec(sandbox.id, { command: ["echo", "contract"] });
+      const process = await context.api.attach(sandbox.id, { command: ["echo"] });
+      await process.exited;
+      const error = await context.api.readFile(sandbox.id, "/tmp/missing.txt").catch((caught: unknown) => caught);
+
+      expect(violations("Sandbox", sandbox)).toEqual([]);
+      expect(violations("ExecResult", result)).toEqual([]);
+      expect(violations("ProcessId", process.id)).toEqual([]);
+      expect(error).toBeInstanceOf(SandboxError);
+      const { code, message } = error as SandboxError;
+      expect(violations("Error", { code, message })).toEqual([]);
     });
 
     it("runs a command and returns its output and exit code", async () => {

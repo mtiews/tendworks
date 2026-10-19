@@ -18,9 +18,23 @@ export type MergeOutcome = { merged: PullRequestMerge } | { pending: PullRequest
  * Port to human interaction's merge gate, which decides by the run's policies and its
  * approval request and merges with the platform's credentials. The control plane keeps
  * no merge state.
+ *
+ * @port
  */
 export interface MergesPort {
   merge(request: MergeRequest): Promise<MergeOutcome>;
+}
+
+/** Fake merge gate for tests: answers every request with `outcome` and records the requests. */
+export function createFakeMerges(outcome: MergeOutcome): MergesPort & { requests: MergeRequest[] } {
+  const requests: MergeRequest[] = [];
+  return {
+    requests,
+    async merge(request) {
+      requests.push(structuredClone(request));
+      return structuredClone(outcome);
+    },
+  };
 }
 
 export const REFUSAL_STATUS = { invalid: 400, rejected: 403, conflict: 409, refused: 409, unavailable: 502 } as const satisfies Record<

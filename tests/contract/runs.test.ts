@@ -11,12 +11,15 @@ import {
 import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { guardedContracts } from "./support/guarded-contracts.js";
 
 /*
  * Both sides of the internal orchestration API in one process: the control plane's
  * client against orchestration's real API, with the agent runtime's fake agent behind
  * the A2A boundary. The durable engine is replaced by the in-process one.
  */
+
+const contracts = guardedContracts("orchestration", "control-plane");
 
 type Run = ControlPlane.components["schemas"]["run"];
 
@@ -28,9 +31,9 @@ function platform() {
   const controlPlane = createControlPlaneApi({
     probes: [],
     configuration,
-    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: (request) => orchestration.fetch(request) }),
+    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
   });
-  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: (request) => controlPlane.fetch(request) });
+  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
 }
 
 describe("runs through the control plane, orchestration and the fake agent", () => {

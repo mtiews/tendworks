@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://tendworks.dev/schemas/v1/sandbox-template.schema.json",
+  "$id": "https://tendworks.dev/schemas/v1/schemas/sandbox-template.schema.json",
   "title": "SandboxTemplate",
   "description": "The declarative recipe a sandbox is created from: image, isolation class and resources. The egress allowlist follows with the egress proxy.",
   "type": "object",
