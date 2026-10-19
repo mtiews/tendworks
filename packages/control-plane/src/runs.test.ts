@@ -30,12 +30,12 @@ do:
 }
 
 function setup(runs: RunsPort = createInMemoryRuns()) {
-  const api = createControlPlaneApi({ probes: [], configuration: configuration(), runs });
+  const api = createControlPlaneApi({ probes: [], configuration: configuration(), runs, apiToken: "test-token" });
   const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const response = await api.fetch(
       new Request(`http://tend.test${path}`, {
         method,
-        headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
+        headers: { authorization: "Bearer test-token", ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     );

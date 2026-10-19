@@ -23,6 +23,8 @@ const contracts = guardedContracts("orchestration", "control-plane");
 
 type Run = ControlPlane.components["schemas"]["run"];
 
+const API_TOKEN = "contract-test-token";
+
 function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
@@ -32,8 +34,9 @@ function platform() {
     probes: [],
     configuration,
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
+    apiToken: API_TOKEN,
   });
-  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
+  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${API_TOKEN}` }, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
 }
 
 describe("runs through the control plane, orchestration and the fake agent", () => {

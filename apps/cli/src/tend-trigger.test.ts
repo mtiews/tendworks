@@ -12,6 +12,7 @@ async function tend(args: string[]) {
   const api = createControlPlaneApi({
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs: createInMemoryRuns(),
     triggers: { list: async () => triggers },
   });

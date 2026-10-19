@@ -108,12 +108,12 @@ Agent profiles with `harness: claude-code` run Claude Code through `@agentclient
 
 1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
 2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox. The `developer` profile also passes the agent token in, so set `TENDWORKS_AGENT_GITHUB_TOKEN` (fine-grained, playground repository only, contents and pull requests read/write).
-3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
+3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
 4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, the cost and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox, `docker volume ls --filter label=dev.tendworks.volume` no leftover volume.
 
 The workspace (`/workspace`) and the harness's home and config directory (`/session`) are volumes of the agent session, and the ACP session id is kept with the task, so after a platform restart the harness resumes the session with `session/resume` in a new sandbox (ADR 0009 (agent-sessions-resume-on-their-volumes)). Manual restart smoke test with the real harness, after steps 1–3:
 
-5. Start `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
+5. Start `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
 6. `docker compose -f deploy/compose.yaml restart worker`.
 7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
@@ -122,7 +122,7 @@ The workspace (`/workspace`) and the harness's home and config directory (`/sess
 The `develop-issue` workflow hands an issue to the `developer` agent. The runtime checks the issue's repository out in the workspace on a branch fixed by the run, copies the profile's skills into the sandbox, passes the agent token in as `GH_TOKEN` and appends the role description to the harness's system prompt; the agent pushes the branch, opens the pull request and records it, so the run's output shows it (ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)). The regular suites cover this with the scripted agent and a local bare repository; against the playground repository, after steps 1–3:
 
 8. Open an issue in `mtiews/tendworks-playground` with a small, clear change, e.g. "Add a file GREETING.md that says hello".
-9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"issue":{"repository":"mtiews/tendworks-playground","number":<n>,"title":"<title>","body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the time trigger find it: add this binding to the configuration folder, set `TENDWORKS_PLATFORM_GITHUB_TOKEN` and label the issue `ready-for-agent`:
+9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"issue":{"repository":"mtiews/tendworks-playground","number":<n>,"title":"<title>","body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the time trigger find it: add this binding to the configuration folder, set `TENDWORKS_PLATFORM_GITHUB_TOKEN` and label the issue `ready-for-agent`:
 
    ```yaml
    apiVersion: tendworks.dev/v1

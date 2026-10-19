@@ -52,6 +52,13 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 // requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
+// Operations that change state need this token (ADR XXXX (interim-bearer-token-on-the-control-plane-api)).
+const apiToken = env("TEND_API_TOKEN");
+if (apiToken.length < 16) {
+  console.error("TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`");
+  process.exit(1);
+}
+
 const databaseUrl = env("TEND_DATABASE_URL");
 const pool = new pg.Pool({ connectionString: databaseUrl });
 await migrateEventBus(pool);
@@ -99,7 +106,7 @@ const triggerGateway = createTriggerGateway({
   // trigger.fired goes onto the event bus in the transaction that records the firing.
   store: createPostgresFiringStore({ pool, publisher: bus }),
   secrets: platformSecrets,
-  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) }),
+  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
 });
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 const api = createControlPlaneApi({
@@ -111,6 +118,7 @@ const api = createControlPlaneApi({
   merges,
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
+  apiToken,
 });
 
 const port = Number(env("PORT", "8080"));

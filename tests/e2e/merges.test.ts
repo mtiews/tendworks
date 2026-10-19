@@ -1,10 +1,8 @@
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
-
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 
 async function runToEnd(workflow: string, timeoutMs = 45_000): Promise<Run> {
   const { data: started, response } = await client.POST("/runs", { body: { workflow, input: { issue: { number: 14, title: "Merge it" } } } });

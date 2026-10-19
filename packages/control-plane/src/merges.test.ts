@@ -7,11 +7,12 @@ async function merge(body: unknown, merges?: MergesPort) {
   const api = createControlPlaneApi({
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs: createInMemoryRuns(),
     ...(merges ? { merges } : {}),
   });
   const response = await api.fetch(
-    new Request("http://tend.test/pull-requests/merge", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+    new Request("http://tend.test/pull-requests/merge", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", authorization: "Bearer test-token" } }),
   );
   return { status: response.status, body: await response.json() };
 }

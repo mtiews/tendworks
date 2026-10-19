@@ -31,12 +31,20 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .addOption(
       new Option("--url <url>", "control plane URL").env("TEND_URL").default("http://localhost:8080"),
     )
+    .addOption(new Option("--token <token>", "the platform's API token, needed by commands that change state").env("TEND_API_TOKEN"))
     .exitOverride()
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr });
 
   const controlPlane = (command: Command) => {
-    const baseUrl: string = command.optsWithGlobals().url;
-    return { baseUrl, client: createClient<ControlPlane.paths>({ baseUrl, ...(io.fetch ? { fetch: io.fetch } : {}) }) };
+    const { url: baseUrl, token } = command.optsWithGlobals<{ url: string; token?: string }>();
+    return {
+      baseUrl,
+      client: createClient<ControlPlane.paths>({
+        baseUrl,
+        ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+        ...(io.fetch ? { fetch: io.fetch } : {}),
+      }),
+    };
   };
 
   program
@@ -173,6 +181,10 @@ class UnreachableError extends Error {
 
 class AnswerError extends Error {
   constructor(response: Response, problem?: { title?: string; detail?: string }) {
+    if (response.status === 401) {
+      super("the control plane refused the API token (HTTP 401); set TEND_API_TOKEN or pass --token");
+      return;
+    }
     const reason = problem?.title ? `: ${problem.title}${problem.detail ? ` (${problem.detail})` : ""}` : "";
     super(`unexpected answer from the control plane (HTTP ${response.status})${reason}`);
   }

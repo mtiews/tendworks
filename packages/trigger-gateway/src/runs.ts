@@ -20,9 +20,13 @@ export interface RunStarter {
   start(request: StartRun): Promise<{ id: string }>;
 }
 
-/** Starts runs through the public control plane API (`POST /runs`). */
-export function createControlPlaneRunStarter(options: { baseUrl: string; fetch?: (request: Request) => Promise<Response> }): RunStarter {
-  const client = createClient<ControlPlane.paths>({ baseUrl: options.baseUrl, ...(options.fetch ? { fetch: options.fetch } : {}) });
+/** Starts runs through the public control plane API (`POST /runs`), with the platform's API token. */
+export function createControlPlaneRunStarter(options: { baseUrl: string; apiToken: string; fetch?: (request: Request) => Promise<Response> }): RunStarter {
+  const client = createClient<ControlPlane.paths>({
+    baseUrl: options.baseUrl,
+    headers: { authorization: `Bearer ${options.apiToken}` },
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
   return {
     async start({ traceparent, ...request }) {
       const { data, error, response } = await client.POST("/runs", { body: request, ...(traceparent ? { params: { header: { traceparent } } } : {}) });

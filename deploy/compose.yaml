@@ -36,9 +36,9 @@ services:
       retries: 30
 
   # The only way to the Docker API (ADR 0001). Only what the sandbox adapter needs is open:
-  # /_ping, /version, /containers/** (create, start, archive, delete), /exec/** and
-  # /volumes/** (deleting the volumes of a finished agent session), with POST enabling
-  # every write method on those. Images are not reachable, so
+  # /_ping, /version, /containers/** (create, start, archive, delete), /exec/**,
+  # /volumes/** (deleting the volumes of a finished agent session) and /networks/**
+  # (creating the sandbox network once), with POST enabling every write method on those. Images are not reachable, so
   # sandbox images must already be on the host. Every other section is closed,
   # including the events stream the proxy opens by default.
   # It sits on its own internal network that only the worker joins.
@@ -57,6 +57,7 @@ services:
       CONTAINERS: 1
       EXEC: 1
       VOLUMES: 1
+      NETWORKS: 1
       POST: 1
       EVENTS: 0
     networks:
@@ -74,6 +75,9 @@ services:
       # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
       # merge gate merges pull requests on github.com with it. Never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
+      # API token for operations that change state (ADR XXXX (interim-bearer-token-on-the-control-plane-api)).
+      # The default is for the laptop profile only: set your own in deploy/.env.
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
@@ -101,8 +105,13 @@ services:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
       TEND_CONFIG_DIR: /config
       TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
-      # Workflows reach the control plane API (and only it) from here, e.g. the merge step.
+      # Workflows reach the control plane API (and only it) from here, e.g. the merge step,
+      # with the API token. The token is no agent secret, so it never enters a sandbox.
       TEND_CONTROL_PLANE_URL: http://server:8080
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+      # Sandboxes run on their own Docker network, not on this stack's networks, so they
+      # cannot reach the server, worker, store or socket proxy by name or address.
+      TEND_SANDBOX_NETWORK: tendworks-sandboxes
       # Harness credentials from deploy/.env. Only the one TEND_CLAUDE_CODE_CREDENTIAL
       # selects (oauth-token or api-key) is passed into sandboxes, never both.
       TEND_CLAUDE_CODE_CREDENTIAL: ${TEND_CLAUDE_CODE_CREDENTIAL:-}

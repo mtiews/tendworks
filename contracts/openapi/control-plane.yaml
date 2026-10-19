@@ -4,7 +4,10 @@ info:
   version: 0.1.0
   description: >-
     Public API of the Tendworks control plane. The web UI, the tend CLI, the
-    meta-agent and any script use only this API.
+    meta-agent and any script use only this API. Operations that change state (start a
+    run, merge a pull request, decide an approval request) need the platform's API token
+    as a bearer token; reading does not. This is an interim scheme until identity (OIDC)
+    arrives.
 paths:
   /status:
     get:
@@ -30,6 +33,8 @@ paths:
   /runs:
     post:
       operationId: startRun
+      security:
+        - apiToken: []
       summary: Start a run of a configured workflow
       description: >-
         Starts a run of the workflow named `workflow` (its `document.name`) from the
@@ -61,6 +66,17 @@ paths:
           description: >-
             The request is invalid, e.g. no workflow with this name is configured or the
             traceparent is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -156,6 +172,8 @@ paths:
   /pull-requests/merge:
     post:
       operationId: mergePullRequest
+      security:
+        - apiToken: []
       summary: Merge a run's pull request behind the gate of its policies
       description: >-
         Merges the pull request with the platform's credentials, never an agent's.
@@ -198,6 +216,17 @@ paths:
             an unknown run, a pull request the run did not report, a pull request that is
             not from the repository and branch of the run's workspace, no policy that
             applies to the run's workflow, or no integration for the pull request's host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -261,6 +290,8 @@ paths:
   /approval-requests/{approvalRequestId}/decision:
     post:
       operationId: decideApprovalRequest
+      security:
+        - apiToken: []
       summary: Approve or reject an approval request
       description: >-
         Records the decision and emits `approval.decided`, which the waiting run
@@ -291,6 +322,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No approval request with this id.
           content:
@@ -310,6 +352,13 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The platform's API token (`TEND_API_TOKEN`), shared by the operator's clients and
+        the worker's merge step. Interim until OIDC; never handed to sandboxes.
   parameters:
     Traceparent:
       name: traceparent

@@ -22,19 +22,35 @@ async function setup() {
   const api = createControlPlaneApi({
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs: createInMemoryRuns(),
     approvals: createApprovals({ store, now: () => new Date("2026-10-19T10:05:00.000Z") }),
   });
   const tend = async (args: string[]) => {
     let stdout = "";
     let stderr = "";
-    const exitCode = await runTend(args, { fetch: (request) => api.fetch(request), stdout: (text) => (stdout += text), stderr: (text) => (stderr += text) });
+    const exitCode = await runTend(["--token", "test-token", ...args], {
+      fetch: (request) => api.fetch(request),
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+    });
     return { exitCode, stdout, stderr };
   };
   return { tend, store };
 }
 
 describe("tend approval", () => {
+  it("sends the API token, and says how to set it when the control plane refuses it", async () => {
+    const { tend } = await setup();
+
+    const refused = await tend(["--token", "wrong-token", "approval", "approve", pending.id]);
+    const approved = await tend(["approval", "approve", pending.id]);
+
+    expect(refused.exitCode).toBe(1);
+    expect(refused.stderr).toBe("tend: the control plane refused the API token (HTTP 401); set TEND_API_TOKEN or pass --token\n");
+    expect(approved.exitCode).toBe(0);
+  });
+
   it("lists approval requests with their status and question", async () => {
     const { tend } = await setup();
 

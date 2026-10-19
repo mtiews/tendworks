@@ -11,6 +11,7 @@
     "@tendworks/health": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/sandbox": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*"
   }

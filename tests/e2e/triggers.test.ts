@@ -1,10 +1,9 @@
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 const BINDING = "issue-ready-for-agent"; // examples/config/triggers, fake integration
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,6 +1,7 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
-import { Hono } from "hono";
+import { Hono, type MiddlewareHandler } from "hono";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
 import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
@@ -31,6 +32,11 @@ export interface ControlPlaneApiOptions {
   merges?: MergesPort;
   /** Human interaction's approval requests; their endpoints answer 503 without it. */
   approvals?: ApprovalsPort;
+  /**
+   * The platform's API token: operations that change state need it as a bearer token
+   * (`apiToken` security scheme), reading does not. Interim until OIDC.
+   */
+  apiToken: string;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -44,10 +50,23 @@ export function createControlPlaneApi({
   notifications,
   merges,
   approvals,
+  apiToken,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
+  if (!apiToken) throw new Error("the control plane API needs an API token");
   const app = new Hono();
-  const problem = (status: 400 | 403 | 404 | 409 | 502 | 503, title: string, detail?: string): Response =>
-    Response.json({ title, status, ...(detail === undefined ? {} : { detail }) } satisfies Schemas["Problem"], { status });
+  const problem = (status: 400 | 401 | 403 | 404 | 409 | 502 | 503, title: string, detail?: string, headers?: Record<string, string>): Response =>
+    Response.json({ title, status, ...(detail === undefined ? {} : { detail }) } satisfies Schemas["Problem"], { status, ...(headers ? { headers } : {}) });
+
+  // Compared as digests, so neither the length nor the content leaks through timing.
+  const digest = (value: string) => createHash("sha256").update(value).digest();
+  const expected = digest(`Bearer ${apiToken}`);
+  const authenticated: MiddlewareHandler = async (c, next) => {
+    const authorization = c.req.header("authorization") ?? "";
+    if (!timingSafeEqual(digest(authorization), expected)) {
+      return problem(401, "Unauthorized", "this operation needs the platform's API token as a bearer token", { "www-authenticate": "Bearer" });
+    }
+    await next();
+  };
 
   app.get("/status", async (c) => {
     const [checked, pendingApprovals] = await Promise.all([
@@ -65,7 +84,7 @@ export function createControlPlaneApi({
     return c.json(report satisfies StatusResponse[503]["content"]["application/json"], 503);
   });
 
-  app.post("/runs", async (c) => {
+  app.post("/runs", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["StartRunRequest"]> | undefined;
     if (typeof body?.workflow !== "string") return problem(400, "Invalid request", "`workflow` must be the name of a configured workflow");
     if (body.input !== undefined && (body.input === null || typeof body.input !== "object" || Array.isArray(body.input))) {
@@ -107,7 +126,7 @@ export function createControlPlaneApi({
     }
   });
 
-  app.post("/pull-requests/merge", async (c) => {
+  app.post("/pull-requests/merge", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     // Only these two fields: what the gate decides by comes from the platform's records.
     const valid =
@@ -146,7 +165,7 @@ export function createControlPlaneApi({
     }
   });
 
-  app.post("/approval-requests/:approvalRequestId/decision", async (c) => {
+  app.post("/approval-requests/:approvalRequestId/decision", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["ApprovalDecisionRequest"]> | undefined;
     if (body?.decision !== "approve" && body?.decision !== "reject") {
       return problem(400, "Invalid request", "`decision` must be approve or reject");

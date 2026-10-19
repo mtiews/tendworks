@@ -21,6 +21,8 @@ import { guardedContracts } from "./support/guarded-contracts.js";
 
 const contracts = guardedContracts("orchestration", "control-plane", "trigger-gateway");
 
+const API_TOKEN = "contract-test-token";
+
 function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
@@ -29,7 +31,7 @@ function platform() {
   const gateway = createTriggerGateway({
     bindings: configuration.triggerBindings,
     store: createInMemoryFiringStore(),
-    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }),
+    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", apiToken: API_TOKEN, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }),
     now: () => new Date("2026-10-18T10:00:05.000Z"),
   });
   const gatewayApi = createTriggerGatewayApi(gateway);
@@ -38,6 +40,7 @@ function platform() {
     configuration,
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
     triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: contracts["trigger-gateway"].guard((request) => gatewayApi.fetch(request)) }),
+    apiToken: API_TOKEN,
   });
   return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
 }

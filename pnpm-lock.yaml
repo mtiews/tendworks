@@ -479,6 +479,9 @@ importers:
       '@tendworks/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox

@@ -24,4 +24,21 @@ describe("fetch http executor", () => {
     await expect(executor.request({ method: "GET", endpoint: "not a url", headers: {} })).rejects.toThrow("is not an absolute URL");
     expect(sent).toEqual([]);
   });
+
+  it("authenticates every request with the platform's API token, whatever the workflow sets", async () => {
+    const sent: (string | null)[] = [];
+    const executor = createFetchHttpExecutor({
+      allowedOrigin: "http://server:8080",
+      apiToken: "platform-api-token",
+      fetch: async (request) => {
+        sent.push(request.headers.get("authorization"));
+        return new Response(null, { status: 204 });
+      },
+    });
+
+    await executor.request({ method: "POST", endpoint: "http://server:8080/pull-requests/merge", headers: {}, body: {} });
+    await executor.request({ method: "POST", endpoint: "http://server:8080/runs", headers: { Authorization: "Bearer chosen-by-workflow" }, body: {} });
+
+    expect(sent).toEqual(["Bearer platform-api-token", "Bearer platform-api-token"]);
+  });
 });

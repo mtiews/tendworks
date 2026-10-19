@@ -48,6 +48,7 @@ afterAll(() => {
 
 const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
 const PR = "https://git.example/example/playground/pull/1";
+const API_TOKEN = "contract-test-token";
 const healthy = createStaticHealthProbe("store", { status: "healthy" });
 const unhealthy = createStaticHealthProbe("execution-engine", { status: "unhealthy", message: "no answer" });
 const unreachable = async (): Promise<Response> => {
@@ -62,14 +63,15 @@ function orchestration(engine?: (real: RunEngine) => RunEngine) {
   return contracts.orchestration.guard((request) => api.fetch(request));
 }
 
-function controlPlane(options: Partial<ControlPlaneApiOptions> = {}) {
+function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string } = {}) {
   const api = createControlPlaneApi({
     probes: [healthy],
     configuration,
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: orchestration() }),
+    apiToken: API_TOKEN,
     ...options,
   });
-  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts.controlPlane.guard((request) => api.fetch(request)) });
+  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${token}` }, fetch: contracts.controlPlane.guard((request) => api.fetch(request)) });
 }
 
 const unreachableOrchestration = () => createOrchestrationClient({ baseUrl: "http://worker.test", fetch: unreachable });
@@ -128,12 +130,24 @@ describe("control plane: runs, through orchestration", () => {
   });
 });
 
+describe("control plane: the API token", () => {
+  it("refuses operations that change state without the API token", async () => {
+    const client = controlPlane({}, { token: "wrong-token" });
+
+    const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
+    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+
+    expect([started, merged, decided].map(({ response }) => response.status)).toEqual([401, 401, 401]);
+  });
+});
+
 describe("control plane: triggers, through the trigger gateway", () => {
   it("lists the configured trigger bindings", async () => {
     const gateway = createTriggerGateway({
       bindings: configuration.triggerBindings,
       store: createInMemoryFiringStore(),
-      runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", fetch: unreachable }),
+      runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", apiToken: API_TOKEN, fetch: unreachable }),
       now: () => new Date("2026-10-19T10:00:00.000Z"),
     });
     const api = createTriggerGatewayApi(gateway);

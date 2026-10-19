@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { createSecretResolver } from "@tendworks/platform";
 import { expect, it } from "vitest";
 import { parse } from "yaml";
 
@@ -6,7 +7,8 @@ import { parse } from "yaml";
 // started by the worker, so a secret the worker does not have can never reach one.
 
 const compose = parse(readFileSync(new URL("../../deploy/compose.yaml", import.meta.url), "utf8")) as {
-  services: Record<string, { environment?: Record<string, unknown> }>;
+  services: Record<string, { environment?: Record<string, unknown>; networks?: string[] }>;
+  networks?: Record<string, { name?: string }>;
 };
 const environment = (service: string) => Object.keys(compose.services[service]?.environment ?? {});
 
@@ -17,4 +19,23 @@ it("never gives the platform's repository token to the worker, which starts the 
 it("gives the agent's repository token only to the worker", () => {
   expect(environment("worker")).toContain("TENDWORKS_AGENT_GITHUB_TOKEN");
   expect(environment("server")).not.toContain("TENDWORKS_AGENT_GITHUB_TOKEN");
+});
+
+it("never lets an agent profile hand the worker's API token into a sandbox", () => {
+  // The worker holds the token for the merge step; a sandbox only gets the harness
+  // credential and what agent profiles reference, which resolves to agent secrets only.
+  expect(environment("worker")).toContain("TEND_API_TOKEN");
+  const worker = Object.fromEntries(environment("worker").map((name) => [name, "value"]));
+  const agentSecrets = createSecretResolver("agent", worker);
+
+  expect(environment("worker").filter((name) => agentSecrets.resolve(name) !== undefined)).toEqual(["TENDWORKS_AGENT_GITHUB_TOKEN"]);
+});
+
+it("starts sandboxes on a network of their own, not on one of the stack's", () => {
+  const network = compose.services.worker?.environment?.TEND_SANDBOX_NETWORK;
+  const stack = ["default", ...Object.keys(compose.networks ?? {}), ...Object.values(compose.networks ?? {}).flatMap(({ name }) => (name ? [name] : []))];
+
+  expect(network).toEqual(expect.any(String));
+  expect(stack).not.toContain(network);
+  expect(stack.map((name) => `tendworks_${name}`)).not.toContain(network);
 });

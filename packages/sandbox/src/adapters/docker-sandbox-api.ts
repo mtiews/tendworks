@@ -23,6 +23,12 @@ export interface DockerSandboxApiOptions {
   url: string;
   /** Extra labels for every sandbox container, e.g. to find a test run's containers. */
   labels?: Record<string, string>;
+  /**
+   * The Docker network sandboxes run on, created on first use as a bridge without
+   * traffic between its containers. Keep it apart from the platform's own networks, so
+   * a sandbox cannot reach the platform's services. Without it, Docker's default bridge.
+   */
+  network?: string;
 }
 
 const runtimes: Record<IsolationClass, string> = { container: "runc", gvisor: "runsc" };
@@ -108,7 +114,7 @@ function upgrade(target: URL, body: unknown): Promise<Socket> {
  * Sandbox API on the Docker Engine API. Needs only the socket proxy sections
  * CONTAINERS, EXEC, VOLUMES and POST; images must already be on the host.
  */
-export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOptions): SandboxApi {
+export function createDockerSandboxApi({ url, labels = {}, network }: DockerSandboxApiOptions): SandboxApi {
   const call = (method: string, path: string, init: { json?: unknown; body?: Uint8Array; contentType?: string } = {}) => {
     const headers: Record<string, string> = {};
     let body: RequestInit["body"];
@@ -150,9 +156,35 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
     return ((await created.json()) as { Id: string }).Id;
   };
 
+  // Created once per adapter; a failed attempt is retried with the next sandbox.
+  let networkReady: Promise<void> | undefined;
+  const ensureNetwork = (name: string) =>
+    (networkReady ??= (async () => {
+      const found = await call("GET", `/networks/${encodeURIComponent(name)}`);
+      await found.body?.cancel();
+      if (found.ok) return;
+      if (found.status !== 404) throw await failure(found, `finding the sandbox network ${name}`);
+      const created = await call("POST", "/networks/create", {
+        json: {
+          Name: name,
+          Driver: "bridge",
+          // No traffic between sandboxes; each one only reaches the outside.
+          Options: { "com.docker.network.bridge.enable_icc": "false" },
+          Labels: { ...labels, "dev.tendworks.sandbox-network": "true" },
+        },
+      });
+      // 409: another adapter created it meanwhile.
+      if (!created.ok && created.status !== 409) throw await failure(created, `creating the sandbox network ${name}`);
+      await created.body?.cancel();
+    })().catch((error: unknown) => {
+      networkReady = undefined;
+      throw error;
+    }));
+
   const api: SandboxApi = {
     async create(template, { volumes = [] } = {}) {
       assertVolumeMounts(volumes);
+      if (network !== undefined) await ensureNetwork(network);
       const id = newSandboxId();
       const isolationClass = template.spec.isolationClass ?? defaultIsolationClass;
       const { cpus, memoryMb, pids = 1024 } = template.spec.resources ?? {};
@@ -177,6 +209,7 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
               Target: mountPath(path),
               VolumeOptions: { Labels: { ...labels, "dev.tendworks.volume": volume } },
             })),
+            ...(network === undefined ? {} : { NetworkMode: network }),
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],
             PidsLimit: pids,

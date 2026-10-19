@@ -63,7 +63,7 @@ for (const profile of profiles) {
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl }),
+  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
@@ -96,8 +96,10 @@ bus.subscribe("orchestration.run-events", createRunEventForwarder(engine).handle
 // `call: http` tasks may only reach the control plane API; workflows find it as
 // `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
 // repository token lives in the server bundle, never in this one.
+// They authenticate with the platform's API token, which the executor adds; it never
+// reaches a workflow definition or a sandbox.
 const controlPlaneUrl = env("TEND_CONTROL_PLANE_URL");
-const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl });
+const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl, apiToken: env("TEND_API_TOKEN") });
 const runtime = { name: "tendworks", metadata: { controlPlaneUrl: controlPlaneUrl.replace(/\/+$/, "") } };
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents, http }) });
 
