@@ -1,0 +1,10 @@
+{
+  "name": "tendworks-sandbox-scripted-acp",
+  "private": true,
+  "description": "Test image: a scripted ACP agent in place of the Claude Code adapter, for the end-to-end restart test. No model, no credentials. Same ACP SDK as the agent runtime.",
+  "type": "module",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.7.0",
+    "zod": "4.6.5"
+  }
+}

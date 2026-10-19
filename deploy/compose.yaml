@@ -151,6 +151,14 @@ services:
     build:
       context: ../images/sandbox-claude-code
 
+  # Test image of the end-to-end restart test (a scripted ACP agent, no model). Never
+  # started by compose; `pnpm e2e` builds it.
+  sandbox-scripted-acp:
+    profiles: [test-images]
+    image: tendworks/sandbox-scripted-acp:test
+    build:
+      context: ../images/sandbox-scripted-acp
+
 networks:
   sandbox-backend:
     internal: true

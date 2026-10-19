@@ -24,6 +24,11 @@ jobs:
         run: pnpm test:integration
       - name: End-to-end tests on the compose stack
         run: pnpm e2e
+        env:
+          # The restart test runs the Claude Code harness against a scripted ACP agent; the
+          # harness needs some credential selected, which the scripted agent ignores.
+          TEND_CLAUDE_CODE_CREDENTIAL: api-key
+          ANTHROPIC_API_KEY: scripted-agent-needs-no-key
       - name: Compose logs on failure
         if: failure()
         run: docker compose -f deploy/compose.yaml logs
