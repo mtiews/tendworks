@@ -14,7 +14,8 @@
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "e2e": "docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp && docker compose -f deploy/compose.yaml up -d --build --wait && vitest run --project e2e",
-    "check": "pnpm typecheck && pnpm lint && pnpm test"
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "devDependencies": {
     "@types/node": "24.19.2",

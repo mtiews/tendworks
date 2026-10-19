@@ -5,7 +5,7 @@ const environment = {
   TENDWORKS_AGENT_GITHUB_TOKEN: "agent-token",
   TENDWORKS_AGENT_EMPTY: "",
   TENDWORKS_PLATFORM_GITHUB_TOKEN: "platform-token",
-  TEND_DATABASE_URL: "postgres://tend:secret@postgres/tend",
+  TEND_DATABASE_URL: "postgres://tend:secret@postgres/tend", // betterleaks:allow test fixture
 };
 
 describe("secret references for agents", () => {

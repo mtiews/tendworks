@@ -1,0 +1,11 @@
+#!/bin/sh
+# Scan the staged changes for secrets with Betterleaks before every commit.
+# This guards against accidents, not against intent: `git commit --no-verify` skips it.
+# Known dummy values are marked inline with `betterleaks:allow` and a reason.
+
+if ! command -v betterleaks >/dev/null 2>&1; then
+  echo "pre-commit: betterleaks is not on PATH. Install it, or commit with --no-verify if you must." >&2
+  exit 1
+fi
+
+exec betterleaks git . --staged --redact --no-banner --allow-signature=betterleaks:allow
