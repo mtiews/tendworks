@@ -5,8 +5,11 @@ import {
   createAgentRuntime,
   createClaudeCodeHarness,
   createFileTranscriptStore,
+  createPostgresTaskStore,
   loadAgentProfiles,
+  migrateAgentRuntimeStore,
 } from "@tendworks/agent-runtime";
+import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi } from "@tendworks/health";
 import {
   createExecutionEngineProbe,
@@ -54,14 +57,19 @@ const claudeCode = createClaudeCodeHarness({
 const engineAddress = env("TEND_EXECUTION_ENGINE_ADDRESS");
 const pool = new pg.Pool({ connectionString: env("TEND_DATABASE_URL") });
 await migrateOrchestrationStore(pool);
+await migrateAgentRuntimeStore(pool);
+await migrateEventBus(pool);
 
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
+// Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
 const agents = createAgentRuntime({
   profiles,
   harnesses: { "claude-code": claudeCode },
+  store: createPostgresTaskStore({ pool }),
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
-const store = createPostgresRunStore({ pool });
+// Run and step events go onto the event bus in the transaction of the run state they describe.
+const store = createPostgresRunStore({ pool, publisher: createPostgresEventBus({ pool }) });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents }) });
 

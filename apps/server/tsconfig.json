@@ -13,6 +13,15 @@
   "references": [
     {
       "path": "../../packages/control-plane"
+    },
+    {
+      "path": "../../packages/event-bus"
+    },
+    {
+      "path": "../../packages/human-interaction"
+    },
+    {
+      "path": "../../packages/trigger-gateway"
     }
   ]
 }

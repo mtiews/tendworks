@@ -2,7 +2,7 @@ import { createHealthApi } from "@tendworks/health";
 import { describe, expect, it } from "vitest";
 import { createControlPlaneApi, createInMemoryRuns, type HealthProbe, type PlatformStatus } from "./index.js";
 
-const noRuns = { configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [] }, runs: createInMemoryRuns() };
+const noRuns = { configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [] }, runs: createInMemoryRuns() };
 
 const healthy = (name: string): HealthProbe => ({ name, check: async () => ({ status: "healthy" }) });
 

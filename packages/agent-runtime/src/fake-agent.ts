@@ -2,15 +2,16 @@ import type { Harness } from "./harness.js";
 
 /**
  * The fake agent (harness `fake`): answers deterministically as its profile says,
- * without a sandbox or a model, and costs nothing. Stands in for a real agent in tests
- * and demos.
+ * without a sandbox or a model, and costs nothing. A resumed task only works for the
+ * time that is left. Stands in for a real agent in tests and demos.
  */
 export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<void> }): Harness {
   return {
-    async run({ taskId, profile, message }, observer) {
+    async run({ taskId, profile, message, elapsedMs = 0 }, observer) {
       const { outcome = "completed", delaySeconds = 0, message: reply } = profile.spec.fake ?? {};
       observer.progress("working");
-      if (delaySeconds > 0) await sleep(delaySeconds * 1_000);
+      const remainingMs = delaySeconds * 1_000 - elapsedMs;
+      if (remainingMs > 0) await sleep(remainingMs);
 
       const cost = { amount: 0, currency: "USD" };
       if (outcome === "failed") {

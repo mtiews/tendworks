@@ -9,6 +9,7 @@
     "@tendworks/control-plane": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
     "@tendworks/shared": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*",
     "openapi-fetch": "0.17.0"
   }
 }

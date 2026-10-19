@@ -8,6 +8,9 @@ type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type Cost = ControlPlane.components["schemas"]["cost"];
+type TriggerList = ControlPlane.components["schemas"]["triggerList"];
+type Duration = ControlPlane.components["schemas"]["duration"];
+type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -81,6 +84,36 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatRun));
     });
 
+  program
+    .command("trigger")
+    .description("inspect triggers")
+    .command("list")
+    .description("list trigger bindings with their next scheduled execution")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/triggers").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatTriggerList));
+    });
+
+  const notification = program.command("notification").description("inspect notifications");
+
+  notification
+    .command("list")
+    .description("list notifications, newest first, with their delivery status")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/notifications").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatNotificationList));
+    });
+
   try {
     await program.parseAsync(args, { from: "user" });
     return exitCode;
@@ -131,6 +164,20 @@ function formatRunList(list: RunList): string {
   return table(rows);
 }
 
+function formatTriggerList(list: TriggerList): string {
+  const rows = [
+    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION"],
+    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt]),
+  ];
+  return table(rows);
+}
+
+/** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
+function formatDuration(duration: Duration): string {
+  const units = [["days", "d"], ["hours", "h"], ["minutes", "m"], ["seconds", "s"]] as const;
+  return units.map(([unit, suffix]) => (duration[unit] ? `${duration[unit]}${suffix}` : "")).join("") || "0s";
+}
+
 function formatRun(run: Run): string {
   const describe = (error: WorkflowError) => `${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`;
   const fields = [
@@ -166,6 +213,20 @@ function totalCost(costs: Cost[]): string {
   const sums = new Map<string, number>();
   for (const { amount, currency } of costs) sums.set(currency, (sums.get(currency) ?? 0) + amount);
   return [...sums].map(([currency, amount]) => formatCost({ amount, currency })).join(", ");
+}
+
+function formatNotificationList(list: NotificationList): string {
+  const rows = [
+    ["CREATED", "KIND", "RUN", "DELIVERY", "TITLE"],
+    ...list.items.map((n) => [
+      n.createdAt,
+      n.kind,
+      n.runId,
+      n.delivery.error ? `${n.delivery.status}: ${n.delivery.error}` : n.delivery.status,
+      n.title,
+    ]),
+  ];
+  return table(rows);
 }
 
 /** Aligns cells in columns; the last column is not padded. */

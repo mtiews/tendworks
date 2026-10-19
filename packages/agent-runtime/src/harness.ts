@@ -7,6 +7,8 @@ export interface HarnessTask {
   profile: AgentProfile.AgentProfile;
   /** The message that started the task. */
   message: A2A.Message;
+  /** How long agents already worked on the task before an interruption (0 for a new task). */
+  elapsedMs?: number;
 }
 
 export interface Cost {

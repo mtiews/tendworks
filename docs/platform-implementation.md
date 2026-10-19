@@ -87,7 +87,7 @@ Every slice ends with a working `docker compose up`. Configuration lives in `exa
 | # | Slice | Proves |
 | --- | --- | --- |
 | S0 | Scaffold: pnpm workspaces, dependency-cruiser rules, Compose with Postgres and Temporal (dev mode), empty `server` and `worker`, `tend status` | repo structure, domain boundaries |
-| S1 | `POST /runs` → minimal workflow interpreter (`do`, `call`) → A2A task → fake agent; `tend run list/get`; restart test for the workflow | control plane contract, interpreter, A2A seam, generated client, durable execution |
+| S1 | `POST /runs` → minimal workflow interpreter (`do`, `call`) → A2A task → fake agent; `tend run list/get`; restart test for the workflow; durable agent tasks resumed after a restart (ADR 0004) | control plane contract, interpreter, A2A seam, generated client, durable execution |
 | S2 | Fake agent replaced by Claude Code via ACP in a `container` sandbox (through the socket proxy); transcript and cost on a local volume; resume via `session/resume`; restart test for the agent session | sandbox API, ACP, agent runtime |
 | S3 | Time trigger plus GitHub polling for `ready-for-agent` in the playground repo | trigger gateway, TriggerBinding, integration port |
 | S4 | Pull request by the agent, merge as a workflow step behind `merge: auto \| ask`, event bus (Postgres outbox) with its first consumer, persisted notifications and approval requests, fake notification adapter | event bus, human interaction, milestone 1 success criterion |
@@ -98,7 +98,7 @@ Rules for the skeleton:
 - **Fakes first.** Each seam gets its fake before its real adapter; the fake stays as the second implementation of the port.
 - **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5.
 - **Interpreter grows with demand.** `listen` and `switch` are added when the merge gate needs them, test-driven.
-- **Event bus with its first consumer.** Until S4 the control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker); run and step events wait in orchestration's outbox (ADR 0003).
+- **Event bus with its first consumer.** The control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker). Run and step events go onto the event bus in the transaction of the run state (ADR 0003, ADR 0005); the first consumer is human interaction, which records a notification for every completed or failed run before delivering it.
 - **Resume is tested from S1 on**, not at the end.
 
 ## Open items

@@ -209,6 +209,22 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@tendworks/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
+      '@tendworks/human-interaction':
+        specifier: workspace:*
+        version: link:../../packages/human-interaction
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   apps/worker:
     dependencies:
@@ -218,6 +234,9 @@ importers:
       '@tendworks/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tendworks/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
       '@tendworks/health':
         specifier: workspace:*
         version: link:../../packages/health
@@ -246,12 +265,19 @@ importers:
       ajv:
         specifier: 8.20.0
         version: 8.20.0
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       yaml:
         specifier: 2.9.1
         version: 2.9.1
       zod:
         specifier: 4.6.5
         version: 4.6.5
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/control-plane:
     dependencies:
@@ -281,7 +307,15 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
-  packages/event-bus: {}
+  packages/event-bus:
+    dependencies:
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/health:
     dependencies:
@@ -292,7 +326,18 @@ importers:
         specifier: 4.13.13
         version: 4.13.13
 
-  packages/human-interaction: {}
+  packages/human-interaction:
+    dependencies:
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/mcp-platform: {}
 
@@ -363,7 +408,27 @@ importers:
         specifier: 7.13.0
         version: 7.13.0(typescript@6.0.3)
 
-  packages/trigger-gateway: {}
+  packages/trigger-gateway:
+    dependencies:
+      '@gabrielbryk/jq-ts':
+        specifier: 1.7.0
+        version: 1.7.0(typescript@6.0.3)
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
+      openapi-fetch:
+        specifier: 0.17.0
+        version: 0.17.0
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   tests/contract:
     dependencies:
@@ -379,6 +444,9 @@ importers:
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0
