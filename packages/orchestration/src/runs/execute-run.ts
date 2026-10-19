@@ -1,4 +1,5 @@
 import type { A2A, Workflow } from "@tendworks/shared";
+import type { EventInbox } from "../workflow/event-inbox.js";
 import type { HttpRequest, HttpResponse } from "../workflow/http-executor.js";
 import { runWorkflow, type RunResult, type RuntimeDescriptor, type Step } from "../workflow/interpreter.js";
 import type { RunContext } from "./run-events.js";
@@ -25,8 +26,11 @@ export interface RunActivities {
   runFinished(run: RunContext, outcome: RunOutcome): Promise<void>;
 }
 
-/** Executes a run with the interpreter, recording its progress through the activities. */
-export async function executeRun(execution: RunExecution, activities: RunActivities): Promise<void> {
+/**
+ * Executes a run with the interpreter, recording its progress through the activities.
+ * `events` holds the events delivered to the run, for its `listen` tasks.
+ */
+export async function executeRun(execution: RunExecution, activities: RunActivities, events?: EventInbox): Promise<void> {
   const run: RunContext = { runId: execution.runId, workflow: execution.workflow, traceparent: execution.traceparent };
   await activities.runStarted(run);
   const { steps: _steps, ...outcome } = await runWorkflow(execution.definition, {
@@ -34,6 +38,7 @@ export async function executeRun(execution: RunExecution, activities: RunActivit
     input: execution.input,
     executor: { sendMessage: (agent, request) => activities.sendMessage(agent, request) },
     http: { request: (request) => activities.httpRequest(request) },
+    ...(events ? { events } : {}),
     ...(execution.runtime ? { runtime: execution.runtime } : {}),
     recordStep: (step) => activities.recordStep(run, step),
   });

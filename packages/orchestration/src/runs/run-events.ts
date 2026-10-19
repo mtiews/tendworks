@@ -26,14 +26,15 @@ export interface RunContext {
   traceparent: string;
 }
 
-const SOURCE = "/tendworks/orchestration";
+/** The CloudEvent source of run and step events. */
+export const RUN_EVENT_SOURCE = "/tendworks/orchestration";
 
 function envelope(run: RunContext, id: string, time: string) {
   return {
     specversion: "1.0" as const,
     // Deterministic ids make a repeated write (retried activity) recognisable.
     id,
-    source: SOURCE,
+    source: RUN_EVENT_SOURCE,
     subject: `runs/${run.runId}`,
     time,
     datacontenttype: "application/json" as const,
