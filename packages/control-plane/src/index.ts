@@ -1,5 +1,5 @@
 export { createStoreProbe } from "./adapters/postgres-store-probe.js";
-export { createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
+export { apiTokenProblems, createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
 export { createInMemoryApprovals, type ApprovalDecision, type ApprovalRequest, type ApprovalsPort, type ApprovalStatus } from "./approvals.js";
 export { ConfigurationError, loadConfiguration, type Configuration } from "./configuration.js";
 export { createFakeMerges, type MergeOutcome, type MergeRefusal, type MergeRequest, type MergesPort, type PullRequestMerge } from "./merges.js";

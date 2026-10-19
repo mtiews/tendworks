@@ -52,11 +52,12 @@ async function tend(args: string[], extra: Run[] = []) {
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     apiToken: "test-token",
+    readToken: "test-read-token",
     runs,
   });
   let stdout = "";
   let stderr = "";
-  const exitCode = await runTend(args, {
+  const exitCode = await runTend(["--token", "test-token", ...args], {
     fetch: (request) => api.fetch(request),
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),
@@ -65,6 +66,14 @@ async function tend(args: string[], extra: Run[] = []) {
 }
 
 describe("tend run list", () => {
+  it("reads with the read-only token too, and says how to pass a token when the control plane refuses", async () => {
+    const withReadToken = await tend(["--token", "test-read-token", "run", "list"]);
+    const refused = await tend(["--token", "wrong-token", "run", "list"]);
+
+    expect(withReadToken.exitCode).toBe(0);
+    expect(refused).toEqual({ exitCode: 1, stdout: "", stderr: "tend: the control plane refused the token (HTTP 401); set TEND_API_TOKEN or pass --token\n" });
+  });
+
   it("shows runs newest first with status, workflow and start time", async () => {
     const { exitCode, stdout } = await tend(["run", "list"]);
 

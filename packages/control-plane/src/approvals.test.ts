@@ -25,7 +25,7 @@ function api(approvals?: ApprovalsPort, probes: HealthProbe[] = []) {
 
 async function call(approvals: ApprovalsPort | undefined, path: string, init?: { method: string; body: unknown }) {
   const response = await api(approvals).fetch(
-    new Request(`http://tend.test${path}`, init ? { method: init.method, body: JSON.stringify(init.body), headers: { "content-type": "application/json", authorization: "Bearer test-token" } } : {}),
+    new Request(`http://tend.test${path}`, init ? { method: init.method, body: JSON.stringify(init.body), headers: { "content-type": "application/json", authorization: "Bearer test-token" } } : { headers: { authorization: "Bearer test-token" } }),
   );
   return { status: response.status, body: await response.json() };
 }

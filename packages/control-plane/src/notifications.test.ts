@@ -18,7 +18,7 @@ async function list(notifications?: NotificationsPort) {
     runs: createInMemoryRuns(),
     ...(notifications ? { notifications } : {}),
   });
-  const response = await api.fetch(new Request("http://tend.test/notifications"));
+  const response = await api.fetch(new Request("http://tend.test/notifications", { headers: { authorization: "Bearer test-token" } }));
   return { status: response.status, body: await response.json() };
 }
 

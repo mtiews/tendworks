@@ -18,6 +18,7 @@ import type { ControlPlane } from "@tendworks/shared";
 import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
+import { readContract } from "./support/contracts.js";
 import { openApiContract } from "./support/openapi-contract.js";
 
 /*
@@ -49,6 +50,7 @@ afterAll(() => {
 const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
 const PR = "https://git.example/example/playground/pull/1";
 const API_TOKEN = "contract-test-token";
+const READ_TOKEN = "contract-test-read-token";
 const healthy = createStaticHealthProbe("store", { status: "healthy" });
 const unhealthy = createStaticHealthProbe("execution-engine", { status: "unhealthy", message: "no answer" });
 const unreachable = async (): Promise<Response> => {
@@ -63,15 +65,20 @@ function orchestration(engine?: (real: RunEngine) => RunEngine) {
   return contracts.orchestration.guard((request) => api.fetch(request));
 }
 
-function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string } = {}) {
+function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string | null } = {}) {
   const api = createControlPlaneApi({
     probes: [healthy],
     configuration,
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: orchestration() }),
     apiToken: API_TOKEN,
+    readToken: READ_TOKEN,
     ...options,
   });
-  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${token}` }, fetch: contracts.controlPlane.guard((request) => api.fetch(request)) });
+  return createClient<ControlPlane.paths>({
+    baseUrl: "http://tend.test",
+    ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
+    fetch: contracts.controlPlane.guard((request) => api.fetch(request)),
+  });
 }
 
 const unreachableOrchestration = () => createOrchestrationClient({ baseUrl: "http://worker.test", fetch: unreachable });
@@ -149,6 +156,60 @@ describe("control plane: the API token", () => {
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
 
     expect([started, merged, decided].map(({ response }) => response.status)).toEqual([401, 401, 401]);
+  });
+
+  it("refuses operations that change state with the read-only token", async () => {
+    const client = controlPlane({}, { token: READ_TOKEN });
+
+    const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
+    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+
+    expect([started, merged, decided].map(({ response }) => response.status)).toEqual([403, 403, 403]);
+  });
+
+  it("refuses reading without a token, except the platform status", async () => {
+    const client = controlPlane({}, { token: null });
+
+    const answers = await Promise.all([
+      client.GET("/runs"),
+      client.GET("/runs/{runId}", { params: { path: { runId: "r-1" } } }),
+      client.GET("/agents"),
+      client.GET("/triggers"),
+      client.GET("/notifications"),
+      client.GET("/approval-requests"),
+      client.GET("/status"),
+    ]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 200]);
+  });
+
+  it("serves reading with the read-only token", async () => {
+    const client = controlPlane({ notifications: createInMemoryNotificationStore(), approvals: createApprovals({ store: createInMemoryApprovalStore() }) }, { token: READ_TOKEN });
+
+    const answers = await Promise.all([client.GET("/runs"), client.GET("/agents"), client.GET("/triggers"), client.GET("/notifications"), client.GET("/approval-requests")]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([200, 200, 200, 200, 200]);
+  });
+
+  it("declares the API token for every operation but the status, and the read-only token for reading only", () => {
+    const document = readContract("openapi/control-plane.yaml") as {
+      security?: Record<string, string[]>[];
+      paths: Record<string, Record<string, { security?: Record<string, string[]>[]; responses: Record<string, unknown> }>>;
+    };
+    const declared = Object.entries(document.paths).flatMap(([path, item]) =>
+      Object.entries(item).map(([method, operation]) => ({
+        operation: `${method.toUpperCase()} ${path}`,
+        schemes: (operation.security ?? document.security ?? []).flatMap((requirement) => Object.keys(requirement)).sort(),
+        refusals: ["401", "403"].filter((status) => status in operation.responses),
+      })),
+    );
+
+    for (const { operation, schemes, refusals } of declared) {
+      if (operation === "GET /status") expect({ operation, schemes, refusals }).toEqual({ operation, schemes: [], refusals: [] });
+      else if (operation.startsWith("GET ")) expect({ operation, schemes, refusals }).toEqual({ operation, schemes: ["apiToken", "readToken"], refusals: ["401"] });
+      else expect({ operation, schemes, refusals }).toEqual({ operation, schemes: ["apiToken"], refusals: ["401", "403"] });
+    }
   });
 });
 

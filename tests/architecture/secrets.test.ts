@@ -31,6 +31,16 @@ it("never lets an agent profile hand the worker's API token into a sandbox", () 
   expect(environment("worker").filter((name) => agentSecrets.resolve(name) !== undefined)).toEqual(["TENDWORKS_AGENT_GITHUB_TOKEN"]);
 });
 
+it("never lets an agent profile hand the read-only token into a sandbox", () => {
+  // The server checks it; only the platform MCP server's sessions may get it, passed by the
+  // agent runtime itself (ADR 0016), never through a profile's secret references.
+  expect(environment("server")).toContain("TEND_API_READ_TOKEN");
+  const everything = Object.fromEntries([...environment("server"), ...environment("worker")].map((name) => [name, "value"]));
+
+  expect(createSecretResolver("agent", everything).resolve("TEND_API_READ_TOKEN")).toBeUndefined();
+  expect(createSecretResolver("agent", everything).resolve("TEND_API_TOKEN")).toBeUndefined();
+});
+
 it("starts sandboxes on a network of their own, not on one of the stack's", () => {
   const network = compose.services.worker?.environment?.TEND_SANDBOX_NETWORK;
   const stack = ["default", ...Object.keys(compose.networks ?? {}), ...Object.values(compose.networks ?? {}).flatMap(({ name }) => (name ? [name] : []))];
