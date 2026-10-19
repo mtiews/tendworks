@@ -149,3 +149,9 @@ wait_triggered_run() {
 
 # Prints a field of pull request $1 (URL) from GitHub, e.g. `pr_field <url> state`.
 pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
+
+# True when the policy ask-before-merge lists develop-issue under spec.workflows (comments
+# in the file do not count).
+asks_for_develop_issue() {
+  grep -E '^[[:space:]]*workflows:' examples/config/policies/ask-before-merge.yaml | grep -q 'develop-issue'
+}

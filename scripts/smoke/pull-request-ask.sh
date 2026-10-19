@@ -12,7 +12,7 @@ source "$(dirname "$0")/lib.sh"
 
 ISSUE=${1:?usage: $0 <issue number in $PLAYGROUND> [approve|reject]}
 DECISION=${2:-}
-if ! grep -q "develop-issue" examples/config/policies/ask-before-merge.yaml; then
+if ! asks_for_develop_issue; then
   echo "ask-before-merge does not list develop-issue, so the merge would not ask."
   echo "Add it under workflows in examples/config/policies/ask-before-merge.yaml and restart the server."
   exit 1

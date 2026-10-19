@@ -12,7 +12,7 @@
 source "$(dirname "$0")/lib.sh"
 
 ISSUE=${1:?usage: $0 <issue number in $PLAYGROUND>}
-if grep -q "develop-issue" examples/config/policies/ask-before-merge.yaml; then
+if asks_for_develop_issue; then
   echo "ask-before-merge lists develop-issue, so the merge would wait for approval."
   echo "Remove it there and restart the server, or use scripts/smoke/pull-request-ask.sh."
   exit 1
