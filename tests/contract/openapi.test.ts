@@ -291,6 +291,18 @@ describe("control plane: chats, through the agent runtime", () => {
     expect((await events(stream.data)).map((event) => event.id ?? event.event)).toEqual(["2", "3", "4", "5", "6", "7", "8", "end"]);
   });
 
+  it("starts a chat with a repository as its workspace, and refuses a repository with credentials in its URL", async () => {
+    const { client } = chatting();
+
+    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://git.example/acme/app.git" } });
+    const refused = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://user:token@git.example/acme/app.git" } });
+
+    expect(started.response.status).toBe(201);
+    expect(started.data).toMatchObject({ repository: "https://git.example/acme/app.git" });
+    expect(refused.response.status).toBe(400);
+    expect(refused.error).toMatchObject({ title: "Invalid repository" });
+  });
+
   it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
     const { client, of } = chatting();
     const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });

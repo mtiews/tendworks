@@ -122,6 +122,10 @@ const fetch = (request: Request) => {
 const port = Number(env("PORT", "8081"));
 const server = serve({ fetch, port }, () => console.log(`worker internal API listening on :${port}`));
 
+// Chats have no run whose engine would resend their message after a restart: the agent
+// runtime takes up their interrupted turns and idle times itself (ADR 0015).
+agents.resumeChats().catch((error: unknown) => console.error("cannot resume chats:", error));
+
 const stopped = runWorker.run().catch((error: unknown) => {
   console.error("run worker failed:", error);
   process.exit(1);

@@ -217,12 +217,18 @@ export function createControlPlaneApi({
   app.post("/chats", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     const text = textOf(body);
-    if (typeof body?.agent !== "string" || text === undefined) {
-      return problem(400, "Invalid request", "the body must be { agent, text } with the name of an agent profile that allows chats and the first message");
+    const repository = body?.repository;
+    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
+      return problem(
+        400,
+        "Invalid request",
+        "the body must be { agent, text, repository? } with the name of an agent profile that allows chats, the first message and a clone URL",
+      );
     }
     const agent = body.agent;
     return throughRuntime(async (runtime) => {
-      const chat = await runtime.startChat({ agent, text });
+      // The agent runtime checks the repository: it owns the workspace rules.
+      const chat = await runtime.startChat({ agent, text, ...(repository === undefined ? {} : { repository }) });
       return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
     });
   });

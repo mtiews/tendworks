@@ -229,11 +229,13 @@ $defs:
       message that starts a task: the agent's workspace is a checkout of `repository` on
       `branch`. An existing branch is checked out, a missing one is created from the
       repository's default branch, so a task sent again for the same branch continues
-      where the last attempt left off. The agent reaches the repository with the
-      credentials its agent profile passes into the sandbox (`spec.env`).
+      where the last attempt left off. Without `branch` (a chat's workspace), the
+      checkout stays on the repository's default branch. The agent reaches the
+      repository with the credentials its agent profile passes into the sandbox
+      (`spec.env`); a public repository needs none.
     type: object
     additionalProperties: false
-    required: [repository, branch]
+    required: [repository]
     properties:
       repository:
         type: string

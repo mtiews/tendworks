@@ -3,7 +3,8 @@ import type { A2A, AgentRuntime as Contract } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { AgentRuntime } from "./agent-runtime.js";
 import { AgentNotFoundError } from "./agent-tasks.js";
-import { ChatBusyError, ChatEndedError, ChatNotAllowedError, type Chat } from "./chats.js";
+import { ChatBusyError, ChatEndedError, ChatNotAllowedError, InvalidRepositoryError, type Chat } from "./chats.js";
+import { WORKSPACE } from "./workspace.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 type Schemas = Contract.components["schemas"];
@@ -34,17 +35,21 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
   const noChat = (chatId: string) => problem(404, "Chat not found", `no chat '${chatId}' exists`);
 
   app.post("/chats", async (c) => {
-    const body = (await c.req.raw.clone().json().catch(() => undefined)) as { agent?: unknown } | undefined;
+    const body = (await c.req.raw.clone().json().catch(() => undefined)) as { agent?: unknown; repository?: unknown } | undefined;
     const text = await textOf(c.req.raw);
-    if (typeof body?.agent !== "string" || text === undefined) {
-      return problem(400, "Invalid request", "the body must be { agent, text } with the name of an agent profile and the first message");
+    const repository = body?.repository;
+    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
+      return problem(400, "Invalid request", "the body must be { agent, text, repository? } with the name of an agent profile, the first message and a clone URL");
     }
     try {
-      const chat = await runtime.startChat(body.agent, userMessage(text));
+      // The repository becomes the workspace of the chat's task (ADR 0010), on its default branch.
+      const message = userMessage(text);
+      const chat = await runtime.startChat(body.agent, repository === undefined ? message : { ...message, metadata: { [WORKSPACE]: { repository } } });
       return c.json(chat satisfies Chat, 201, { location: `/chats/${chat.id}` });
     } catch (error) {
       if (error instanceof AgentNotFoundError) return problem(400, "Unknown agent profile", error.message);
       if (error instanceof ChatNotAllowedError) return problem(400, "Chat not allowed", error.message);
+      if (error instanceof InvalidRepositoryError) return problem(400, "Invalid repository", error.message);
       throw error;
     }
   });

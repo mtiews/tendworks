@@ -1,7 +1,7 @@
 export { createAgentRuntime, RESUMED, type AgentRuntime, type AgentRuntimeOptions, type HarnessName } from "./agent-runtime.js";
 export { createAgentRuntimeApi, type AgentRuntimeApiOptions } from "./api.js";
 export type { AgentSession } from "./sessions.js";
-export { ChatBusyError, ChatEndedError, ChatNotAllowedError, type Chat } from "./chats.js";
+export { ChatBusyError, ChatEndedError, ChatNotAllowedError, InvalidRepositoryError, type Chat } from "./chats.js";
 export { chatEnded, chatStarted, type ChatEvent, type ChatEventPublisher } from "./chat-events.js";
 export { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
 export { AgentProfileError, loadAgentProfiles, type LoadedAgentProfile } from "./agent-profiles.js";
