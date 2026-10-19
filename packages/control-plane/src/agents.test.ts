@@ -71,7 +71,7 @@ describe("agents API: active agent sessions", () => {
     expect(body.items?.find(({ name }) => name === "assistant")?.sessions).toEqual([expect.objectContaining({ kind: "chat", chat: chat.id, status: "input-required" })]);
   });
 
-  it("answers 503 when the agent runtime cannot be reached or is not configured", async () => {
+  it("lists the profiles without sessions when the agent runtime cannot be reached or is not configured", async () => {
     const unreachable = createAgentRuntimeClient({
       baseUrl: "http://worker.test",
       fetch: async () => {
@@ -79,7 +79,16 @@ describe("agents API: active agent sessions", () => {
       },
     });
 
-    expect(await setup(unreachable)()).toMatchObject({ status: 503, body: { title: "Agent runtime unavailable" } });
-    expect(await setup("none")()).toMatchObject({ status: 503, body: { title: "Agent runtime unavailable" } });
+    const withoutSessions = {
+      status: 200,
+      body: {
+        items: [
+          { name: "assistant", harness: "fake" },
+          { name: "developer", harness: "fake" },
+        ],
+      },
+    };
+    expect(await setup(unreachable)()).toEqual(withoutSessions);
+    expect(await setup("none")()).toEqual(withoutSessions);
   });
 });

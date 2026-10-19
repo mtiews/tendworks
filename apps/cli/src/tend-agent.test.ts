@@ -51,6 +51,18 @@ describe("tend agent list", () => {
     ]);
   });
 
+  it("shows ? as the number of sessions while the agent runtime cannot be reached", async () => {
+    const api = createControlPlaneApi({ probes: [], configuration: configuration(), apiToken: "test-token", runs: createInMemoryRuns() });
+
+    const { exitCode, stdout } = await tend(api, ["agent", "list"]);
+
+    expect(exitCode).toBe(0);
+    expect(stdout.trimEnd().split("\n").slice(1)).toEqual([
+      expect.stringMatching(/^developer\s+claude-code\s+claude-code\s+tdd\s+\?$/),
+      expect.stringMatching(/^reviewer\s+fake\s+\?$/),
+    ]);
+  });
+
   it("prints the agent profiles with their sessions as a document with -o json and -o yaml, naming secrets but never their values", async () => {
     const { api, step, chat } = await busy();
     const agents = [

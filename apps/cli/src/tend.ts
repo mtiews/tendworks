@@ -374,7 +374,7 @@ function formatOrigin(origin: Run["startedBy"], { url = false }: { url?: boolean
 function formatAgentList(list: AgentList): string {
   const rows = [
     ["NAME", "HARNESS", "SANDBOX", "SKILLS", "SESSIONS"],
-    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", "), String(agent.sessions.length)]),
+    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", "), agent.sessions ? String(agent.sessions.length) : "?"]),
   ];
   return table(rows);
 }

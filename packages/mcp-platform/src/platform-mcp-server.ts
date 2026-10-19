@@ -83,7 +83,7 @@ function toolsOn(client: ControlPlaneClient): McpServer {
     {
       title: "List agents",
       description:
-        "Lists the configured agent profiles with the agent sessions working right now: steps of runs (with run and step) and chats. An agent is running when it has a session.",
+        "Lists the configured agent profiles with the agent sessions working right now: steps of runs (with run and step) and chats. An agent is running when it has a session; a profile without `sessions` means the platform cannot tell right now.",
       annotations: readOnly,
     },
     async () => {

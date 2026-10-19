@@ -305,26 +305,25 @@ export function createControlPlaneApi({
     });
   });
 
-  app.get("/agents", async (c) =>
-    throughRuntime(async (runtime) => {
-      // Who works right now lives in the agent runtime; the profiles come from the configuration.
-      const sessions = await runtime.listSessions();
-      const items = configuration.agentProfiles
-        .map(({ metadata, spec }): Schemas["Agent"] => {
-          const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
-          return {
-            name: metadata.name,
-            harness: spec.harness,
-            ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
-            ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
-            ...(secrets.length > 0 ? { secrets } : {}),
-            sessions: sessions.filter((session) => session.agent === metadata.name),
-          };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-      return c.json({ items } satisfies Schemas["AgentList"], 200);
-    }),
-  );
+  app.get("/agents", async (c) => {
+    // Who works right now lives in the agent runtime; the profiles come from the configuration,
+    // so they are listed also when the agent runtime cannot be reached, without sessions then.
+    const sessions = await agentRuntime?.listSessions().catch(() => undefined);
+    const items = configuration.agentProfiles
+      .map(({ metadata, spec }): Schemas["Agent"] => {
+        const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
+        return {
+          name: metadata.name,
+          harness: spec.harness,
+          ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
+          ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
+          ...(secrets.length > 0 ? { secrets } : {}),
+          ...(sessions ? { sessions: sessions.filter((session) => session.agent === metadata.name) } : {}),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ items } satisfies Schemas["AgentList"], 200);
+  });
 
   app.get("/triggers", async (c) => {
     let items;
