@@ -4,10 +4,132 @@ info:
   version: 0.1.0
   description: >-
     Internal API of the agent runtime, served by the worker bundle. The control plane
-    reads agent sessions through it; it is never published. Every agent session belongs
-    to one A2A task (a run's step or, later, a chat), so sessions are addressed by their
-    task id.
+    reads agent sessions and leads chats through it; it is never published. Every agent
+    session belongs to one A2A task (a run's step or a chat), so sessions are addressed by
+    their task id; a chat's id is its task's id.
 paths:
+  /chats:
+    post:
+      operationId: startChat
+      summary: Start a chat with an agent profile
+      description: >-
+        Creates the chat's A2A task and hands the first message to the agent; answers at
+        once with the chat in `working` while the first turn runs. Only profiles with
+        `spec.chat` allow chats. Emits `chat.started`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/chat.schema.yaml#/$defs/startChatRequest"
+      responses:
+        "201":
+          description: The chat, working on its first turn.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "400":
+          description: >-
+            The body is invalid, no such agent profile is configured, or the profile does
+            not allow chats.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listChats
+      summary: List chats, the most recently started first
+      responses:
+        "200":
+          description: All chats, ended ones included.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chatList"
+  /chats/{chatId}:
+    get:
+      operationId: getChat
+      summary: Get a chat
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The chat.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/messages:
+    post:
+      operationId: sendChatMessage
+      summary: Send the next message of a chat
+      description: >-
+        A2A `SendMessage` to the chat's task, which waits in `input-required`: the agent
+        starts its next turn in the same agent session; answers at once with the chat in
+        `working`. Messages are serialized: while a turn runs, a message is refused.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/chat.schema.yaml#/$defs/chatMessageRequest"
+      responses:
+        "200":
+          description: The chat, working on the turn.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "400":
+          description: The body is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: A turn is still running, or the chat has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/end:
+    post:
+      operationId: endChat
+      summary: End a chat
+      description: >-
+        Ends the chat for good, also while a turn runs: destroys its sandbox and deletes
+        its volumes; the transcript stays. Emits `chat.ended`. Ending an ended chat
+        changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The ended chat.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /tasks/{taskId}/transcript:
     get:
       operationId: getTaskTranscript
@@ -75,6 +197,12 @@ paths:
                 $ref: "#/components/schemas/Problem"
 components:
   parameters:
+    ChatId:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
     LastEventId:
       name: Last-Event-ID
       in: header

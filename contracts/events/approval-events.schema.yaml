@@ -12,6 +12,7 @@ $defs:
     description: An approval request was created; the run waits for its decision.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, runid, data]
     properties:
@@ -24,6 +25,7 @@ $defs:
     description: An approval request was approved or rejected.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, runid, data]
     properties:

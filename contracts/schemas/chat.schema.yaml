@@ -1,0 +1,91 @@
+$id: https://tendworks.dev/schemas/v1/schemas/chat.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Chat
+description: >-
+  A chat (ADR 0015): an agent session a human starts and leads directly, without a run.
+  Behind it the agent runtime keeps one A2A task that waits in `input-required` between
+  turns; the chat's id is that task's id. All state lives on the platform, so any client
+  can read it, follow its transcript and send the next message.
+$ref: '#/$defs/chat'
+$defs:
+  chat:
+    title: Chat
+    type: object
+    additionalProperties: false
+    required: [id, agent, status, startedAt, lastActivityAt]
+    properties:
+      id:
+        type: string
+        description: Id of the chat, the id of its A2A task.
+      agent:
+        type: string
+        description: Name of the agent profile the chat is held with.
+      status:
+        $ref: '#/$defs/chatStatus'
+      startedAt:
+        type: string
+        format: date-time
+      lastActivityAt:
+        type: string
+        format: date-time
+        description: When a turn last started or ended, or the chat ended.
+      endedAt:
+        type: string
+        format: date-time
+        description: When the chat ended or failed; absent while it is open.
+      message:
+        type: string
+        description: >-
+          The agent's last answer while the chat waits for the next message, or why the
+          chat failed. Absent while a turn runs.
+      cost:
+        $ref: './run.schema.yaml#/$defs/cost'
+        description: What the chat's turns cost so far, as its harness reports it.
+      transcript:
+        type: string
+        description: >-
+          Reference to the transcript of the chat's agent session; read it through the
+          chat's transcript endpoints.
+  chatStatus:
+    title: ChatStatus
+    description: >-
+      `working`: the agent works on a turn, a further message is refused.
+      `input-required`: the agent ended its turn and waits for the next message.
+      `ended`: the human ended the chat; its sandbox and volumes are gone, the transcript
+      stays. `failed`: the agent session failed for good; cleaned up like an ended chat.
+    type: string
+    enum: [working, input-required, ended, failed]
+  chatList:
+    title: ChatList
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        description: Chats, the most recently started first.
+        items:
+          $ref: '#/$defs/chat'
+  startChatRequest:
+    title: StartChatRequest
+    type: object
+    additionalProperties: false
+    required: [agent, text]
+    properties:
+      agent:
+        type: string
+        description: Name of an agent profile that allows chats (`spec.chat`).
+      text:
+        type: string
+        minLength: 1
+        description: The first message to the agent.
+  chatMessageRequest:
+    title: ChatMessageRequest
+    type: object
+    additionalProperties: false
+    required: [text]
+    properties:
+      text:
+        type: string
+        minLength: 1
+        description: The next message to the agent.

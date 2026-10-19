@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { createAgentRuntime } from "@tendworks/agent-runtime";
+import { createAgentRuntime, createInMemoryTaskStore } from "@tendworks/agent-runtime";
 import { loadConfiguration } from "@tendworks/control-plane";
 import { createApprovals, createFakePullRequests, createInMemoryApprovalStore, createMergeGate } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
@@ -117,5 +117,38 @@ describe("events the domains emit", () => {
 
     expect(approvals.published.map((event) => event.type)).toEqual(["dev.tendworks.approval.requested", "dev.tendworks.approval.decided"]);
     expectValid(approvals.published);
+  });
+
+  it("agent runtime: chat.started and chat.ended, without a run", async () => {
+    const store = createInMemoryTaskStore();
+    const agents = createAgentRuntime({ profiles: configuration.agentProfiles, store, sleep: async () => {} });
+
+    const chat = await agents.startChat("fake-assistant", { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "Hello" }] });
+    await agents.endChat(chat.id);
+
+    expect(store.published.map((event) => event.type)).toEqual(["dev.tendworks.chat.started", "dev.tendworks.chat.ended"]);
+    expect(store.published.every((event) => !("runid" in event) && event.subject === `chats/${chat.id}`)).toBe(true);
+    expectValid(store.published);
+  });
+});
+
+describe("the event envelope", () => {
+  const envelope = contractSchema("events/cloudevent.schema.yaml");
+  const base = {
+    specversion: "1.0",
+    id: "x",
+    source: "/tendworks/test",
+    time: "2026-10-19T10:00:00Z",
+    datacontenttype: "application/json",
+    traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+    data: {},
+  };
+
+  it("requires the run of every event but a chat's, which names its chat in the subject instead", () => {
+    expect(envelope({ ...base, type: "dev.tendworks.run.started", subject: "runs/r-1" })).toBe(false);
+    expect(envelope({ ...base, type: "dev.tendworks.run.started", subject: "runs/r-1", runid: "r-1" })).toBe(true);
+    expect(envelope({ ...base, type: "dev.tendworks.chat.started", subject: "chats/c-1" })).toBe(true);
+    expect(envelope({ ...base, type: "dev.tendworks.chat.started" })).toBe(false);
+    expect(envelope({ ...base, type: "dev.tendworks.chat.started", subject: "chats/c-1", runid: "r-1" })).toBe(false);
   });
 });

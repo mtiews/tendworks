@@ -127,11 +127,12 @@ From the start, the model is built as "steps that consume and produce artifacts,
 - agent output (messages, tool calls) is not an event: clients follow it as transcript entries through the API (ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus)); the bus carries only lifecycle events of agent sessions and chats
 - `agent.input_required` — agent needs an answer
 - `approval.requested`, `approval.decided`, `approval.expired`
+- `chat.started`, `chat.ended` — a human started or ended a chat (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)); no output of the agent
 - `artifact.created`
 - `sandbox.created`, `sandbox.snapshotted`, `sandbox.destroyed`
 - `config.change_proposed`, `config.change_applied`
 
-Every event carries `runid` and `stepid` as CloudEvents extension attributes plus the W3C `traceparent`. This lets events, logs and traces of a run be joined without knowing their producers.
+Every event of a run carries `runid` (and `stepid` for a step) as CloudEvents extension attributes plus the W3C `traceparent`. This lets events, logs and traces of a run be joined without knowing their producers. A chat belongs to no run: its events carry neither `runid` nor `stepid`, name the chat in the CloudEvents `subject` (`chats/<chatId>`) and share the trace the chat started.
 
 **Additions from the factory validation**
 

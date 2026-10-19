@@ -68,6 +68,8 @@ properties:
           Whether the harness may add AI attribution (co-author trailers, generated-with
           lines, session links) to commits and pull requests. The default `true` keeps the
           harness default; `false` turns attribution off.
+      chat:
+        $ref: '#/$defs/chatSettings'
       env:
         type: object
         title: AgentEnvironment
@@ -81,6 +83,25 @@ properties:
         additionalProperties:
           $ref: '#/$defs/secretRef'
 $defs:
+  chatSettings:
+    title: AgentChatSettings
+    description: >-
+      Allows chats with the profile (ADR 0015): a human can start an agent session with it
+      directly and lead it turn by turn. Without it the profile only takes tasks from
+      workflows, so nobody can steer an agent with push rights past workflow and merge
+      gate. Give it only to profiles whose credentials keep a chat inside its workspace.
+    type: object
+    additionalProperties: false
+    properties:
+      idleMinutes:
+        type: integer
+        minimum: 1
+        maximum: 1440
+        default: 5
+        description: >-
+          How long a chat may wait for the human's next message before its sandbox is
+          destroyed; the volumes stay, and the next message resumes the session in a new
+          sandbox.
   secretRef:
     title: AgentSecretRef
     description: >-
