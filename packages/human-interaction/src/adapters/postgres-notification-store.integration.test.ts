@@ -2,7 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 import { afterAll, beforeAll } from "vitest";
+import type { ApprovalEvent } from "../approvals/approval-store.js";
+import { describeApprovalStore } from "../approvals/approval-store.suite.js";
 import { describeNotificationStore } from "../notification-store.suite.js";
+import { createPostgresApprovalStore } from "./postgres-approval-store.js";
 import { createPostgresNotificationStore, migrateHumanInteractionStore } from "./postgres-notification-store.js";
 
 /* Runs the shared notification store suite against a throwaway Postgres container. */
@@ -40,3 +43,17 @@ afterAll(async () => {
 });
 
 describeNotificationStore("Postgres", () => createPostgresNotificationStore(pool));
+
+// Approval events go to a table of the test inside the store's transaction, so only
+// events of committed writes show up.
+describeApprovalStore("Postgres", async () => {
+  await pool.query("create table if not exists approval_test_events (position bigserial primary key, event jsonb not null)");
+  const store = createPostgresApprovalStore({
+    pool,
+    publisher: { publish: async (tx, event) => void (await tx.query("insert into approval_test_events (event) values ($1)", [JSON.stringify(event)])) },
+  });
+  return {
+    store,
+    published: async () => (await pool.query<{ event: ApprovalEvent }>("select event from approval_test_events order by position")).rows.map((row) => row.event),
+  };
+});

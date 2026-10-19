@@ -26,5 +26,5 @@ do:
         method: post
         endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
         body:
+          run: '${ $workflow.id }'
           pullRequest: '${ .pullRequest }'
-          policy: merge-gate

@@ -203,6 +203,9 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@tendworks/human-interaction':
+        specifier: workspace:*
+        version: link:../../packages/human-interaction
 
   apps/server:
     dependencies:

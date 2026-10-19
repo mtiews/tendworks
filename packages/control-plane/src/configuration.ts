@@ -140,6 +140,16 @@ export function loadConfiguration(dir: string): Configuration {
     }
   }
 
+  // A policy for a misspelt workflow would silently never apply, leaving a laxer one in charge.
+  for (const { file, policy } of policies.values()) {
+    for (const workflow of policy.spec.workflows ?? []) {
+      if (!workflows.has(workflow)) {
+        const configured = [...workflows.keys()].sort().join(", ") || "none";
+        issues.push(`${file}: policy '${policy.metadata.name}' names workflow '${workflow}', which is not configured (configured: ${configured})`);
+      }
+    }
+  }
+
   if (issues.length > 0) throw new ConfigurationError(issues);
   return {
     workflowNames: [...workflows.keys()].sort(),
@@ -172,7 +182,7 @@ function agentCalls(tasks: Workflow.TaskList, scope: string): [string, string][]
     Object.entries(item).flatMap(([name, task]): [string, string][] => {
       const reference = `${scope}/do/${index}/${name}`;
       if ("call" in task) return task.call === "a2a" ? [[reference, task.with.agentCard.endpoint.slice("agent://".length)]] : [];
-      return agentCalls(task.do, reference);
+      return "do" in task ? agentCalls(task.do, reference) : [];
     }),
   );
 }

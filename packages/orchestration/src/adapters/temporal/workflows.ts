@@ -1,7 +1,11 @@
 // Workflow code: bundled and run inside the execution engine's deterministic sandbox.
 // Import only deterministic modules (the interpreter) and types; activities as types only.
-import { ActivityFailure, proxyActivities } from "@temporalio/workflow";
+import { ActivityFailure, defineSignal, proxyActivities, setHandler } from "@temporalio/workflow";
 import { executeRun, type RunActivities, type RunExecution } from "../../runs/execute-run.js";
+import { EventQueue, type ReceivedEvent } from "../../workflow/event-inbox.js";
+
+/** Delivers an event to the run; the engine keeps it in the run's history, so it survives restarts. */
+const eventSignal = defineSignal<[ReceivedEvent]>("event");
 
 const recording = proxyActivities<Pick<RunActivities, "runStarted" | "recordStep" | "runFinished">>({
   startToCloseTimeout: "1 minute",
@@ -26,6 +30,9 @@ const endpoints = proxyActivities<Pick<RunActivities, "httpRequest">>({
 
 /** One run = one workflow execution; the workflow id is the run id. */
 export async function executeRunWorkflow(execution: RunExecution): Promise<void> {
+  // Registered before the first await, so no event signalled at start is missed.
+  const inbox = new EventQueue();
+  setHandler(eventSignal, (event) => inbox.deliver(event));
   // Activity proxies are Proxy objects without own keys, so they cannot be spread.
   await executeRun(execution, {
     runStarted: recording.runStarted,
@@ -48,5 +55,5 @@ export async function executeRunWorkflow(execution: RunExecution): Promise<void>
         throw error;
       }
     },
-  });
+  }, inbox);
 }

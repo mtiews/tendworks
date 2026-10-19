@@ -36,6 +36,7 @@ create table if not exists orchestration.steps (
 );
 alter table orchestration.steps add column if not exists transcript text;
 alter table orchestration.steps add column if not exists cost jsonb;
+alter table orchestration.steps add column if not exists artifacts jsonb;
 create table if not exists orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
@@ -101,6 +102,7 @@ interface StepRow {
   task_id: string | null;
   transcript: string | null;
   cost: NonNullable<StepRecord["cost"]> | null;
+  artifacts: NonNullable<StepRecord["artifacts"]> | null;
   error: NonNullable<StepRecord["error"]> | null;
   started_at: Date;
   finished_at: Date | null;
@@ -172,14 +174,14 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
     async saveStep(runId, step, events) {
       await transaction(async (tx) => {
         await tx.query(
-          `insert into orchestration.steps (run_id, reference, name, status, task_id, transcript, cost, error, started_at, finished_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+          `insert into orchestration.steps (run_id, reference, name, status, task_id, transcript, cost, artifacts, error, started_at, finished_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            on conflict (run_id, reference) do update set
              name = excluded.name, status = excluded.status, task_id = excluded.task_id,
-             transcript = excluded.transcript, cost = excluded.cost,
+             transcript = excluded.transcript, cost = excluded.cost, artifacts = excluded.artifacts,
              error = excluded.error, finished_at = excluded.finished_at`,
           [
-            runId, step.reference, step.name, step.status, step.taskId ?? null, step.transcript ?? null, json(step.cost),
+            runId, step.reference, step.name, step.status, step.taskId ?? null, step.transcript ?? null, json(step.cost), json(step.artifacts),
             json(step.error), step.startedAt, step.finishedAt ?? null,
           ],
         );
@@ -217,6 +219,7 @@ function toStep(row: StepRow): StepRecord {
     ...(row.task_id === null ? {} : { taskId: row.task_id }),
     ...(row.transcript === null ? {} : { transcript: row.transcript }),
     ...(row.cost === null ? {} : { cost: row.cost }),
+    ...(row.artifacts === null ? {} : { artifacts: row.artifacts }),
     ...(row.error === null ? {} : { error: row.error }),
     startedAt: row.started_at.toISOString(),
     ...(row.finished_at === null ? {} : { finishedAt: row.finished_at.toISOString() }),

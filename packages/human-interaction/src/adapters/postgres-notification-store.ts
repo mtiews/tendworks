@@ -16,6 +16,20 @@ create table if not exists human_interaction.notifications (
   created_at timestamptz not null,
   delivery   jsonb not null
 );
+create table if not exists human_interaction.approval_requests (
+  position     bigserial unique,
+  id           text primary key,
+  run_id       text not null,
+  workflow     text not null,
+  action       text not null,
+  pull_request text not null,
+  policy       text not null,
+  question     text not null,
+  status       text not null,
+  created_at   timestamptz not null,
+  decided_at   timestamptz,
+  unique (run_id, action, pull_request)
+);
 `;
 
 /** Creates human interaction's tables if they do not exist yet. */

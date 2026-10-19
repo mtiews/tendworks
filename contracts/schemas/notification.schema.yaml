@@ -7,7 +7,7 @@ description: >-
 $defs:
   notification:
     title: Notification
-    description: A message to the human that needs no decision, e.g. that a run finished.
+    description: A message to the human that needs no decision, e.g. that a run finished or that an approval request waits.
     type: object
     additionalProperties: false
     required: [id, kind, runId, title, createdAt, delivery]
@@ -35,7 +35,7 @@ $defs:
     title: NotificationKind
     description: What the notification is about.
     type: string
-    enum: [run.completed, run.failed]
+    enum: [run.completed, run.failed, approval.requested]
   delivery:
     title: NotificationDelivery
     description: Outcome of the latest delivery attempt through the notification channel.

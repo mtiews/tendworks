@@ -72,6 +72,14 @@ $defs:
           (e.g. a `file://` URL on the worker's transcript volume).
       cost:
         $ref: '#/$defs/cost'
+      artifacts:
+        type: array
+        description: >-
+          Links the step's agent reported as results of its task (A2A artifacts with a
+          URL), e.g. the pull request it opened. The merge gate only merges a pull request
+          the run reported this way.
+        items:
+          $ref: '#/$defs/stepArtifact'
       error:
         $ref: '#/$defs/workflowError'
       startedAt:
@@ -80,6 +88,20 @@ $defs:
       finishedAt:
         type: string
         format: date-time
+  stepArtifact:
+    title: StepArtifact
+    description: A result an agent reported as a link.
+    type: object
+    additionalProperties: false
+    required: [name, url]
+    properties:
+      name:
+        type: string
+        description: What the link is, e.g. `pull-request`.
+      url:
+        type: string
+      description:
+        type: string
   cost:
     title: Cost
     description: What an agent session cost, as its harness reports it (with a subscription an estimate, not a bill).

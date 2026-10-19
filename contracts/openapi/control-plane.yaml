@@ -11,9 +11,9 @@ paths:
       operationId: getPlatformStatus
       summary: Platform health
       description: >-
-        Health of the platform and of each component it depends on. Answers 200
-        when the platform is healthy and 503 when it is not; both carry the same
-        body.
+        Health of the platform and of each component it depends on, and how many
+        approval requests wait for a decision. Answers 200 when the platform is healthy
+        and 503 when it is not; both carry the same body.
       responses:
         "200":
           description: Platform is healthy.
@@ -149,13 +149,19 @@ paths:
   /pull-requests/merge:
     post:
       operationId: mergePullRequest
-      summary: Merge a pull request behind the gate of a policy
+      summary: Merge a run's pull request behind the gate of its policies
       description: >-
-        Merges the pull request with the platform's credentials, never an agent's. The
-        named policy decides first: with `merge: auto` the pull request is merged right
-        away; `merge: ask` (an approval request first) is refused for now. Merging a pull
-        request that is already merged succeeds, so a repeated request is harmless.
-        Workflows call this as a step after the agent opened the pull request.
+        Merges the pull request with the platform's credentials, never an agent's.
+        The caller names the run and the pull request; everything else comes from the
+        platform's own records: the run must be running and must have reported the pull
+        request (an artifact of one of its steps), and the policies that apply to the
+        run's workflow decide (the strictest wins). With `allow` the pull request is
+        merged right away. With `ask` the merge needs an approved approval request for
+        this run and pull request: the first request creates one (202), later requests
+        answer 202 while it is pending, merge once it is approved and are refused (403)
+        once it is rejected. Merging a pull request that is already merged succeeds, so
+        a repeated request is harmless. Workflows call this as a step after the agent
+        opened the pull request.
       requestBody:
         required: true
         content:
@@ -169,22 +175,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PullRequestMerge"
+        "202":
+          description: >-
+            The policy asks for an approval and the approval request is pending; the
+            body names it. Nothing is merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestMerge"
         "400":
           description: >-
             The request is invalid: no pull request given (e.g. the agent reported none),
-            no policy with this name, or no integration for the pull request's host.
+            an unknown run, a pull request the run did not report, no policy that
+            applies to the run's workflow, or no integration for the pull request's host.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
         "403":
-          description: The policy does not allow merging without an approval.
+          description: The approval request for this merge was rejected.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
         "409":
-          description: The repository refused the merge, e.g. the pull request is closed or has conflicts.
+          description: >-
+            The run is not running, or the repository refused the merge, e.g. the pull
+            request is closed or has conflicts.
           content:
             application/json:
               schema:
@@ -195,8 +212,99 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /approval-requests:
+    get:
+      operationId: listApprovalRequests
+      summary: List approval requests, newest first
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only requests with this status, e.g. `pending`.
+          schema:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalStatus"
+      responses:
+        "200":
+          description: Approval requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequestList"
+        "503":
+          description: Approval requests cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /approval-requests/{approvalRequestId}/decision:
+    post:
+      operationId: decideApprovalRequest
+      summary: Approve or reject an approval request
+      description: >-
+        Records the decision and emits `approval.decided`, which the waiting run
+        receives. Deciding a request again the same way changes nothing; a decided
+        request cannot be decided the other way.
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: The decided approval request.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+        "400":
+          description: The decision is neither `approve` nor `reject`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No approval request with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The approval request was already decided the other way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Approval requests cannot be read or written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
+    ApprovalRequestList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalDecision"
     NotificationList:
       type: object
       required: [items]
@@ -208,17 +316,17 @@ components:
             $ref: "../schemas/notification.schema.yaml#/$defs/notification"
     MergePullRequestRequest:
       type: object
-      required: [pullRequest, policy]
+      required: [run, pullRequest]
       additionalProperties: false
       properties:
+        run:
+          type: string
+          description: Id of the running run whose pull request to merge.
         pullRequest:
           type: [string, "null"]
           description: >-
-            Web URL of the pull request, as the agent reported it. `null` (no pull request
-            reported) is answered with 400 and a message saying so.
-        policy:
-          type: string
-          description: Name of the configured policy whose gate applies.
+            Web URL of the pull request, as the run's agent reported it. `null` (no pull
+            request reported) is answered with 400 and a message saying so.
     PullRequestMerge:
       type: object
       required: [pullRequest, policy, decision, merged]
@@ -228,14 +336,18 @@ components:
           type: string
         policy:
           type: string
+          description: Name of the policy whose decision applied (the strictest that applies).
         decision:
           $ref: "../schemas/policy.schema.yaml#/$defs/decision"
         merged:
           type: boolean
-          const: true
+          description: True once merged; false while the approval request is pending.
         commit:
           type: string
           description: The merge commit, when the repository reports one.
+        approvalRequest:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+          description: With decision `ask`, the approval request the merge waits for or merged after.
     StartRunRequest:
       type: object
       required: [workflow]
@@ -285,6 +397,12 @@ components:
         checkedAt:
           type: string
           format: date-time
+        pendingApprovals:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of approval requests waiting for a decision; absent when approval
+            requests cannot be read.
     ComponentStatus:
       type: object
       required: [name, status]

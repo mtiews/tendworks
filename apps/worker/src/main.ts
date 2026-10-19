@@ -20,6 +20,7 @@ import {
   createOrchestrationApi,
   createPostgresRunStore,
   createRunActivities,
+  createRunEventForwarder,
   createTemporalRunEngine,
   createTemporalRunWorker,
   migrateOrchestrationStore,
@@ -87,8 +88,13 @@ const agents = createAgentRuntime({
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
 // Run and step events go onto the event bus in the transaction of the run state they describe.
-const store = createPostgresRunStore({ pool, publisher: createPostgresEventBus({ pool }) });
+const bus = createPostgresEventBus({ pool });
+const store = createPostgresRunStore({ pool, publisher: bus });
 const engine = await createTemporalRunEngine({ address: engineAddress });
+// Other domains' events that name a run (e.g. approval.decided) go to that run, whose
+// `listen` tasks receive them. The subscription's position survives restarts, so an event
+// published while the worker was down is delivered when it is back.
+bus.subscribe("orchestration.run-events", createRunEventForwarder(engine).handle);
 // `call: http` tasks may only reach the control plane API; workflows find it as
 // `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
 // repository token lives in the server bundle, never in this one.
@@ -118,6 +124,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     runWorker.shutdown();
     server.close();
     await stopped;
+    await bus.close();
     await Promise.all([engine.close(), pool.end()]);
     process.exit(0);
   });

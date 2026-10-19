@@ -1,5 +1,7 @@
 # The platform merges pull requests through a gate on the control plane API
 
+Status: accepted; the request shape (`{ pullRequest, policy }`) and the rule that workflows name their policy are superseded by ADR 0012 (the-merge-gate-decides-by-the-run-and-waits-for-approval-requests): the request names the run, and the gate takes the policy from the configuration.
+
 The merge after the agent step is a workflow step the platform performs, never the agent and never inside a sandbox. The platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`) lives only in the server bundle (ADR 0008 (secret-references-resolve-against-the-platform-environment), `tests/architecture/secrets.test.ts`), but workflows run in the worker. So the step calls the public control plane API, `POST /pull-requests/merge { pullRequest, policy }` (`contracts/openapi/control-plane.yaml`), with the DSL's built-in `call: http`:
 
 ```yaml
@@ -25,7 +27,7 @@ Behind the endpoint, human interaction's merge gate looks up the `Policy` (`cont
 
 - The interpreter supports `call: http` (method, endpoint, headers, body; output = response content). A status outside 2xx fails the step with a communication error carrying the endpoint's problem `title`, `detail` and status. The worker's HTTP executor only lets requests go to the control plane's origin, so a workflow cannot reach the sandbox backend from the worker.
 - Status mapping: 400 invalid request (no pull request, unknown policy, no integration for the host), 403 policy says `ask`, 409 repository refused (closed, conflicts), 502 repository unreachable or credentials refused.
-- With `merge: ask` the step fails with 403 and merges nothing. #15 adds the approval request: the workflow creates one and `listen`s for its decision, and the merge request then names the approved request, which the gate checks before it merges.
+- With `merge: ask` the step fails with 403 and merges nothing. (Replaced by ADR 0012: the gate opens an approval request, the workflow `listen`s for its decision and asks again; the gate finds the approved request itself.)
 - The secret name of the GitHub integration is fixed in the server bundle, not referenced from configuration; a second token or forge needs an integration `kind` with a secret reference.
-- The control plane API has no authentication yet, and Docker Desktop lets containers reach the host's localhost, so a sandbox could call the endpoint. It still cannot pass the gate, and the agent token can merge anyway (accepted risk, ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)).
+- The control plane API has no authentication yet, and Docker Desktop lets containers reach the host's localhost, so a sandbox could call the endpoint. With the caller naming the policy it could pass the gate by claiming a lax one; ADR 0012 closes that, and the agent token can merge anyway (accepted risk, ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)).
 - GitHub recommends its asynchronous merge API (`merge-async`); the synchronous endpoint is enough while the playground has no merge queue.

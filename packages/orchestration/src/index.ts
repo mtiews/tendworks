@@ -17,6 +17,8 @@ export { executeRun, type RunActivities, type RunExecution, type RunOutcome } fr
 export { createInMemoryRunStore, InMemoryEventPublisher } from "./runs/in-memory-run-store.js";
 export { createRunActivities, type RunActivitiesOptions } from "./runs/run-activities.js";
 export { createInProcessRunEngine, type RunEngine } from "./runs/run-engine.js";
+export { createRunEventForwarder } from "./runs/run-event-forwarder.js";
+export { EventQueue, type EventInbox, type ReceivedEvent } from "./workflow/event-inbox.js";
 export type { EventPublisher, RunContext, RunEvent } from "./runs/run-events.js";
 export type { Run, RunPatch, RunStatus, RunStore, StepRecord } from "./runs/run-store.js";
 export { RUN_ID, STEP_REFERENCE, type AgentTaskExecutor } from "./workflow/agent-task-executor.js";

@@ -308,6 +308,32 @@ do:
     ]);
   });
 
+  it("records the links the agent reported as artifacts of its task", async () => {
+    const executor = new InMemoryAgentTaskExecutor().agent("developer", () => ({
+      id: "t-dev",
+      status: { state: "TASK_STATE_COMPLETED" },
+      artifacts: [
+        { artifactId: "t-dev/pull-request", name: "pull-request", description: "The change", parts: [{ url: "https://git.example/acme/app/pull/7" }] },
+        { artifactId: "t-dev/notes", name: "notes", parts: [{ text: "no link" }] },
+      ],
+    }));
+    const definition = workflow(`
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://developer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: build it }]
+`);
+
+    const run = await runWorkflow(definition, { runId: "r", input: {}, executor });
+
+    expect(run.steps[0]?.artifacts).toEqual([{ name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "The change" }]);
+  });
+
   describe("when a call fails", () => {
     const definition = () =>
       workflow(`
@@ -430,7 +456,7 @@ do:
         status: "completed",
         output: { merged: true, pullRequest: "https://git.example/acme/app/pull/7" },
         steps: [
-          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev" },
+          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev", artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }] },
           { name: "merge", reference: "/do/1/merge", status: "completed" },
         ],
       });
@@ -455,7 +481,7 @@ do:
         status: "failed",
         error,
         steps: [
-          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev" },
+          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev", artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }] },
           { name: "merge", reference: "/do/1/merge", status: "failed", error },
         ],
       });

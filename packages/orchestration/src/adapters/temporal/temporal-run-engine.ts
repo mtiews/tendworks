@@ -1,7 +1,7 @@
 import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Context } from "@temporalio/activity";
-import { Client, Connection } from "@temporalio/client";
+import { Client, Connection, WorkflowNotFoundError } from "@temporalio/client";
 import { NativeConnection, Worker } from "@temporalio/worker";
 import type { RunActivities } from "../../runs/execute-run.js";
 import type { RunEngine } from "../../runs/run-engine.js";
@@ -31,6 +31,16 @@ export async function createTemporalRunEngine(options: TemporalOptions): Promise
         workflowIdConflictPolicy: "FAIL",
         workflowIdReusePolicy: "REJECT_DUPLICATE",
       });
+    },
+    async deliver(runId, event) {
+      try {
+        // The signal of workflows.ts, by name: its definition lives in the workflow bundle.
+        await client.workflow.getHandle(runId).signal("event", event);
+      } catch (error) {
+        // The run ended (or never ran on this engine): nobody listens any more.
+        if (error instanceof WorkflowNotFoundError) return;
+        throw error;
+      }
     },
     close: () => connection.close(),
   };

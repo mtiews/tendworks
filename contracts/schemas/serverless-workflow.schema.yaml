@@ -14,9 +14,11 @@ $comment: >-
   kept. Supported: task `do`; task `call` with `a2a` and method `message/send`, where
   the agent card endpoint names an agent profile as `agent://<profile>`; task `call`
   with `http` (method, endpoint, headers, body; output `content`); data flow via
-  `input.from`, `output.as` and `export.as`; runtime expression arguments `$context`,
-  `$input`, `$workflow` and `$runtime`. Add a definition from the official schema
-  here when the interpreter learns it.
+  `input.from`, `output.as` and `export.as`; the `then` flow directive (`continue`,
+  `exit`, `end` or the name of a task in the same list); task `switch`; task `listen`
+  for one event (`to.one`) filtered by its type; runtime expression arguments
+  `$context`, `$input`, `$workflow` and `$runtime`. Add a definition from the official
+  schema here when the interpreter learns it.
 type: object
 required: [document, do]
 additionalProperties: false
@@ -90,7 +92,7 @@ $defs:
     description: A discrete unit of work that contributes to achieving the overall objectives defined by the workflow.
     # if/then/else instead of the official oneOf yields one precise error per mistake.
     # tsType tells the type generator what the conditional means.
-    tsType: CallA2ATask | CallHTTPTask | DoTask
+    tsType: CallA2ATask | CallHTTPTask | DoTask | SwitchTask | ListenTask
     type: object
     if:
       properties:
@@ -106,7 +108,21 @@ $defs:
       else:
         $ref: '#/$defs/callA2ATask'
     else:
-      $ref: '#/$defs/doTask'
+      if:
+        properties:
+          switch: true
+        required: [switch]
+      then:
+        $ref: '#/$defs/switchTask'
+      else:
+        if:
+          properties:
+            listen: true
+          required: [listen]
+        then:
+          $ref: '#/$defs/listenTask'
+        else:
+          $ref: '#/$defs/doTask'
   callHttpTask:
     title: CallHTTPTask
     description: >-
@@ -130,6 +146,8 @@ $defs:
         $ref: '#/$defs/output'
       export:
         $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
       metadata:
         $ref: '#/$defs/taskMetadata'
   httpArguments:
@@ -179,6 +197,8 @@ $defs:
         $ref: '#/$defs/output'
       export:
         $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
       metadata:
         $ref: '#/$defs/taskMetadata'
   a2aArguments:
@@ -291,8 +311,121 @@ $defs:
         $ref: '#/$defs/output'
       export:
         $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
       metadata:
         $ref: '#/$defs/taskMetadata'
+  switchTask:
+    type: object
+    title: SwitchTask
+    description: >-
+      Picks how the workflow goes on: the first case whose `when` holds (a runtime
+      expression on the task's input) decides with its `then`; a case without `when` is
+      the default. When no case matches, the workflow continues with the next task. The
+      output is the task's input.
+    additionalProperties: false
+    required: [switch]
+    properties:
+      switch:
+        type: array
+        title: SwitchTaskConfiguration
+        minItems: 1
+        items:
+          type: object
+          title: SwitchItem
+          minProperties: 1
+          maxProperties: 1
+          additionalProperties:
+            $ref: '#/$defs/switchCase'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  switchCase:
+    type: object
+    title: SwitchCase
+    description: A condition and the flow directive to follow when it holds.
+    additionalProperties: false
+    required: [then]
+    properties:
+      when:
+        type: string
+        title: SwitchCaseCondition
+        description: A runtime expression; the case matches when it yields true.
+      then:
+        $ref: '#/$defs/flowDirective'
+  listenTask:
+    type: object
+    title: ListenTask
+    description: >-
+      Waits until an event arrives that matches the filter. Tendworks delivers to a run
+      only the events that carry its run id (CloudEvent extension `runid`), including
+      events that arrived before the task started listening; each event is consumed once.
+      The output is an array with the consumed event: its `data` (`read: data`, the
+      default) or the whole CloudEvent (`read: envelope`).
+    additionalProperties: false
+    required: [listen]
+    properties:
+      listen:
+        type: object
+        title: ListenTaskConfiguration
+        additionalProperties: false
+        required: [to]
+        properties:
+          to:
+            type: object
+            title: ListenTo
+            description: The event to listen to; only `one` is supported.
+            additionalProperties: false
+            required: [one]
+            properties:
+              one:
+                $ref: '#/$defs/eventFilter'
+          read:
+            type: string
+            title: ListenAndReadAs
+            enum: [data, envelope]
+            default: data
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  eventFilter:
+    type: object
+    title: EventFilter
+    description: Selects events by their attributes; only the event type is supported.
+    additionalProperties: false
+    required: [with]
+    properties:
+      with:
+        type: object
+        title: WithEvent
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            type: string
+            title: EventType
+            description: The CloudEvent type, e.g. `dev.tendworks.approval.decided`.
+  flowDirective:
+    title: FlowDirective
+    description: >-
+      Where the workflow goes on after a task: `continue` (the next task, the default),
+      `exit` (leave the enclosing task list), `end` (end the workflow) or the name of a
+      task in the same list.
+    type: string
   taskMetadata:
     type: object
     title: TaskMetadata

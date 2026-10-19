@@ -61,12 +61,13 @@ do:
         workflow = definition,
         http = new InMemoryHttpExecutor(),
         runtime,
-      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor } = {},
+        ...options
+      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor; runId?: string; whileRunning?: (engine: RunEngine) => Promise<void> } = {},
     ): Promise<Run> {
       const store = createInMemoryRunStore();
       const { engine, stop } = await setup(createRunActivities({ store, agents, http }));
       if (stop) stops.push(stop);
-      const runId = crypto.randomUUID();
+      const runId = options.runId ?? crypto.randomUUID();
       await store.create({ id: runId, workflow: "two-steps", status: "pending", input: { goal: "ship" }, steps: [], createdAt: new Date().toISOString() });
       await engine.start({
         runId,
@@ -76,6 +77,7 @@ do:
         input: { goal: "ship" },
         ...(runtime ? { runtime } : {}),
       });
+      await options.whileRunning?.(engine);
       for (let attempt = 0; attempt < 300; attempt++) {
         const run = (await store.get(runId))!;
         if (run.status === "completed" || run.status === "failed") return run;
@@ -139,6 +141,42 @@ do:
       expect(http.requests).toEqual([
         { method: "POST", endpoint: "http://control-plane.test/pull-requests/merge", headers: {}, body: { goal: "ship" } },
       ]);
+    });
+
+    it("delivers events to a run that listens for them, also events that arrive before it listens", async () => {
+      const runId = crypto.randomUUID();
+      const event = (id: string, type: string, data: unknown) => ({ specversion: "1.0", id, source: "/tendworks/test", type, runid: runId, data });
+      const workflow = validateWorkflow(
+        parse(`
+document: { dsl: '1.0.3', namespace: test, name: two-steps, version: '0.1.0' }
+do:
+  - first:
+      listen: { to: { one: { with: { type: dev.tendworks.test.first } } } }
+  - second:
+      listen: { to: { one: { with: { type: dev.tendworks.test.second } } } }
+      output:
+        as: '\${ { first: $input[0], second: .[0] } }'
+`),
+      );
+
+      const run = await execute(new InMemoryAgentTaskExecutor(), {
+        workflow,
+        runId,
+        whileRunning: async (engine) => {
+          await engine.deliver(runId, event("e2", "dev.tendworks.test.second", "b"));
+          await engine.deliver(runId, event("e1", "dev.tendworks.test.first", "a"));
+          await engine.deliver(runId, event("e1", "dev.tendworks.test.first", "a"));
+        },
+      });
+
+      expect(run).toMatchObject({ status: "completed", output: { first: "a", second: "b" } });
+    });
+
+    it("ignores an event for a run it does not execute", async () => {
+      const { engine, stop } = await setup(createRunActivities({ store: createInMemoryRunStore(), agents: new InMemoryAgentTaskExecutor(), http: new InMemoryHttpExecutor() }));
+      if (stop) stops.push(stop);
+
+      await expect(engine.deliver(crypto.randomUUID(), { specversion: "1.0", id: "e", source: "/tendworks/test", type: "x" })).resolves.toBeUndefined();
     });
   });
 }
