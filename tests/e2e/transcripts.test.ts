@@ -166,7 +166,8 @@ describe("following running steps live on the compose stack", () => {
       expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
       expect(stdout).toMatch(/^== \/do\/0\/\S+ \(\S+\)\n\d\d:\d\d:\d\d {2}task {7}scripted-developer: /);
       expect(stdout).toMatch(/tool {7}Write before\.txt\n(.*\n)*.*tool {7}Write after\.txt\n/);
-      expect(stdout.trimEnd().split("\n").at(-1)).toMatch(/ended {6}TASK_STATE_COMPLETED: /);
+      // The last entry; the agent's reply in it continues over several lines.
+      expect(stdout).toMatch(/\n\d\d:\d\d:\d\d {2}ended {6}TASK_STATE_COMPLETED: [^]*\(0\.01 USD\)\n$/);
       expect((await getRun(runId)).status).toBe("completed");
     },
   );
