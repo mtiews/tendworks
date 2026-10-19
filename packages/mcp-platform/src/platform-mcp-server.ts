@@ -31,11 +31,16 @@ export function createPlatformMcpServer({ controlPlane }: PlatformMcpServerOptio
       // not even the list of tools. Its token check comes before any other answer.
       const { response: probe } = await client.GET("/triggers");
       if (probe.status === 401) return unauthorized();
-      // Stateless: every request gets its own server and transport, nothing is kept between them.
+      // Stateless (no session id generator): every request gets its own server and transport,
+      // which answers with JSON and is closed once the answer is complete.
       const server = toolsOn(client);
-      const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true }) // no session id generator: stateless;
+      const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
       await server.connect(transport);
-      return transport.handleRequest(request);
+      try {
+        return await transport.handleRequest(request);
+      } finally {
+        await server.close();
+      }
     },
   };
 }

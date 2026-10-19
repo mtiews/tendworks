@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { READ_TOKEN } from "./support/control-plane.js";
 
 const run = promisify(execFile);
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), "utf8");
@@ -49,5 +50,33 @@ describe("a sandbox of the developer profile", () => {
 
     // The liveness check answers, so the port is reachable and only the token guards the reads.
     expect(JSON.parse(answers)).toEqual([expect.any(Number), 401, 401, 401]);
+  });
+});
+
+describe("the platform MCP server", () => {
+  // The address compose gives the worker for sessions of profiles that list the server
+  // (TEND_PLATFORM_MCP_URL): the server's published port, seen from the sandbox network.
+  const mcp = `http://host.docker.internal:${port}/mcp`;
+
+  it("answers a sandbox at its configured address: its tools with the read-only token, nothing without it", { timeout: 180_000 }, async () => {
+    const answers = await inDeveloperSandbox(`
+      const call = (token, method, params) =>
+        fetch(${JSON.stringify(mcp)}, {
+          method: "POST",
+          headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...(token ? { authorization: "Bearer " + token } : {}) },
+          body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+        }).then(async (response) => ({ status: response.status, body: response.status === 200 ? await response.json() : undefined }));
+      Promise.all([
+        call(undefined, "tools/list", {}),
+        call(${JSON.stringify(READ_TOKEN)}, "tools/list", {}),
+        call(${JSON.stringify(READ_TOKEN)}, "tools/call", { name: "list_agents", arguments: {} }),
+      ]).then((answers) => console.log(JSON.stringify(answers)));
+    `);
+
+    const [anonymous, tools, agents] = JSON.parse(answers) as { status: number; body?: { result: { tools?: { name: string }[]; content?: { text: string }[] } } }[];
+    expect(anonymous?.status).toBe(401);
+    expect(tools?.body?.result.tools?.map((tool) => tool.name).sort()).toEqual(["get_run", "list_agents", "list_runs", "list_triggers"]);
+    const listed = JSON.parse(agents?.body?.result.content?.[0]?.text ?? "{}") as { items: { name: string }[] };
+    expect(listed.items.map((agent) => agent.name)).toContain("assistant");
   });
 });
