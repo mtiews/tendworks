@@ -169,11 +169,15 @@ export function createInMemoryAgentRuntime({ chatAgents = [] }: InMemoryAgentRun
       record(chatId, { type: "input-required", message: reply, ...(total ? { cost: total } : {}) });
       update(chatId, { status: "input-required", message: reply, ...(total ? { cost: total } : {}) });
     },
-    async startChat({ agent, text }: StartChatRequest) {
+    async startChat({ agent, text, repository }: StartChatRequest) {
       if (!chatAgents.includes(agent)) throw new ChatRefusedError("Chat not allowed", `agent profile ${agent} does not allow chats: its agent profile has no spec.chat`);
+      // Simpler than the agent runtime's rule, enough to tell refused from accepted.
+      if (repository !== undefined && !/^https?:\/\/[^\s/@]+(\/\S*)?$/.test(repository)) {
+        throw new ChatRefusedError("Invalid repository", `repository ${JSON.stringify(repository)} is no https or http clone URL without credentials`);
+      }
       const id = crypto.randomUUID();
       const startedAt = now();
-      chats.set(id, { id, agent, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}` });
+      chats.set(id, { id, agent, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...(repository === undefined ? {} : { repository }) });
       running.add(id);
       record(id, { type: "task-started", agent, message: message(text) });
       return structuredClone(chats.get(id)!);

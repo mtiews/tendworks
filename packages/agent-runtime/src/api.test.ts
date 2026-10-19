@@ -286,6 +286,31 @@ describe("agent runtime API: chats", () => {
     expect(invalid.status).toBe(400);
   });
 
+  it("starts a chat with a repository as its workspace and shows it", async () => {
+    const { call } = setup();
+
+    const started = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+    const chat = (await started.json()) as Chat;
+
+    expect(started.status).toBe(201);
+    expect(chat).toMatchObject({ repository: "https://git.example/acme/app.git" });
+    expect(await (await call("GET", `/chats/${chat.id}`)).json()).toMatchObject({ repository: "https://git.example/acme/app.git" });
+  });
+
+  it("refuses a chat with a repository that is no clone URL without credentials, with the reason", async () => {
+    const { call } = setup();
+
+    const refused = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://user:secret@git.example/acme/app.git" });
+    const malformed = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: 42 });
+
+    expect(refused.status).toBe(400);
+    const problem = (await refused.json()) as { title: string; detail: string };
+    expect(problem).toMatchObject({ title: "Invalid repository", detail: expect.stringContaining("without user name or password") });
+    expect(problem.detail).not.toContain("secret");
+    expect(malformed.status).toBe(400);
+    expect(await (await call("GET", "/chats")).json()).toEqual({ items: [] });
+  });
+
   it("answers 404 for a chat it does not know, and 400 for a message without text", async () => {
     const { call } = setup();
     const chat = (await (await call("POST", "/chats", { agent: "assistant", text: "Hello" })).json()) as Chat;

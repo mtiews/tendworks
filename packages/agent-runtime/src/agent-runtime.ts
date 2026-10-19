@@ -3,7 +3,20 @@ import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
 import { chatEnded, chatStarted } from "./chat-events.js";
-import { addCost, CHAT, ChatBusyError, ChatEndedError, chatFacts, ChatNotAllowedError, toChat, type Chat, type ChatFacts } from "./chats.js";
+import {
+  addCost,
+  CHAT,
+  ChatBusyError,
+  ChatEndedError,
+  chatFacts,
+  ChatNotAllowedError,
+  InvalidRepositoryError,
+  toChat,
+  workspaceProblem,
+  type Chat,
+  type ChatFacts,
+} from "./chats.js";
+import { workspaceOf } from "./workspace.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Cost, Harness, HarnessResult, HarnessSession, HarnessTurn, OpenSession } from "./harness.js";
 import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
@@ -31,6 +44,8 @@ export interface AgentRuntimeOptions {
   transcripts?: TranscriptStore;
   /** Waiting, replaceable in tests. */
   sleep?: (ms: number) => Promise<void>;
+  /** Waits for what is left of a chat's idle time; replaceable in tests. Does not keep the process alive. */
+  idle?: (ms: number) => Promise<void>;
   now?: () => Date;
 }
 
@@ -83,6 +98,13 @@ export interface AgentRuntime extends AgentTasks {
   getChat(chatId: string): Promise<Chat | undefined>;
   /** All chats, the most recently started first. */
   listChats(): Promise<Chat[]>;
+  /**
+   * Takes up the chats that have not ended, once after the process started (ADR 0004,
+   * 0015): a turn a restart interrupted continues in the same agent session, and a chat
+   * waiting for a message lets its sandbox go when its idle time is over. Resolves once
+   * the interrupted turns are under way.
+   */
+  resumeChats(): Promise<void>;
 }
 
 /** A chat this process works on: its open agent session and what it records. */
@@ -98,7 +120,13 @@ interface OpenChat {
   turn?: Promise<void>;
   /** Set once the chat is being ended; a turn that ends then leaves the outcome to the end. */
   ending?: Promise<Chat>;
+  /** Counts the times the chat began waiting for a message, so only the latest wait lets the sandbox go. */
+  waits: number;
+  /** Letting go of the sandbox after the idle time, while it happens. */
+  suspending?: Promise<void>;
 }
+
+const DEFAULT_IDLE_MINUTES = 5;
 
 /**
  * Accepts A2A tasks and hands each to the harness its agent profile names, recording
@@ -112,6 +140,7 @@ export function createAgentRuntime({
   store = createInMemoryTaskStore(),
   transcripts = createInMemoryTranscriptStore(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  idle = (ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()),
   now = () => new Date(),
 }: AgentRuntimeOptions): AgentRuntime {
   const byName = new Map(profiles.map((profile) => [profile.metadata.name, profile]));
@@ -147,14 +176,19 @@ export function createAgentRuntime({
     const harness = available[profile.spec.harness];
     if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
     const { record, written } = recorder(task.id, transcripts.open(task.id));
+    // The workspace the first message asked for; checked when the chat started.
+    const first = task.history?.[0];
+    const requested = first ? workspaceOf(first) : {};
+    const workspace = "workspace" in requested ? requested.workspace : undefined;
     const chat: OpenChat = {
       profile,
       facts,
       task,
       record,
       written,
+      waits: 0,
       session: harness.open(
-        { taskId: task.id, profile, ...(session ? { session } : {}) },
+        { taskId: task.id, profile, ...(session ? { session } : {}), ...(workspace ? { workspace } : {}) },
         { record, progress: () => {}, saveSession: (kept) => store.saveSession(task.id, kept) },
       ),
     };
@@ -162,13 +196,33 @@ export function createAgentRuntime({
     return chat;
   }
 
+  /**
+   * Lets the chat's sandbox go once nobody answered for the profile's idle time (ADR 0015),
+   * counted from `since`; the volumes stay and the next message resumes the session.
+   */
+  function idleAfterwards(chat: OpenChat, since: Date): void {
+    const wait = ++chat.waits;
+    const idleMs = (chat.profile.spec.chat?.idleMinutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
+    void idle(Math.max(0, idleMs - (now().getTime() - since.getTime()))).then(async () => {
+      const id = chat.task.id;
+      if (chat.waits !== wait || chat.ending || busy.has(id) || chats.get(id) !== chat) return;
+      chat.suspending = chat.session.suspend().catch((error: unknown) => {
+        chat.record({ type: "error", message: `cannot remove the idle chat's sandbox: ${error instanceof Error ? error.message : String(error)}` });
+      });
+      await chat.suspending;
+    });
+  }
+
   /** Runs one turn of a chat in the background; afterwards the chat waits for the next message, or failed. */
-  function startTurn(chat: OpenChat, message: A2A.Message): void {
+  function startTurn(chat: OpenChat, message: A2A.Message, options: { interrupted?: boolean } = {}): void {
     const id = chat.task.id;
+    chat.waits++;
     chat.turn = (async () => {
       let result: HarnessTurn;
       try {
-        result = await chat.session.turn(message);
+        // A sandbox being let go goes first; the turn then resumes the session in a new one.
+        await chat.suspending;
+        result = await chat.session.turn(message, options);
       } catch (error) {
         result = { state: "TASK_STATE_FAILED", message: `the agent session failed: ${error instanceof Error ? error.message : String(error)}` };
       }
@@ -189,6 +243,7 @@ export function createAgentRuntime({
       // Accepting the next message before the entry is visible, so a client that saw it is not refused.
       busy.delete(id);
       chat.record({ type: "input-required", message: result.message, ...(cost ? { cost } : {}) });
+      idleAfterwards(chat, now());
     })().catch(() => {
       // The store failed; the chat stays working until a restart takes it up (ADR 0004).
     });
@@ -341,6 +396,8 @@ export function createAgentRuntime({
       if (!profile) throw new AgentNotFoundError(agent);
       if (!profile.spec.chat) throw new ChatNotAllowedError(agent);
       if (!available[profile.spec.harness]?.open) throw new ChatNotAllowedError(agent, `harness ${profile.spec.harness} cannot hold a session across turns`);
+      const problem = workspaceProblem(message);
+      if (problem) throw new InvalidRepositoryError(problem);
 
       const id = crypto.randomUUID();
       const startedAt = now().toISOString();
@@ -439,6 +496,25 @@ export function createAgentRuntime({
         const facts = chatFacts(current);
         return facts ? [toChat(current, facts)] : [];
       });
+    },
+    async resumeChats() {
+      for (const listed of await store.list({ kind: "chat" })) {
+        if (chats.has(listed.id) || TERMINAL.has(listed.status.state)) continue;
+        const stored = await store.find(listed.id);
+        const facts = stored && chatFacts(stored.task);
+        const profile = facts && byName.get(facts.agent);
+        // A chat whose profile is gone from the configuration stays as it is; it cannot go on.
+        if (!stored || !facts || !profile || !available[profile.spec.harness]?.open) continue;
+        const chat = openChat(profile, stored.task, facts, stored.session);
+        const interrupted = stored.task.status.state === "TASK_STATE_WORKING" && stored.task.history?.findLast((message) => message.role === "ROLE_USER");
+        if (interrupted) {
+          busy.add(chat.task.id);
+          chat.record({ type: "task-resumed", agent: facts.agent, message: interrupted });
+          startTurn(chat, interrupted, { interrupted: true });
+        } else {
+          idleAfterwards(chat, new Date(stored.task.status.timestamp ?? facts.startedAt));
+        }
+      }
     },
   };
 }

@@ -44,6 +44,25 @@ describe("chats API", () => {
     expect(refused).toMatchObject({ status: 400, body: { title: "Chat not allowed", detail: expect.stringContaining("spec.chat") } });
   });
 
+  it("starts a chat with a repository as its workspace", async () => {
+    const { call } = setup();
+
+    const started = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+
+    expect(started).toMatchObject({ status: 201, body: { repository: "https://git.example/acme/app.git" } });
+    expect(await call("GET", `/chats/${started.body.id}`)).toMatchObject({ body: { repository: "https://git.example/acme/app.git" } });
+  });
+
+  it("refuses a chat with an invalid repository, with the agent runtime's reason", async () => {
+    const { call } = setup();
+
+    const refused = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "ssh://git.example/acme/app.git" });
+    const malformed = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: ["https://git.example/acme/app.git"] });
+
+    expect(refused).toMatchObject({ status: 400, body: { title: "Invalid repository", detail: expect.stringContaining("https") } });
+    expect(malformed).toMatchObject({ status: 400, body: { title: "Invalid request" } });
+  });
+
   it("refuses a message while a turn runs with 409, and takes it once the turn ended", async () => {
     const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
     const { call } = setup(agentRuntime);

@@ -182,7 +182,8 @@ interface FakeSandbox {
  */
 export function scriptedSandboxes(
   script: AgentScript = {},
-  execResult: (request: ExecRequest) => ExecResult = () => ({ exitCode: 0, stdout: "", stderr: "" }),
+  /** What a command run with `exec` does; it may write files into the sandbox, e.g. a checkout into the workspace. */
+  execResult: (request: ExecRequest, sandbox: Pick<Disk, "write">) => ExecResult = () => ({ exitCode: 0, stdout: "", stderr: "" }),
 ) {
   const sandboxes = new Map<string, FakeSandbox>();
   const volumes = new Map<string, Files>();
@@ -225,9 +226,9 @@ export function scriptedSandboxes(
       return process;
     },
     async exec(sandboxId, request) {
-      find(sandboxId);
+      const sandbox = find(sandboxId);
       execs.push({ sandboxId, request });
-      return execResult(request);
+      return execResult(request, { write: (path, content) => void filesFor(sandbox, path).set(path, content) });
     },
     async readFile(sandboxId, path) {
       const content = filesFor(find(sandboxId), path).get(path);

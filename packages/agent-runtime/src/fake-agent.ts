@@ -56,6 +56,7 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
         async cancel() {
           cancel?.();
         },
+        async suspend() {},
         async end() {},
       };
     },

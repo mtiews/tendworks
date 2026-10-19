@@ -65,21 +65,32 @@ export interface HarnessTurn {
 export interface OpenSession {
   /**
    * Runs one prompt turn with `message`. The first turn starts the session; a session
-   * whose sandbox is gone (e.g. after a restart) is resumed first.
+   * whose sandbox is gone (e.g. after idle time or a restart) is resumed first.
+   * `interrupted`: the turn on `message` had begun before and was interrupted (e.g. by a
+   * restart); a resumed session is told to continue it rather than given the message again.
    */
-  turn(message: A2A.Message): Promise<HarnessTurn>;
+  turn(message: A2A.Message, options?: { interrupted?: boolean }): Promise<HarnessTurn>;
   /**
    * Asks the agent to stop the running turn, which then ends in `TASK_STATE_INPUT_REQUIRED`
    * with a `turn-ended` entry of reason `cancelled`; the session goes on. Resolves once
    * the request is made, not once the turn ended. Nothing happens while no turn runs.
    */
   cancel(): Promise<void>;
+  /**
+   * Lets go of the session's sandbox between turns, e.g. when a chat is idle (ADR 0015):
+   * the sandbox goes, its volumes and what is kept to resume the session stay, so the
+   * next turn resumes the session in a new sandbox.
+   */
+  suspend(): Promise<void>;
   /** Ends the session for good, also during a turn: removes its sandbox and its volumes. */
   end(): Promise<void>;
 }
 
 /** A task without its message, for a session whose messages arrive turn by turn. */
-export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs">;
+export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs"> & {
+  /** The workspace the session works in, checked out before its first turn; without it the workspace starts empty. */
+  workspace?: A2A.Workspace;
+};
 
 /**
  * The harness port: runs one agent session for a task, e.g. Claude Code over ACP in a

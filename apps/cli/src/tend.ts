@@ -236,9 +236,10 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       "chat with an agent profile that allows chats; Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
     )
     .argument("<profile>", "agent profile")
-    .action(async (agent: string, _options: unknown, command: Command) => {
+    .option("--repo <url>", "public Git repository (https clone URL) checked out as the chat's workspace")
+    .action(async (agent: string, options: { repo?: string }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
-      await startChat({ agent, client, baseUrl, io });
+      await startChat({ agent, ...(options.repo === undefined ? {} : { repository: options.repo }), client, baseUrl, io });
     });
 
   /** A chat by id, or a clear error when there is none. */
@@ -655,7 +656,19 @@ function queue<T>() {
  * `tend chat <profile>`: an interactive chat (ADR 0015). The first line starts the chat,
  * which then goes on as in {@link converse}.
  */
-async function startChat({ agent, client, baseUrl, io }: { agent: string; client: ControlPlaneClient; baseUrl: string; io: TendIo }) {
+async function startChat({
+  agent,
+  repository,
+  client,
+  baseUrl,
+  io,
+}: {
+  agent: string;
+  repository?: string;
+  client: ControlPlaneClient;
+  baseUrl: string;
+  io: TendIo;
+}) {
   const terminal = chatTerminal(io);
   try {
     let first: string | undefined;
@@ -670,14 +683,15 @@ async function startChat({ agent, client, baseUrl, io }: { agent: string; client
       }
       if (event.text.trim() !== "") first = event.text.trim();
     }
-    const started = await client.POST("/chats", { body: { agent, text: first } }).catch((cause: unknown) => {
+    const started = await client.POST("/chats", { body: { agent, text: first, ...(repository === undefined ? {} : { repository }) } }).catch((cause: unknown) => {
       throw new UnreachableError(baseUrl, cause);
     });
     if (!started.data) {
       if (started.response.status === 400 && started.error?.detail) throw new Error(started.error.detail);
       throw new AnswerError(started.response, started.error);
     }
-    io.stdout(`chat ${started.data.id} with ${agent}; type /end to end it\n`);
+    const checkout = started.data.repository === undefined ? "" : ` in a checkout of ${started.data.repository}`;
+    io.stdout(`chat ${started.data.id} with ${agent}${checkout}; type /end to end it\n`);
     await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first] });
   } finally {
     await terminal.close();
@@ -970,7 +984,7 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
         line(entry.time, "turn", entry.reason);
         break;
       case "workspace-checkout":
-        line(entry.time, "checkout", `${entry.workspace.repository} ${entry.workspace.branch} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
+        line(entry.time, "checkout", `${[entry.workspace.repository, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
         break;
       case "artifacts":
         for (const artifact of entry.artifacts) line(entry.time, "artifact", `${artifact.name} ${artifact.url}`);

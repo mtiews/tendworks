@@ -46,6 +46,11 @@ const CONTINUE =
   "The platform restarted while you were working on this task, and your last turn was interrupted. " +
   "Check the state of the workspace, then continue the task where you left off and finish it.";
 
+/** The prompt of a chat's session resumed after a restart interrupted its turn. */
+const CHAT_CONTINUE =
+  "The platform restarted while you were working on the operator's last message, and your turn was interrupted. " +
+  "Check the state of the workspace, then continue where you left off and answer the operator.";
+
 /** The volumes of a task's agent session, mounted into every sandbox it runs in. */
 const volumesOf = (taskId: string): VolumeMount[] => [
   { volume: `${taskId}-workspace`, path: WORKSPACE },
@@ -151,11 +156,12 @@ export function createClaudeCodeHarness({
     observer: HarnessObserver,
     redact: (text: string) => string,
   ): Promise<HarnessResult | undefined> {
-    observer.progress(`checking out ${workspace.branch}`);
+    observer.progress(`checking out ${workspace.branch ?? workspace.repository}`);
     const checkout = await sandboxes.exec(sandboxId, { ...checkoutCommand(workspace), workingDirectory: WORKSPACE, env });
     observer.record({ type: "workspace-checkout", workspace, exitCode: checkout.exitCode, output: redact(checkout.stderr.trim()) });
     if (checkout.exitCode === 0) return undefined;
-    return failed(redact(`cannot check out ${workspace.repository} on ${workspace.branch}: ${checkout.stderr.trim().slice(-1_000)}`));
+    const on = workspace.branch === undefined ? "" : ` on ${workspace.branch}`;
+    return failed(redact(`cannot check out ${workspace.repository}${on}: ${checkout.stderr.trim().slice(-1_000)}`));
   }
 
   /** Adapter: the harness's ACP adapter started over stdio in the sandbox, with the profile's secrets and the one credential. */
@@ -275,7 +281,7 @@ export function createClaudeCodeHarness({
      * adapter is gone (e.g. after a restart) resumes on the kept volumes with the next
      * turn. The volumes go only when the session ends.
      */
-    open({ taskId, profile, session }, observer) {
+    open({ taskId, profile, session, workspace }, observer) {
       let kept = session;
       let current: { sandboxId: string; acp: AcpSession } | undefined;
       const keep = async (next: HarnessSession) => {
@@ -297,12 +303,21 @@ export function createClaudeCodeHarness({
         await keep({ ...kept, sandboxId });
         await completeOnboarding(sandboxes, sandboxId, profile);
         await copySkills(sandboxId, profile);
+        if (workspace) {
+          // A workspace kept on its volume (e.g. after idle time) stays as it is.
+          const checkoutFailure = await checkOut(sandboxId, workspace, prepared.env, observer, prepared.redact);
+          if (checkoutFailure) {
+            await sandboxes.destroy(sandboxId).catch(() => {});
+            return { failure: checkoutFailure };
+          }
+        }
         const process = await attachAdapter(sandboxId, prepared.env, prepared.credential);
         observer.progress("harness started");
+        const checkedOut = workspace ? `Your workspace is a checkout of ${workspace.repository}.` : "";
         const acp = await openAcpSession({
           process,
           cwd: WORKSPACE,
-          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS].filter(Boolean).join("\n\n") } },
+          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS, checkedOut].filter(Boolean).join("\n\n") } },
           observer,
           redact: prepared.redact,
           keepAliveMs,
@@ -322,7 +337,7 @@ export function createClaudeCodeHarness({
       let cancelled = false;
 
       return {
-        async turn(message) {
+        async turn(message, { interrupted = false } = {}) {
           cancelled = false;
           const prepared = prepare(profile);
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
@@ -333,7 +348,9 @@ export function createClaudeCodeHarness({
               observer.record({ type: "turn-ended", reason: "cancelled" });
               return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf("cancelled", "") };
             }
-            const turn = await connected.acp.prompt(message.parts.flatMap(toContent), { timeoutMs });
+            // A resumed session holds the interrupted turn's message already; a new one gets it again.
+            const prompt = interrupted && connected.acp.resumed ? [{ type: "text" as const, text: CHAT_CONTINUE }] : message.parts.flatMap(toContent);
+            const turn = await connected.acp.prompt(prompt, { timeoutMs });
             if (turn.outcome === "error") return { state: "TASK_STATE_FAILED", message: turn.error };
             return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf(turn.stopReason, turn.reply), ...(turn.cost ? { cost: turn.cost } : {}) };
           } catch (error) {
@@ -343,6 +360,19 @@ export function createClaudeCodeHarness({
         async cancel() {
           cancelled = true;
           await current?.acp.cancel();
+        },
+        async suspend() {
+          // Taken at once, so a turn that starts meanwhile connects to a new sandbox.
+          const suspended = current;
+          const sandboxId = suspended?.sandboxId ?? kept?.sandboxId;
+          current = undefined;
+          if (sandboxId === undefined) return;
+          await sandboxes.destroy(sandboxId).catch(() => {});
+          await suspended?.acp.close();
+          if (kept?.sandboxId === sandboxId) {
+            const { sandboxId: _gone, ...rest } = kept;
+            await keep(rest);
+          }
         },
         async end() {
           // Destroying the sandbox first also ends a running turn and its background commands.

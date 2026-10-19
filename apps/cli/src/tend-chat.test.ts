@@ -181,6 +181,31 @@ describe("tend chat", () => {
     expect(out()).toContain(`left chat ${chatted!.id}; it stays open`);
   });
 
+  it("starts a chat with a repository as its workspace with --repo", async () => {
+    const { exitCode, input, agentRuntime, out } = chat(["assistant", "--repo", "https://git.example/acme/app.git"], ["It has a README."]);
+
+    await until(() => out().includes("> "));
+    input.type("What is in the repository?");
+    await until(() => out().includes("It has a README."));
+    input.close();
+
+    expect(await exitCode).toBe(0);
+    const [started] = agentRuntime.chats.values();
+    expect(started?.repository).toBe("https://git.example/acme/app.git");
+    expect(out()).toMatch(/chat \S+ with assistant in a checkout of https:\/\/git\.example\/acme\/app\.git/);
+  });
+
+  it("refuses an invalid repository with the reason", async () => {
+    const { exitCode, input, agentRuntime, err, out } = chat(["assistant", "--repo", "git.example:acme/app"], []);
+
+    await until(() => out().includes("> "));
+    input.type("Hello");
+
+    expect(await exitCode).toBe(1);
+    expect(err()).toMatch(/tend: repository "git\.example:acme\/app" is no https or http clone URL/);
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
   it("leaves without starting a chat when nothing was typed", async () => {
     const { exitCode, input, agentRuntime, out } = chat(["assistant"], []);
 
