@@ -1,8 +1,8 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type { A2A, AgentProfile } from "@tendworks/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { describeAgentTasks } from "../agent-tasks.suite.js";
-import type { HarnessObserver } from "../harness.js";
+import type { HarnessObserver, HarnessSession } from "../harness.js";
 import { describeHarness } from "../harness.suite.js";
 import {
   createAgentRuntime,
@@ -12,7 +12,7 @@ import {
   type ClaudeCodeHarnessOptions,
   type LoadedAgentProfile,
 } from "../index.js";
-import type { ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplate } from "../sandboxes.js";
+import type { ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplate, VolumeMount } from "../sandboxes.js";
 import type { TranscriptEntry } from "../transcripts/transcript-store.js";
 
 /*
@@ -33,8 +33,10 @@ interface AgentScript {
   askPermission?: boolean;
   /** Writes this to stderr and exits with 1 instead of speaking ACP. */
   crash?: string;
-  /** Ends the turn only when cancelled. */
-  hang?: boolean;
+  /** Ends the turn only when cancelled: every turn (`true`) or only the first one of all processes. */
+  hang?: boolean | "first";
+  /** Does not advertise the ACP resume capability. */
+  noResume?: boolean;
   /** Written to the file named by TENDWORKS_ARTIFACTS before the turn ends. */
   artifacts?: string;
 }
@@ -42,21 +44,28 @@ interface AgentScript {
 interface Observed {
   initialize?: acp.InitializeRequest;
   newSession?: acp.NewSessionRequest;
+  resumed: acp.ResumeSessionRequest[];
   prompts: acp.PromptRequest[];
   keepAlives: number;
   cancelled: boolean;
   permission?: acp.RequestPermissionResponse;
+  sessions: number;
+}
+
+/** Files of the sandbox the scripted agent runs in, as the agent sees them. */
+interface Disk {
+  read(path: string): Uint8Array | undefined;
+  write(path: string, content: Uint8Array): void;
 }
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
-function startFakeAgent(
-  script: AgentScript,
-  observed: Observed,
-  env: Record<string, string>,
-  writeFile: (path: string, text: string) => void,
-): SandboxProcess {
+/**
+ * A scripted ACP agent. Like Claude Code, it keeps each session as a file in its config
+ * directory and can resume a session only while that file exists.
+ */
+function startFakeAgent(script: AgentScript, observed: Observed, disk: Disk, env: Record<string, string>): SandboxProcess & { kill: () => void } {
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
   const fromAgent = new TransformStream<Uint8Array, Uint8Array>();
   const stderr = new TransformStream<Uint8Array, Uint8Array>();
@@ -66,26 +75,35 @@ function startFakeAgent(
     void writer.write(encode(`${script.crash}\n`)).then(() => writer.close());
     void fromAgent.writable.close();
     void toAgent.readable.cancel();
-    return { stdin: toAgent.writable, stdout: fromAgent.readable, stderr: stderr.readable, exited: Promise.resolve(1) };
+    return { stdin: toAgent.writable, stdout: fromAgent.readable, stderr: stderr.readable, exited: Promise.resolve(1), kill: () => {} };
   }
   void stderr.writable.close();
 
   const update = (ctx: { client: acp.AgentContext; params: { sessionId: string } }, sessionUpdate: acp.SessionUpdate) =>
     ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update: sessionUpdate });
   let cancel: () => void = () => {};
+  const sessionFile = (sessionId: string) => `${env.CLAUDE_CONFIG_DIR}/projects/${sessionId}.jsonl`;
 
   const connection = acp
     .agent({ name: "fake-claude-agent-acp" })
     .onRequest(acp.methods.agent.initialize, (ctx) => {
       observed.initialize = ctx.params;
-      return { protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: { sessionCapabilities: { resume: {} } } };
+      return { protocolVersion: acp.PROTOCOL_VERSION, agentCapabilities: { sessionCapabilities: script.noResume ? {} : { resume: {} } } };
     })
     .onRequest(acp.methods.agent.session.new, (ctx) => {
       observed.newSession = ctx.params;
-      return { sessionId: "session-1" };
+      const sessionId = `session-${++observed.sessions}`;
+      disk.write(sessionFile(sessionId), encode(`${JSON.stringify({ cwd: ctx.params.cwd })}\n`));
+      return { sessionId };
+    })
+    .onRequest(acp.methods.agent.session.resume, (ctx) => {
+      if (!disk.read(sessionFile(ctx.params.sessionId))) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
+      observed.resumed.push(ctx.params);
+      return {};
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
       observed.prompts.push(ctx.params);
+      const hang = script.hang === true || (script.hang === "first" && observed.prompts.length === 1);
       const cancelled = new Promise<void>((resolve) => (cancel = resolve));
       if (script.askPermission) {
         observed.permission = await ctx.client.request(acp.methods.client.session.requestPermission, {
@@ -99,13 +117,13 @@ function startFakeAgent(
         });
       }
       await update(ctx, { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Write hello.txt", status: "completed" });
-      if (script.hang) {
+      if (hang) {
         await cancelled;
         return { stopReason: "cancelled" };
       }
       if (script.delayMs) await new Promise((resolve) => setTimeout(resolve, script.delayMs));
       for (const text of script.reply ?? ["Hello"]) await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
-      if (script.artifacts !== undefined) writeFile(env.TENDWORKS_ARTIFACTS!, script.artifacts);
+      if (script.artifacts !== undefined) disk.write(env.TENDWORKS_ARTIFACTS!, encode(script.artifacts));
       await update(ctx, { sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: script.cost ?? 0.42, currency: "USD" } });
       return { stopReason: script.stopReason ?? "end_turn" };
     })
@@ -120,65 +138,112 @@ function startFakeAgent(
     })
     .connect(acp.ndJsonStream(fromAgent.writable, toAgent.readable));
 
-  return { stdin: toAgent.writable, stdout: fromAgent.readable, stderr: stderr.readable, exited: connection.closed.then(() => 0) };
+  const process = { stdin: toAgent.writable, stdout: fromAgent.readable, stderr: stderr.readable, exited: connection.closed.then(() => 0) };
+  // The sandbox goes away under the agent.
+  const kill = () => {
+    void fromAgent.writable.abort().catch(() => {});
+    void toAgent.readable.cancel().catch(() => {});
+  };
+  return Object.assign(process, { kill });
 }
 
 interface Attached {
   sandboxId: string;
   request: ExecRequest;
-  /** Files of the sandbox at the moment the process started. */
+  /** Files of the sandbox at the moment the process started, volumes included. */
   files: Map<string, string>;
+}
+
+type Files = Map<string, Uint8Array>;
+
+interface FakeSandbox {
+  files: Files;
+  /** Volumes by mount path; their files by absolute path in the sandbox. */
+  mounts: { path: string; files: Files }[];
+  kill: () => void;
 }
 
 function fakeSandboxes(
   script: AgentScript = {},
   execResult: (request: ExecRequest) => ExecResult = () => ({ exitCode: 0, stdout: "", stderr: "" }),
 ) {
-  const sandboxes = new Map<string, Map<string, Uint8Array>>();
-  const created: SandboxTemplate[] = [];
+  const sandboxes = new Map<string, FakeSandbox>();
+  const volumes = new Map<string, Files>();
+  const created: { template: SandboxTemplate; volumes: VolumeMount[] }[] = [];
   const destroyed: string[] = [];
+  const deletedVolumes: string[] = [];
   const attached: Attached[] = [];
   const execs: { sandboxId: string; request: ExecRequest }[] = [];
-  const observed: Observed = { prompts: [], keepAlives: 0, cancelled: false };
+  const observed: Observed = { resumed: [], prompts: [], keepAlives: 0, cancelled: false, sessions: 0 };
   const notFound = (message: string) => Object.assign(new Error(message), { code: "file-not-found" });
-  const files = (id: string) => {
+  const find = (id: string) => {
     const found = sandboxes.get(id);
     if (!found) throw Object.assign(new Error(`no sandbox ${id}`), { code: "sandbox-not-found" });
     return found;
   };
+  const filesFor = (sandbox: FakeSandbox, path: string) => sandbox.mounts.find((mount) => path.startsWith(`${mount.path}/`))?.files ?? sandbox.files;
 
   const api: Sandboxes = {
-    async create(template) {
+    async create(template, options = {}) {
       const id = `sandbox${created.length + 1}`;
-      created.push(template);
-      sandboxes.set(id, new Map());
+      created.push({ template, volumes: options.volumes ?? [] });
+      const mounts = (options.volumes ?? []).map(({ volume, path }) => {
+        if (!volumes.has(volume)) volumes.set(volume, new Map());
+        return { path, files: volumes.get(volume)! };
+      });
+      sandboxes.set(id, { files: new Map(), mounts, kill: () => {} });
       return { id };
     },
     async attach(sandboxId, request) {
-      const snapshot = new Map([...files(sandboxId)].map(([path, content]) => [path, decode(content)]));
-      attached.push({ sandboxId, request, files: snapshot });
+      const sandbox = find(sandboxId);
+      const all = [sandbox.files, ...sandbox.mounts.map(({ files }) => files)].flatMap((files) => [...files]);
+      attached.push({ sandboxId, request, files: new Map(all.map(([path, content]) => [path, decode(content)])) });
       if (request.command[0] !== "claude-agent-acp") throw new Error(`unexpected command ${request.command.join(" ")}`);
-      return startFakeAgent(script, observed, request.env ?? {}, (path, text) => files(sandboxId).set(path, encode(text)));
+      const disk: Disk = {
+        read: (path) => filesFor(sandbox, path).get(path),
+        write: (path, content) => void filesFor(sandbox, path).set(path, content),
+      };
+      const process = startFakeAgent(script, observed, disk, request.env ?? {});
+      sandbox.kill = process.kill;
+      return process;
     },
     async exec(sandboxId, request) {
-      files(sandboxId);
+      find(sandboxId);
       execs.push({ sandboxId, request });
       return execResult(request);
     },
     async readFile(sandboxId, path) {
-      const content = files(sandboxId).get(path);
+      const content = filesFor(find(sandboxId), path).get(path);
       if (!content) throw notFound(`no file ${path}`);
       return content;
     },
     async writeFile(sandboxId, path, content) {
-      files(sandboxId).set(path, content);
+      filesFor(find(sandboxId), path).set(path, content);
     },
     async destroy(sandboxId) {
       destroyed.push(sandboxId);
+      sandboxes.get(sandboxId)?.kill();
       sandboxes.delete(sandboxId);
     },
+    async deleteVolume(volume) {
+      deletedVolumes.push(volume);
+      volumes.delete(volume);
+    },
   };
-  return { api, created, destroyed, attached, execs, observed, sandboxes };
+  return { api, created, destroyed, deletedVolumes, attached, execs, observed, sandboxes, volumes };
+}
+
+/**
+ * The sandbox API as a worker that dies sees it: once `die()` is called, no call of
+ * this worker reaches the sandboxes any more, so it cannot clean up after itself.
+ */
+function dyingWorker(api: Sandboxes) {
+  let dead = false;
+  const never = new Promise<never>(() => {});
+  const guarded = Object.fromEntries(
+    Object.entries(api).map(([name, call]) => [name, (...args: unknown[]) => (dead ? never : (call as (...a: unknown[]) => unknown)(...args))]),
+  ) as unknown as Sandboxes;
+  return { api: guarded, die: () => void (dead = true) };
 }
 
 const template: SandboxTemplate = {
@@ -209,15 +274,29 @@ function harness(sandboxes: Sandboxes, options: Partial<ClaudeCodeHarnessOptions
 function observe() {
   const entries: TranscriptEntry[] = [];
   const progress: string[] = [];
-  const observer: HarnessObserver = { record: (entry) => entries.push(entry), progress: (text) => progress.push(text) };
-  return { observer, entries, progress };
+  /** Every session the harness kept, with what had been prompted by then. */
+  const sessions: HarnessSession[] = [];
+  const waiting: { until: (session: HarnessSession) => boolean; resolve: (session: HarnessSession) => void }[] = [];
+  const observer: HarnessObserver = {
+    record: (entry) => entries.push(entry),
+    progress: (text) => progress.push(text),
+    saveSession: async (session) => {
+      sessions.push(session);
+      for (const wait of waiting.filter(({ until }) => until(session))) wait.resolve(session);
+    },
+  };
+  /** Resolves once the harness keeps a session with an ACP session id, e.g. to interrupt it then. */
+  const saved = () =>
+    new Promise<HarnessSession>((resolve) => waiting.push({ until: (session) => session.sessionId !== undefined, resolve }));
+  return { observer, entries, progress, sessions, saved };
 }
 
 const message = (parts: A2A.Part[] = [{ text: "Create hello.txt" }]): A2A.Message => ({ messageId: "m-1", role: "ROLE_USER", parts });
-const task = (overrides: { profile?: AgentProfile.AgentProfile; parts?: A2A.Part[] } = {}) => ({
+const task = (overrides: { profile?: AgentProfile.AgentProfile; parts?: A2A.Part[]; session?: HarnessSession } = {}) => ({
   taskId: "task-1",
   profile: overrides.profile ?? profile(),
   message: message(overrides.parts),
+  ...(overrides.session ? { session: overrides.session } : {}),
 });
 
 const pullRequest = { name: "pull-request", url: "https://git.example/acme/app/pull/1" };
@@ -245,13 +324,89 @@ describe("Claude Code harness", () => {
 
     await harness(sandboxes.api).run(task({ parts: [{ text: "Create hello.txt" }, { data: { issue: { number: 7 } } }] }), observe().observer);
 
-    expect(sandboxes.created).toEqual([template]);
+    expect(sandboxes.created.map((c) => c.template)).toEqual([template]);
     expect(sandboxes.attached[0]?.request).toMatchObject({ command: ["claude-agent-acp"], workingDirectory: "/workspace" });
     expect(sandboxes.observed.newSession).toMatchObject({ cwd: "/workspace", mcpServers: [] });
     expect(sandboxes.observed.prompts[0]?.prompt).toEqual([
       { type: "text", text: "Create hello.txt" },
       { type: "text", text: JSON.stringify({ issue: { number: 7 } }, null, 2) },
     ]);
+  });
+
+  it("keeps the workspace and the harness's home and config directory on volumes of the agent session", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api).run(task(), observe().observer);
+
+    expect(sandboxes.created[0]?.volumes).toEqual([
+      { volume: "task-1-workspace", path: "/workspace" },
+      { volume: "task-1-session", path: "/session" },
+    ]);
+    expect(sandboxes.attached[0]?.request.env).toMatchObject({ HOME: expect.stringMatching(/^\/session\//), CLAUDE_CONFIG_DIR: expect.stringMatching(/^\/session\//) });
+  });
+
+  it("deletes the volumes of the agent session after the sandbox when the session ends", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api).run(task(), observe().observer);
+
+    expect(sandboxes.destroyed).toEqual(["sandbox1"]);
+    expect(sandboxes.deletedVolumes.sort()).toEqual(["task-1-session", "task-1-workspace"]);
+  });
+
+  it("keeps the ACP session id and the sandbox with the task before the agent gets the prompt", async () => {
+    const sandboxes = fakeSandboxes();
+    const { observer, sessions, saved } = observe();
+    const prompted = saved().then(() => sandboxes.observed.prompts.length);
+
+    await harness(sandboxes.api).run(task(), observer);
+
+    expect(await prompted).toBe(0);
+    expect(sessions.at(-1)).toEqual({ sessionId: "session-1", sandboxId: "sandbox1" });
+  });
+
+  it("resumes the kept ACP session in a new sandbox on the same volumes after a restart and completes the task", async () => {
+    const sandboxes = fakeSandboxes({ hang: "first", reply: ["Finished hello.txt."] });
+    // The first worker starts the session and dies while the agent works on the prompt.
+    const before = dyingWorker(sandboxes.api);
+    const first = observe();
+    const kept = first.saved();
+    void harness(before.api).run(task(), first.observer);
+    const session = await kept;
+    await vi.waitFor(() => expect(sandboxes.observed.prompts).toHaveLength(1));
+    before.die();
+
+    const after = observe();
+    const result = await harness(sandboxes.api).run(task({ session }), after.observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_COMPLETED", message: "Finished hello.txt." });
+    // The abandoned sandbox goes before a new one mounts the session's volumes.
+    expect(sandboxes.destroyed[0]).toBe("sandbox1");
+    expect(sandboxes.created.map((c) => c.volumes)).toEqual([sandboxes.created[0]!.volumes, sandboxes.created[0]!.volumes]);
+    expect(sandboxes.observed.sessions).toBe(1);
+    expect(sandboxes.observed.resumed).toMatchObject([{ sessionId: "session-1", cwd: "/workspace", mcpServers: [], _meta: { systemPrompt: { append: expect.any(String) } } }]);
+    expect(sandboxes.observed.prompts[1]).toMatchObject({
+      sessionId: "session-1",
+      prompt: [{ type: "text", text: expect.stringMatching(/continue/i) }],
+    });
+    expect(after.sessions.at(-1)).toEqual({ sessionId: "session-1", sandboxId: "sandbox2" });
+    expect(after.entries).toContainEqual(expect.objectContaining({ type: "acp-session-resumed", sessionId: "session-1" }));
+    expect(sandboxes.deletedVolumes.sort()).toEqual(["task-1-session", "task-1-workspace"]);
+  });
+
+  it.each<[string, AgentScript]>([
+    ["the agent no longer knows the session", {}],
+    ["the agent cannot resume sessions", { noResume: true }],
+  ])("starts the task again in a new session on the kept volumes when %s", async (_, script) => {
+    const sandboxes = fakeSandboxes(script);
+    const { observer, entries, sessions } = observe();
+
+    const result = await harness(sandboxes.api).run(task({ session: { sessionId: "lost-session", sandboxId: "sandbox0" } }), observer);
+
+    expect(result.state).toBe("TASK_STATE_COMPLETED");
+    expect(sandboxes.observed.prompts).toEqual([expect.objectContaining({ sessionId: "session-1", prompt: [{ type: "text", text: "Create hello.txt" }] })]);
+    expect(entries).toContainEqual(expect.objectContaining({ type: "acp-resume-failed", sessionId: "lost-session" }));
+    expect(sessions.at(-1)).toEqual({ sessionId: "session-1", sandboxId: "sandbox1" });
   });
 
   it("destroys the sandbox at the end of the session", async () => {

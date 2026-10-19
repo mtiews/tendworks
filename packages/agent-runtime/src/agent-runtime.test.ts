@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { describeAgentTasks } from "./agent-tasks.suite.js";
 import { createFakeHarness } from "./fake-agent.js";
 import { describeHarness } from "./harness.suite.js";
-import { createAgentRuntime, createInMemoryTaskStore, createInMemoryTranscriptStore } from "./index.js";
+import { createAgentRuntime, createInMemoryTaskStore, createInMemoryTranscriptStore, type Harness, type HarnessSession } from "./index.js";
 
 const profile = (name: string, fake: AgentProfile.FakeAgent = {}): AgentProfile.AgentProfile => ({
   apiVersion: "tendworks.dev/v1",
@@ -113,5 +113,34 @@ describe("fake agent", () => {
     expect(task.history).toEqual([message.message]);
     expect(task.metadata).toMatchObject({ "dev.tendworks/resumed": 1, "dev.tendworks/transcript": expect.any(String) });
     expect(await before.getTask(task.id)).toEqual(task);
+  });
+
+  it("hands a resumed task's harness the session it kept before the interruption", async () => {
+    const store = createInMemoryTaskStore();
+    const developer: AgentProfile.AgentProfile = { ...profile("developer"), spec: { harness: "claude-code", sandbox: "claude-code" } };
+    const message = request([{ text: "work" }]);
+    const sessions: (HarnessSession | undefined)[] = [];
+
+    // The first runtime's harness keeps its session and dies while the agent works.
+    const dying: Harness = {
+      async run(task, observer) {
+        sessions.push(task.session);
+        await observer.saveSession({ sessionId: "session-1" });
+        return new Promise(() => {});
+      },
+    };
+    void createAgentRuntime({ profiles: [developer], store, harnesses: { "claude-code": dying } }).sendMessage("developer", message);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const resuming: Harness = {
+      async run(task) {
+        sessions.push(task.session);
+        return { state: "TASK_STATE_COMPLETED", message: "continued" };
+      },
+    };
+    const task = await createAgentRuntime({ profiles: [developer], store, harnesses: { "claude-code": resuming } }).sendMessage("developer", message);
+
+    expect(task.status.state).toBe("TASK_STATE_COMPLETED");
+    expect(sessions).toEqual([undefined, { sessionId: "session-1" }]);
   });
 });

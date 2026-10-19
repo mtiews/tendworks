@@ -12,5 +12,5 @@ The transcript of an agent session is what the agent runtime sees on the ACP con
 
 - The transcript contains what ACP exposes (messages, tool calls, plans, usage), not the model's raw API traffic.
 - Cost with a subscription OAuth token is the harness's estimate, not a bill.
-- The ACP session id is recorded in the transcript (`acp-session` entry); keeping it next to the task for `session/resume` is #11 (ADR 0004).
+- The ACP session id is recorded in the transcript (`acp-session` entry) and kept next to the task for `session/resume` (ADR 0009 (agent-sessions-resume-on-their-volumes)).
 - Transcripts are files on one worker volume; several workers or a web UI that shows transcripts need the store behind an API or object storage.

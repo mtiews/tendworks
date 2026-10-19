@@ -16,6 +16,7 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
   describe.concurrent(`sandbox API: ${name}`, () => {
     let context: SandboxApiSuiteContext;
     const created: string[] = [];
+    const volumes: string[] = [];
 
     beforeAll(async () => {
       context = await setup();
@@ -23,6 +24,7 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
 
     afterAll(async () => {
       await Promise.all(created.map((id) => context.api.destroy(id)));
+      await Promise.all(volumes.map((volume) => context.api.deleteVolume(volume)));
     });
 
     const template = (spec: Partial<SandboxTemplate["spec"]> = {}, templateName = "suite"): SandboxTemplate => ({
@@ -203,6 +205,63 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
 
     it("rejects attaching to an unknown sandbox", async () => {
       await expect(context.api.attach("doesnotexist", { command: ["cat"] })).rejects.toMatchObject({ code: "sandbox-not-found" });
+    });
+
+    // Volumes are mounted on /tmp: it exists in every image and the sandbox user may write
+    // there, and an empty volume takes over the ownership of the directory it is mounted on.
+    const volumeName = () => `suite-${crypto.randomUUID()}`;
+    const withVolume = async (volume: string) => {
+      const sandbox = await context.api.create(template(), { volumes: [{ volume, path: "/tmp" }] });
+      created.push(sandbox.id);
+      return sandbox;
+    };
+
+    it("keeps the files of a volume for a later sandbox that mounts it", async () => {
+      const volume = volumeName();
+      volumes.push(volume);
+      const first = await withVolume(volume);
+      await context.api.writeFile(first.id, "/tmp/work/progress.md", encode("half done\n"));
+      await context.api.destroy(first.id);
+
+      const second = await withVolume(volume);
+
+      expect(new TextDecoder().decode(await context.api.readFile(second.id, "/tmp/work/progress.md"))).toBe("half done\n");
+      const listed = await context.api.exec(second.id, { command: ["cat", "/tmp/work/progress.md"] });
+      expect(listed.stdout).toBe("half done\n");
+      await context.api.writeFile(second.id, "/tmp/work/progress.md", encode("done\n"));
+    });
+
+    it("keeps different volumes apart", async () => {
+      const [a, b] = [volumeName(), volumeName()];
+      volumes.push(a, b);
+      const first = await withVolume(a);
+      await context.api.writeFile(first.id, "/tmp/only-in-a.txt", encode("a"));
+
+      const second = await withVolume(b);
+
+      await expect(context.api.readFile(second.id, "/tmp/only-in-a.txt")).rejects.toMatchObject({ code: "file-not-found" });
+    });
+
+    it("deletes a volume with its files, also when it is unknown", async () => {
+      const volume = volumeName();
+      const first = await withVolume(volume);
+      await context.api.writeFile(first.id, "/tmp/gone.txt", encode("gone"));
+      await context.api.destroy(first.id);
+
+      await context.api.deleteVolume(volume);
+      await expect(context.api.deleteVolume(volume)).resolves.toBeUndefined();
+
+      const second = await withVolume(volume);
+      volumes.push(volume);
+      await expect(context.api.readFile(second.id, "/tmp/gone.txt")).rejects.toMatchObject({ code: "file-not-found" });
+    });
+
+    it("refuses to delete a volume a sandbox still uses", async () => {
+      const volume = volumeName();
+      volumes.push(volume);
+      await withVolume(volume);
+
+      await expect(context.api.deleteVolume(volume)).rejects.toMatchObject({ code: "volume-in-use" });
     });
 
     it("keeps files of different sandboxes apart", async () => {

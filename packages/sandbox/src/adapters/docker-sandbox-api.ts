@@ -4,7 +4,10 @@ import { posix } from "node:path";
 import {
   assertAbsolutePath,
   assertSandboxId,
+  assertVolumeMounts,
+  assertVolumeName,
   defaultIsolationClass,
+  mountPath,
   sandboxUser,
   newSandboxId,
   SandboxError,
@@ -24,6 +27,7 @@ export interface DockerSandboxApiOptions {
 
 const runtimes: Record<IsolationClass, string> = { container: "runc", gvisor: "runsc" };
 const containerName = (sandboxId: string) => `tendworks-sandbox-${sandboxId}`;
+const volumeName = (volume: string) => `tendworks-volume-${volume}`;
 
 /** Splits Docker's multiplexed attach stream: frames of [stream, 0, 0, 0, size (4 bytes, big endian)] + payload. */
 function demultiplex(raw: Uint8Array): { stdout: string; stderr: string } {
@@ -102,7 +106,7 @@ function upgrade(target: URL, body: unknown): Promise<Socket> {
 
 /**
  * Sandbox API on the Docker Engine API. Needs only the socket proxy sections
- * CONTAINERS, EXEC and POST; images must already be on the host.
+ * CONTAINERS, EXEC, VOLUMES and POST; images must already be on the host.
  */
 export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOptions): SandboxApi {
   const call = (method: string, path: string, init: { json?: unknown; body?: Uint8Array; contentType?: string } = {}) => {
@@ -147,7 +151,8 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
   };
 
   const api: SandboxApi = {
-    async create(template) {
+    async create(template, { volumes = [] } = {}) {
+      assertVolumeMounts(volumes);
       const id = newSandboxId();
       const isolationClass = template.spec.isolationClass ?? defaultIsolationClass;
       const { cpus, memoryMb, pids = 1024 } = template.spec.resources ?? {};
@@ -163,8 +168,15 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
             Runtime: runtimes[isolationClass],
             Init: true,
             Privileged: false, // always set explicitly: the socket proxy cannot stop a privileged container (it filters paths, not bodies)
-            Binds: [], // no host mounts; sandbox volumes are added here explicitly when needed
-            Mounts: [],
+            Binds: [], // no host mounts, only named volumes
+            // A named volume is created on first use and, while empty, takes over the content
+            // and ownership of the image directory it is mounted on.
+            Mounts: volumes.map(({ volume, path }) => ({
+              Type: "volume",
+              Source: volumeName(volume),
+              Target: mountPath(path),
+              VolumeOptions: { Labels: { ...labels, "dev.tendworks.volume": volume } },
+            })),
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],
             PidsLimit: pids,
@@ -289,6 +301,12 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       assertSandboxId(sandboxId);
       const response = await call("DELETE", `/containers/${containerName(sandboxId)}?force=true&v=true`);
       if (!response.ok && response.status !== 404) throw await failure(response, "destroying the sandbox");
+    },
+    async deleteVolume(volume) {
+      assertVolumeName(volume);
+      const response = await call("DELETE", `/volumes/${volumeName(volume)}`);
+      if (response.status === 409) throw new SandboxError("volume-in-use", `volume ${volume} is mounted by a sandbox`);
+      if (!response.ok && response.status !== 404) throw await failure(response, "deleting the volume");
     },
   };
   return api;

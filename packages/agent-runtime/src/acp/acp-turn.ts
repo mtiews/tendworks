@@ -15,10 +15,17 @@ export interface AcpTurnOptions {
   timeoutMs: number;
   /** How long a cancelled turn gets to end. */
   cancelGraceMs?: number;
-  /** Agent-specific `_meta` of `session/new`, e.g. extra instructions for the session. */
+  /** Agent-specific `_meta` of `session/new` and `session/resume`, e.g. extra instructions for the session. */
   sessionMeta?: Record<string, unknown>;
   /** Removes secrets from text the harness wrote before it is recorded or reported. */
   redact?: (text: string) => string;
+  /** Called with the session id before the prompt is sent, e.g. to keep it for a later resume. */
+  onSession?: (sessionId: string) => Promise<void>;
+  /**
+   * An earlier session to resume with `session/resume`, and what to prompt it with then.
+   * When the agent cannot resume it, a new session gets `prompt` instead.
+   */
+  resume?: { sessionId: string; prompt: acp.ContentBlock[] };
 }
 
 export type AcpTurn =
@@ -33,14 +40,16 @@ class HarnessClosed extends Error {}
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Drives one prompt turn over ACP: initialize, `session/new`, `session/prompt`, recording
+ * Drives one prompt turn over ACP: initialize, `session/new` (or `session/resume` of an
+ * earlier session), `session/prompt`, recording
  * every `session/update` and allowing tool permissions once (the sandbox is the
  * boundary). The text the agent wrote after its last tool call is the reply; the last
  * `usage_update` cost is the session's cost. While the turn runs, keep-alive requests
  * make sure a quiet session still carries traffic, so idle connections are not cut.
  */
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
-  const { process, cwd, prompt, observer, keepAliveMs, timeoutMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text } = options;
+  const { process, cwd, observer, keepAliveMs, timeoutMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume } = options;
+  const meta = sessionMeta ? { _meta: sessionMeta } : {};
   const stderr = collect(process.stderr, (line) => observer.record({ type: "harness-stderr", text: redact(line) }));
 
   let reply = "";
@@ -88,9 +97,29 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
       closed,
     ]);
     observer.record({ type: "acp-initialize", protocolVersion: init.protocolVersion, agentInfo: init.agentInfo ?? null });
-    const newSession: acp.NewSessionRequest = { cwd, mcpServers: [], ...(sessionMeta ? { _meta: sessionMeta } : {}) };
-    const { sessionId } = await Promise.race([agent.request(acp.methods.agent.session.new, newSession), closed]);
-    observer.record({ type: "acp-session", sessionId });
+    let sessionId: string | undefined;
+    let prompt = options.prompt;
+    if (resume) {
+      if (init.agentCapabilities?.sessionCapabilities?.resume) {
+        try {
+          await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers: [], ...meta }), closed]);
+          sessionId = resume.sessionId;
+          prompt = resume.prompt;
+          observer.record({ type: "acp-session-resumed", sessionId });
+        } catch (error) {
+          if (error instanceof HarnessClosed) throw error;
+          const reason = redact(error instanceof Error ? error.message : String(error));
+          observer.record({ type: "acp-resume-failed", sessionId: resume.sessionId, reason });
+        }
+      } else {
+        observer.record({ type: "acp-resume-failed", sessionId: resume.sessionId, reason: "the agent cannot resume sessions" });
+      }
+    }
+    if (sessionId === undefined) {
+      sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [], ...meta }), closed])).sessionId;
+      observer.record({ type: "acp-session", sessionId });
+    }
+    await onSession?.(sessionId);
 
     keepAlive = setInterval(() => void agent.request(KEEP_ALIVE, {}).catch(() => {}), keepAliveMs);
     const turn = agent.request(acp.methods.agent.session.prompt, { sessionId, prompt });

@@ -101,8 +101,18 @@ export function createAgentRuntime({
     } else {
       try {
         result = await harness.run(
-          { taskId: id, profile, message: request.message, elapsedMs: now().getTime() - Date.parse(claimed.startedAt) },
-          { record, progress: (text) => working.set(id, withStatus("TASK_STATE_WORKING", text)) },
+          {
+            taskId: id,
+            profile,
+            message: request.message,
+            elapsedMs: id === taskId ? 0 : now().getTime() - Date.parse(claimed.startedAt),
+            ...(claimed.session ? { session: claimed.session } : {}),
+          },
+          {
+            record,
+            progress: (text) => working.set(id, withStatus("TASK_STATE_WORKING", text)),
+            saveSession: (session) => store.saveSession(id, session),
+          },
         );
       } finally {
         working.delete(id);

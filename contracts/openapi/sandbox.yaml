@@ -5,7 +5,9 @@ info:
   description: >-
     Internal API of the sandbox domain: create a sandbox from a sandbox
     template, run commands in it (to completion or attached to their
-    standard streams), read and write files, destroy it. Terms
+    standard streams), read and write files, destroy it. Volumes keep
+    directories beyond the life of a sandbox, so a later sandbox can carry
+    on with them. Terms
     follow OpenSandbox so another backend can be placed behind it. Its first
     consumer, the agent runtime, calls it in-process; snapshot, restore,
     pause and ports follow when needed.
@@ -43,6 +45,26 @@ paths:
       responses:
         "204":
           description: The sandbox no longer exists.
+  /volumes/{volumeName}:
+    parameters:
+      - name: volumeName
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/VolumeName"
+    delete:
+      operationId: deleteVolume
+      summary: Delete a volume and everything in it
+      description: Idempotent; deleting an unknown volume succeeds.
+      responses:
+        "204":
+          description: The volume no longer exists.
+        "409":
+          description: A sandbox still uses the volume.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /sandboxes/{sandboxId}/exec:
     parameters:
       - $ref: "#/components/parameters/SandboxId"
@@ -194,6 +216,28 @@ components:
       properties:
         template:
           $ref: "#/components/schemas/SandboxTemplate"
+        volumes:
+          type: array
+          description: >-
+            Volumes mounted into the sandbox. A volume is created empty on first use
+            (taking over the ownership of the directory it is mounted on) and outlives
+            the sandbox until it is deleted, so a later sandbox mounting the same
+            volume sees its files.
+          items:
+            $ref: "#/components/schemas/VolumeMount"
+    VolumeName:
+      type: string
+      pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
+    VolumeMount:
+      type: object
+      required: [volume, path]
+      additionalProperties: false
+      properties:
+        volume:
+          $ref: "#/components/schemas/VolumeName"
+        path:
+          $ref: "#/components/schemas/AbsolutePath"
+          description: Directory inside the sandbox the volume is mounted on.
     Sandbox:
       type: object
       required: [id, template, isolationClass, state, createdAt]
@@ -262,6 +306,6 @@ components:
       properties:
         code:
           type: string
-          enum: [sandbox-not-found, file-not-found, image-not-found, isolation-class-unavailable, invalid-request]
+          enum: [sandbox-not-found, file-not-found, image-not-found, isolation-class-unavailable, invalid-request, volume-in-use]
         message:
           type: string
