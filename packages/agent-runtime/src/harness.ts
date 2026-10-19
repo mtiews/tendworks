@@ -1,10 +1,11 @@
-import type { A2A, AgentProfile } from "@tendworks/shared";
+import type { A2A } from "@tendworks/shared";
+import type { LoadedAgentProfile } from "./agent-profiles.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 /** One task as a harness gets it. */
 export interface HarnessTask {
   taskId: string;
-  profile: AgentProfile.AgentProfile;
+  profile: LoadedAgentProfile;
   /** The message that started the task. */
   message: A2A.Message;
   /** How long agents already worked on the task before an interruption (0 for a new task). */

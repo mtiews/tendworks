@@ -203,7 +203,16 @@ function formatRun(run: Run): string {
   ];
   const withTranscript = run.steps.filter((step) => step.transcript);
   const transcripts = withTranscript.length > 0 ? `\n${table([["STEP", "TRANSCRIPT"], ...withTranscript.map((step) => [step.reference, step.transcript!])])}` : "";
-  return `${table(fields)}\n${table(steps)}${transcripts}`;
+  return `${table(fields)}\n${table(steps)}${transcripts}${formatOutput(run.output)}`;
+}
+
+/** The run's output, one row per top-level field; single-line strings as they are, anything else as JSON. */
+function formatOutput(output: unknown): string {
+  if (output === undefined) return "";
+  const entries = output !== null && typeof output === "object" && !Array.isArray(output) ? Object.entries(output) : [["output", output]];
+  if (entries.length === 0) return "";
+  const rows = entries.map(([key, value]) => [String(key), typeof value === "string" && !/[\r\n]/.test(value) ? value : JSON.stringify(value)]);
+  return `\n${table([["OUTPUT", "VALUE"], ...rows])}`;
 }
 
 const formatCost = ({ amount, currency }: Cost) => `${Number(amount.toFixed(4))} ${currency}`;

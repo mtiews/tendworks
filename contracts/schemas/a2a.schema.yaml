@@ -110,6 +110,9 @@ $defs:
         items:
           $ref: '#/$defs/part'
       metadata:
+        description: >-
+          Free map. Agents with a sandbox read `dev.tendworks/workspace` (see
+          `#/$defs/workspace`) to prepare their workspace before the session starts.
         $ref: '#/$defs/struct'
       extensions:
         type: array
@@ -216,3 +219,24 @@ $defs:
     description: A free JSON object.
     type: object
     additionalProperties: true
+  workspace:
+    title: Workspace
+    description: >-
+      Tendworks extension, sent as `Message.metadata["dev.tendworks/workspace"]` of the
+      message that starts a task: the agent's workspace is a checkout of `repository` on
+      `branch`. An existing branch is checked out, a missing one is created from the
+      repository's default branch, so a task sent again for the same branch continues
+      where the last attempt left off. The agent reaches the repository with the
+      credentials its agent profile passes into the sandbox (`spec.env`).
+    type: object
+    additionalProperties: false
+    required: [repository, branch]
+    properties:
+      repository:
+        type: string
+        pattern: ^[^-\s]\S*$
+        description: Clone URL of a Git repository, e.g. `https://git.example/owner/name.git`.
+      branch:
+        type: string
+        pattern: ^[^-\s]\S*$
+        description: Branch the agent works on; fixed per run, so a retry updates the same branch.

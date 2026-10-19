@@ -15,6 +15,8 @@ export interface AcpTurnOptions {
   timeoutMs: number;
   /** How long a cancelled turn gets to end. */
   cancelGraceMs?: number;
+  /** Agent-specific `_meta` of `session/new` and `session/resume`, e.g. extra instructions for the session. */
+  sessionMeta?: Record<string, unknown>;
   /** Removes secrets from text the harness wrote before it is recorded or reported. */
   redact?: (text: string) => string;
   /** Called with the session id before the prompt is sent, e.g. to keep it for a later resume. */
@@ -46,7 +48,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * make sure a quiet session still carries traffic, so idle connections are not cut.
  */
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
-  const { process, cwd, observer, keepAliveMs, timeoutMs, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume } = options;
+  const { process, cwd, observer, keepAliveMs, timeoutMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume } = options;
+  const meta = sessionMeta ? { _meta: sessionMeta } : {};
   const stderr = collect(process.stderr, (line) => observer.record({ type: "harness-stderr", text: redact(line) }));
 
   let reply = "";
@@ -99,7 +102,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
     if (resume) {
       if (init.agentCapabilities?.sessionCapabilities?.resume) {
         try {
-          await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers: [] }), closed]);
+          await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers: [], ...meta }), closed]);
           sessionId = resume.sessionId;
           prompt = resume.prompt;
           observer.record({ type: "acp-session-resumed", sessionId });
@@ -113,7 +116,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
       }
     }
     if (sessionId === undefined) {
-      sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [] }), closed])).sessionId;
+      sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [], ...meta }), closed])).sessionId;
       observer.record({ type: "acp-session", sessionId });
     }
     await onSession?.(sessionId);

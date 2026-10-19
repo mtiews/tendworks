@@ -1,12 +1,15 @@
 import { serve } from "@hono/node-server";
 import {
+  AGENT_SECRET_PREFIX,
   AgentProfileError,
+  agentSecretsFromEnv,
   claudeCodeCredentialFromEnv,
   createAgentRuntime,
   createClaudeCodeHarness,
   createFileTranscriptStore,
   createPostgresTaskStore,
   loadAgentProfiles,
+  loadSkills,
   migrateAgentRuntimeStore,
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
@@ -31,9 +34,11 @@ const env = (name: string, fallback?: string): string => {
 
 let profiles;
 let templates;
+let skills;
 try {
   profiles = loadAgentProfiles(env("TEND_CONFIG_DIR"));
   templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"));
+  skills = loadSkills(env("TEND_CONFIG_DIR"));
 } catch (error) {
   if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError)) throw error;
   console.error(error.message);
@@ -46,11 +51,23 @@ const selected = claudeCodeCredentialFromEnv(process.env);
 if ("problem" in selected && profiles.some((profile) => profile.spec.harness === "claude-code")) {
   console.warn(`harness claude-code: ${selected.problem}; its tasks will fail until this is fixed`);
 }
+// Secrets agent profiles pass into sandboxes (spec.env): only TENDWORKS_AGENT_* variables
+// resolve, so platform secrets never reach an agent. Never log their values.
+const secrets = agentSecretsFromEnv(process.env);
+for (const profile of profiles) {
+  for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
+    if (secrets(secretRef.name) === undefined) {
+      console.warn(`agent profile ${profile.metadata.name}: ${variable} needs ${secretRef.name}, which is not set or not an agent secret (${AGENT_SECRET_PREFIX}*); its tasks will fail until it is set`);
+    }
+  }
+}
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
   sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl }),
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
+  skills,
+  secrets,
   ...(process.env.ANTHROPIC_BASE_URL ? { baseUrl: process.env.ANTHROPIC_BASE_URL } : {}),
 });
 

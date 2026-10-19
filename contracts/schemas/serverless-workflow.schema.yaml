@@ -172,6 +172,13 @@ $defs:
             minItems: 1
             items:
               $ref: '#/$defs/a2aPart'
+          metadata:
+            type: object
+            title: A2AMessageMetadata
+            additionalProperties: true
+            description: >-
+              Free map sent along with the message (A2A message metadata). Tendworks agents
+              read `dev.tendworks/workspace` (contracts/schemas/a2a.schema.yaml#/$defs/workspace).
   a2aPart:
     title: A2APart
     tsType: A2ATextPart | A2ADataPart

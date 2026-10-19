@@ -133,6 +133,7 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
         messageId: `${options.runId}${reference}`,
         role: "ROLE_USER",
         parts: parameters.message.parts.map(toPart),
+        ...(parameters.message.metadata === undefined ? {} : { metadata: parameters.message.metadata }),
       },
       metadata: { [RUN_ID]: options.runId, [STEP_REFERENCE]: reference },
     };

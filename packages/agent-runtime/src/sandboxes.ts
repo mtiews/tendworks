@@ -4,6 +4,7 @@ type Schemas = Sandbox.components["schemas"];
 
 export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type ExecRequest = Schemas["ExecRequest"];
+export type ExecResult = Schemas["ExecResult"];
 export type VolumeMount = Schemas["VolumeMount"];
 
 /** A process in a sandbox with its standard streams open. */
@@ -22,6 +23,8 @@ export interface SandboxProcess {
 export interface Sandboxes {
   /** Volumes outlive the sandbox, so a later sandbox mounting them carries on with their files. */
   create(template: SandboxTemplate, options?: { volumes?: VolumeMount[] }): Promise<{ id: string }>;
+  /** Runs a command and waits for it to finish; a non-zero exit code is not an error. */
+  exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
   attach(sandboxId: string, request: ExecRequest): Promise<SandboxProcess>;
   readFile(sandboxId: string, path: string): Promise<Uint8Array>;
   writeFile(sandboxId: string, path: string, content: Uint8Array): Promise<void>;
