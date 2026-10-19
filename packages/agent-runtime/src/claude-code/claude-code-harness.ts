@@ -1,3 +1,4 @@
+import type * as acp from "@agentclientprotocol/sdk";
 import type { A2A } from "@tendworks/shared";
 import { runAcpTurn } from "../acp/acp-turn.js";
 import type { Harness, HarnessResult } from "../harness.js";
@@ -132,7 +133,7 @@ async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string): Prom
   }));
 }
 
-function toContent(part: A2A.Part): { type: "text"; text: string }[] | { type: "resource_link"; uri: string; name: string }[] {
+function toContent(part: A2A.Part): acp.ContentBlock[] {
   if ("text" in part) return [{ type: "text", text: part.text }];
   if ("data" in part) return [{ type: "text", text: JSON.stringify(part.data, null, 2) }];
   if ("url" in part) return [{ type: "resource_link", uri: part.url, name: part.filename ?? part.url }];
