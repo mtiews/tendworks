@@ -1,3 +1,4 @@
+import { toArtifact } from "./artifacts.js";
 import type { Harness } from "./harness.js";
 
 /**
@@ -8,7 +9,7 @@ import type { Harness } from "./harness.js";
 export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<void> }): Harness {
   return {
     async run({ taskId, profile, message, elapsedMs = 0 }, observer) {
-      const { outcome = "completed", delaySeconds = 0, message: reply } = profile.spec.fake ?? {};
+      const { outcome = "completed", delaySeconds = 0, message: reply, artifacts = [] } = profile.spec.fake ?? {};
       observer.progress("working");
       const remainingMs = delaySeconds * 1_000 - elapsedMs;
       if (remainingMs > 0) await sleep(remainingMs);
@@ -24,7 +25,7 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
       return {
         state: "TASK_STATE_COMPLETED",
         message: text,
-        artifacts: [{ artifactId: `${taskId}/echo`, name: "echo", parts: message.parts }],
+        artifacts: [{ artifactId: `${taskId}/echo`, name: "echo", parts: message.parts }, ...artifacts.map((artifact) => toArtifact(taskId, artifact))],
         cost,
       };
     },

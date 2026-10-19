@@ -14,8 +14,9 @@ const profile = (name: string, fake: AgentProfile.FakeAgent = {}): AgentProfile.
 
 describeHarness("fake agent", () => ({
   harness: createFakeHarness({ sleep: async () => {} }),
-  profile: profile("echo", { message: "Hello" }),
+  profile: profile("echo", { message: "Hello", artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/1" }] }),
   reply: "Hello",
+  reported: { name: "pull-request", url: "https://git.example/acme/app/pull/1" },
 }));
 
 describeAgentTasks("fake agent", () => {

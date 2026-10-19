@@ -3,7 +3,8 @@ $schema: https://json-schema.org/draft/2020-12/schema
 title: AgentProfile
 description: >-
   Frontmatter of an agent profile (`agents/<name>.md`). The Markdown body below the
-  frontmatter is the role description. Workflows address a profile as `agent://<name>`.
+  frontmatter is the role description; harnesses that support it give it to the agent as
+  its instructions for every task. Workflows address a profile as `agent://<name>`.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -50,7 +51,46 @@ properties:
       sandbox:
         type: string
         description: Name of the sandbox template the agent's sandbox is created from.
+      skills:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$
+        description: >-
+          Skills (Agent Skills format) the agent can use, by directory name under
+          `skills/` of the configuration folder (`skills/<name>/SKILL.md` plus any files
+          next to it). They are copied into the agent's sandbox before the session starts.
+      env:
+        type: object
+        title: AgentEnvironment
+        description: >-
+          Environment variables set for the agent inside its sandbox, each from a secret
+          the platform holds (ADR 0008). Everything listed here is visible to the agent,
+          so list only secrets meant for it, e.g. a repository token scoped to what the
+          agent may do. A secret that cannot be resolved fails the task with its name.
+        propertyNames:
+          pattern: ^[A-Z_][A-Z0-9_]*$
+        additionalProperties:
+          $ref: '#/$defs/secretRef'
 $defs:
+  secretRef:
+    title: AgentSecretRef
+    description: >-
+      Reference to a secret the platform holds; in the laptop profile an environment
+      variable of the worker, set from `deploy/.env` (ADR 0008).
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^[A-Z_][A-Z0-9_]*$
   fakeAgent:
     title: FakeAgent
     description: How the fake agent answers every task.
@@ -73,3 +113,26 @@ $defs:
         maximum: 3600
         default: 0
         description: How long the agent works before it answers.
+      artifacts:
+        type: array
+        description: >-
+          Artifacts the agent reports in addition to the echo, as an agent in a sandbox
+          reports them (e.g. a pull request it opened).
+        items:
+          $ref: '#/$defs/reportedArtifact'
+  reportedArtifact:
+    title: ReportedArtifact
+    description: >-
+      A result an agent reports as a link, e.g. `{ name: pull-request, url: ... }`. It
+      becomes an A2A artifact of the task with one `url` part.
+    type: object
+    required: [name, url]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$
+      url:
+        type: string
+      description:
+        type: string

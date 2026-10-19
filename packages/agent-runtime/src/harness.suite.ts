@@ -9,6 +9,8 @@ export interface HarnessSuiteContext {
   profile: AgentProfile.AgentProfile;
   /** What the agent answers to that task. */
   reply: string;
+  /** A result the agent under `profile` reports as a link, e.g. a pull request it opened. */
+  reported: { name: string; url: string };
 }
 
 /**
@@ -58,6 +60,14 @@ export function describeHarness(name: string, setup: () => HarnessSuiteContext |
       const result = await harness.run({ taskId: "task-4", profile, message }, observe().observer);
 
       expect(result.cost).toEqual({ amount: expect.any(Number), currency: "USD" });
+    });
+
+    it("reports the results the agent declared as artifacts with a link", async () => {
+      const { harness, profile, reported } = await setup();
+
+      const result = await harness.run({ taskId: "task-5", profile, message }, observe().observer);
+
+      expect(result.artifacts).toContainEqual({ artifactId: `task-5/${reported.name}`, name: reported.name, parts: [{ url: reported.url }] });
     });
   });
 }

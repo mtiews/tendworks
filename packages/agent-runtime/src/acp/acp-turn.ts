@@ -15,6 +15,8 @@ export interface AcpTurnOptions {
   timeoutMs: number;
   /** How long a cancelled turn gets to end. */
   cancelGraceMs?: number;
+  /** Agent-specific `_meta` of `session/new`, e.g. extra instructions for the session. */
+  sessionMeta?: Record<string, unknown>;
   /** Removes secrets from text the harness wrote before it is recorded or reported. */
   redact?: (text: string) => string;
 }
@@ -38,7 +40,7 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
  * make sure a quiet session still carries traffic, so idle connections are not cut.
  */
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
-  const { process, cwd, prompt, observer, keepAliveMs, timeoutMs, cancelGraceMs = 10_000, redact = (text) => text } = options;
+  const { process, cwd, prompt, observer, keepAliveMs, timeoutMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text } = options;
   const stderr = collect(process.stderr, (line) => observer.record({ type: "harness-stderr", text: redact(line) }));
 
   let reply = "";
@@ -86,7 +88,8 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
       closed,
     ]);
     observer.record({ type: "acp-initialize", protocolVersion: init.protocolVersion, agentInfo: init.agentInfo ?? null });
-    const { sessionId } = await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [] }), closed]);
+    const newSession: acp.NewSessionRequest = { cwd, mcpServers: [], ...(sessionMeta ? { _meta: sessionMeta } : {}) };
+    const { sessionId } = await Promise.race([agent.request(acp.methods.agent.session.new, newSession), closed]);
     observer.record({ type: "acp-session", sessionId });
 
     keepAlive = setInterval(() => void agent.request(KEEP_ALIVE, {}).catch(() => {}), keepAliveMs);

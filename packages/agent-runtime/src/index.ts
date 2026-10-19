@@ -1,6 +1,8 @@
 export { createAgentRuntime, RESUMED, type AgentRuntimeOptions, type HarnessName } from "./agent-runtime.js";
 export { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks } from "./agent-tasks.js";
-export { AgentProfileError, loadAgentProfiles } from "./agent-profiles.js";
+export { AgentProfileError, loadAgentProfiles, type LoadedAgentProfile } from "./agent-profiles.js";
+export { loadSkills, type SkillFile, type Skills } from "./skills.js";
+export { AGENT_SECRET_PREFIX, agentSecretsFromEnv } from "./agent-secrets.js";
 export { createClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude-code/claude-code-harness.js";
 export { claudeCodeCredentialFromEnv, type ClaudeCodeCredential } from "./claude-code/credentials.js";
 export type { Cost, Harness, HarnessObserver, HarnessResult, HarnessTask } from "./harness.js";

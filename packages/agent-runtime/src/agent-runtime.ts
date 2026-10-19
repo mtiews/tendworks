@@ -1,4 +1,5 @@
 import type { A2A, AgentProfile } from "@tendworks/shared";
+import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks } from "./agent-tasks.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Harness, HarnessResult } from "./harness.js";
@@ -11,7 +12,7 @@ export const RESUMED = "dev.tendworks/resumed";
 export type HarnessName = AgentProfile.AgentProfileSpec["harness"];
 
 export interface AgentRuntimeOptions {
-  profiles: AgentProfile.AgentProfile[];
+  profiles: LoadedAgentProfile[];
   /** Harnesses by the name agent profiles use in `spec.harness`. The fake agent (`fake`) is built in. */
   harnesses?: Partial<Record<HarnessName, Harness>>;
   /** Where tasks are kept; durable so tasks survive a restart. In memory by default. */
@@ -51,7 +52,7 @@ export function createAgentRuntime({
   // Progress of running tasks; only the start and the end are written to the store.
   const working = new Map<string, A2A.Task>();
 
-  async function work(profile: AgentProfile.AgentProfile, request: A2A.SendMessageRequest): Promise<A2A.Task> {
+  async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest): Promise<A2A.Task> {
     const startedAt = now();
     const taskId = crypto.randomUUID();
     const claimed = await store.claim({

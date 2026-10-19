@@ -24,8 +24,19 @@ describe("loadAgentProfiles", () => {
         kind: "AgentProfile",
         metadata: { name: "echo" },
         spec: { harness: "fake", fake: { delaySeconds: 1 } },
+        role: "You echo.",
       },
     ]);
+  });
+
+  it("rejects a profile that names a skill the configuration does not contain", () => {
+    const dir = configWith({
+      "developer.md": "---\napiVersion: tendworks.dev/v1\nkind: AgentProfile\nmetadata:\n  name: developer\nspec:\n  harness: fake\n  skills: [tdd, missing]\n---\n",
+    });
+    mkdirSync(join(dir, "skills", "tdd"), { recursive: true });
+    writeFileSync(join(dir, "skills", "tdd", "SKILL.md"), "---\nname: tdd\n---\n");
+
+    expect(() => loadAgentProfiles(dir)).toThrow("agents/developer.md: /spec/skills: no skill 'missing' (skills/missing/SKILL.md)");
   });
 
   it("names the file and field of an invalid profile", () => {

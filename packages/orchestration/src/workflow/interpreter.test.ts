@@ -60,6 +60,31 @@ do:
     });
   });
 
+  it("sends the message metadata along, with runtime expressions evaluated against the input and the run", async () => {
+    const executor = new InMemoryAgentTaskExecutor();
+    const definition = workflow(`
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://developer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: build it }]
+            metadata:
+              dev.tendworks/workspace:
+                repository: '\${ "https://git.example/\\(.repository).git" }'
+                branch: '\${ "tendworks/run-\\($workflow.id)" }'
+`);
+
+    await runWorkflow(definition, { runId: "run-1", input: { repository: "acme/app" }, executor });
+
+    expect(executor.requests[0]?.request.message.metadata).toEqual({
+      "dev.tendworks/workspace": { repository: "https://git.example/acme/app.git", branch: "tendworks/run-run-1" },
+    });
+  });
+
   it("passes the workflow input and each call's transformed output on to the next task", async () => {
     const executor = new InMemoryAgentTaskExecutor()
       .agent("planner", () => ({

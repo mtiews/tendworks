@@ -10,8 +10,9 @@ import {
   createInMemoryTranscriptStore,
   type ClaudeCodeCredential,
   type ClaudeCodeHarnessOptions,
+  type LoadedAgentProfile,
 } from "../index.js";
-import type { ExecRequest, Sandboxes, SandboxProcess, SandboxTemplate } from "../sandboxes.js";
+import type { ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplate } from "../sandboxes.js";
 import type { TranscriptEntry } from "../transcripts/transcript-store.js";
 
 /*
@@ -34,6 +35,8 @@ interface AgentScript {
   crash?: string;
   /** Ends the turn only when cancelled. */
   hang?: boolean;
+  /** Written to the file named by TENDWORKS_ARTIFACTS before the turn ends. */
+  artifacts?: string;
 }
 
 interface Observed {
@@ -48,7 +51,12 @@ interface Observed {
 const encode = (text: string) => new TextEncoder().encode(text);
 const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 
-function startFakeAgent(script: AgentScript, observed: Observed): SandboxProcess {
+function startFakeAgent(
+  script: AgentScript,
+  observed: Observed,
+  env: Record<string, string>,
+  writeFile: (path: string, text: string) => void,
+): SandboxProcess {
   const toAgent = new TransformStream<Uint8Array, Uint8Array>();
   const fromAgent = new TransformStream<Uint8Array, Uint8Array>();
   const stderr = new TransformStream<Uint8Array, Uint8Array>();
@@ -97,6 +105,7 @@ function startFakeAgent(script: AgentScript, observed: Observed): SandboxProcess
       }
       if (script.delayMs) await new Promise((resolve) => setTimeout(resolve, script.delayMs));
       for (const text of script.reply ?? ["Hello"]) await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      if (script.artifacts !== undefined) writeFile(env.TENDWORKS_ARTIFACTS!, script.artifacts);
       await update(ctx, { sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: script.cost ?? 0.42, currency: "USD" } });
       return { stopReason: script.stopReason ?? "end_turn" };
     })
@@ -121,11 +130,15 @@ interface Attached {
   files: Map<string, string>;
 }
 
-function fakeSandboxes(script: AgentScript = {}) {
+function fakeSandboxes(
+  script: AgentScript = {},
+  execResult: (request: ExecRequest) => ExecResult = () => ({ exitCode: 0, stdout: "", stderr: "" }),
+) {
   const sandboxes = new Map<string, Map<string, Uint8Array>>();
   const created: SandboxTemplate[] = [];
   const destroyed: string[] = [];
   const attached: Attached[] = [];
+  const execs: { sandboxId: string; request: ExecRequest }[] = [];
   const observed: Observed = { prompts: [], keepAlives: 0, cancelled: false };
   const notFound = (message: string) => Object.assign(new Error(message), { code: "file-not-found" });
   const files = (id: string) => {
@@ -145,7 +158,12 @@ function fakeSandboxes(script: AgentScript = {}) {
       const snapshot = new Map([...files(sandboxId)].map(([path, content]) => [path, decode(content)]));
       attached.push({ sandboxId, request, files: snapshot });
       if (request.command[0] !== "claude-agent-acp") throw new Error(`unexpected command ${request.command.join(" ")}`);
-      return startFakeAgent(script, observed);
+      return startFakeAgent(script, observed, request.env ?? {}, (path, text) => files(sandboxId).set(path, encode(text)));
+    },
+    async exec(sandboxId, request) {
+      files(sandboxId);
+      execs.push({ sandboxId, request });
+      return execResult(request);
     },
     async readFile(sandboxId, path) {
       const content = files(sandboxId).get(path);
@@ -160,7 +178,7 @@ function fakeSandboxes(script: AgentScript = {}) {
       sandboxes.delete(sandboxId);
     },
   };
-  return { api, created, destroyed, attached, observed, sandboxes };
+  return { api, created, destroyed, attached, execs, observed, sandboxes };
 }
 
 const template: SandboxTemplate = {
@@ -202,10 +220,13 @@ const task = (overrides: { profile?: AgentProfile.AgentProfile; parts?: A2A.Part
   message: message(overrides.parts),
 });
 
+const pullRequest = { name: "pull-request", url: "https://git.example/acme/app/pull/1" };
+
 describeHarness("Claude Code over ACP (scripted agent)", () => ({
-  harness: harness(fakeSandboxes({ reply: ["Hello"] }).api),
+  harness: harness(fakeSandboxes({ reply: ["Hello"], artifacts: JSON.stringify([pullRequest]) }).api),
   profile: profile(),
   reply: "Hello",
+  reported: pullRequest,
 }));
 
 describeAgentTasks("agent runtime with the Claude Code harness (scripted agent)", () => {
@@ -374,5 +395,136 @@ describe("Claude Code harness", () => {
     expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("time") });
     expect(sandboxes.observed.cancelled).toBe(true);
     expect(sandboxes.destroyed).toEqual(["sandbox1"]);
+  });
+});
+
+describe("Claude Code harness: the agent's role, skills, secrets and workspace", () => {
+  const developer = (spec: Partial<AgentProfile.AgentProfileSpec> = {}, role?: string): LoadedAgentProfile => ({
+    ...profile(),
+    spec: { ...profile().spec, ...spec },
+    ...(role === undefined ? {} : { role }),
+  });
+  const agentToken = "agent-token-secret-value";
+  const secrets = (name: string): string | undefined => ({ AGENT_TOKEN: agentToken })[name as "AGENT_TOKEN"];
+  const withToken = { env: { GH_TOKEN: { secretRef: { name: "AGENT_TOKEN" } } } };
+  const workspace = { repository: "https://git.example/acme/app.git", branch: "tendworks/run-1" };
+  const withWorkspace = (value: unknown = workspace): A2A.Message => ({ ...message(), metadata: { "dev.tendworks/workspace": value } });
+
+  it("gives the agent its role description and how to report results as instructions for the session", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api).run({ ...task(), profile: developer({}, "You are the developer.") }, observe().observer);
+
+    const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+    expect(append).toContain("You are the developer.");
+    expect(append).toContain("/session/artifacts.json");
+    expect(sandboxes.attached[0]?.request.env).toMatchObject({ TENDWORKS_ARTIFACTS: "/session/artifacts.json" });
+  });
+
+  it("ignores a malformed artifacts file and records why", async () => {
+    const sandboxes = fakeSandboxes({ artifacts: '{"url": "not a list"}' });
+    const { observer, entries } = observe();
+
+    const result = await harness(sandboxes.api).run(task(), observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_COMPLETED" });
+    expect(result.artifacts).toBeUndefined();
+    expect(entries).toContainEqual(expect.objectContaining({ type: "artifacts-ignored" }));
+  });
+
+  it("copies the profile's skills into the harness's config directory before the harness starts", async () => {
+    const sandboxes = fakeSandboxes();
+    const skills = new Map([["tdd", [{ path: "SKILL.md", content: encode("Red, green.") }, { path: "refs/mocking.md", content: encode("Mock less.") }]]]);
+
+    await harness(sandboxes.api, { skills }).run({ ...task(), profile: developer({ skills: ["tdd"] }) }, observe().observer);
+
+    const { files, request } = sandboxes.attached[0]!;
+    expect(files.get(`${request.env?.CLAUDE_CONFIG_DIR}/skills/tdd/SKILL.md`)).toBe("Red, green.");
+    expect(files.get(`${request.env?.CLAUDE_CONFIG_DIR}/skills/tdd/refs/mocking.md`)).toBe("Mock less.");
+  });
+
+  it("fails the task without a sandbox when a skill of the profile is not loaded", async () => {
+    const sandboxes = fakeSandboxes();
+
+    const result = await harness(sandboxes.api).run({ ...task(), profile: developer({ skills: ["tdd"] }) }, observe().observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("tdd") });
+    expect(sandboxes.created).toEqual([]);
+  });
+
+  it("passes the secrets the profile lists into the sandbox under the names it gives them", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api, { secrets }).run({ ...task(), profile: developer(withToken) }, observe().observer);
+
+    const env = sandboxes.attached[0]?.request.env ?? {};
+    expect(env.GH_TOKEN).toBe(agentToken);
+    expect(env).not.toHaveProperty("AGENT_TOKEN");
+  });
+
+  it("fails the task without a sandbox when a secret the profile lists is missing, naming it but no value", async () => {
+    const sandboxes = fakeSandboxes();
+
+    const result = await harness(sandboxes.api, { secrets }).run(
+      { ...task(), profile: developer({ env: { GH_TOKEN: { secretRef: { name: "NOT_SET" } } } }) },
+      observe().observer,
+    );
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("NOT_SET") });
+    expect(sandboxes.created).toEqual([]);
+  });
+
+  it("never reveals a secret of the profile in what it reports", async () => {
+    const sandboxes = fakeSandboxes({ crash: `fatal: push refused for ${agentToken}` });
+    const { observer, entries } = observe();
+
+    const result = await harness(sandboxes.api, { secrets }).run({ ...task(), profile: developer(withToken) }, observer);
+
+    expect(result.message).toContain("fatal: push refused");
+    expect(result.message).not.toContain(agentToken);
+    expect(JSON.stringify(entries)).not.toContain(agentToken);
+  });
+
+  it("checks the workspace out in the sandbox, with the profile's secrets, before the harness starts", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api, { secrets }).run({ taskId: "task-1", message: withWorkspace(), profile: developer(withToken) }, observe().observer);
+
+    expect(sandboxes.execs).toHaveLength(1);
+    const { request } = sandboxes.execs[0]!;
+    expect(request.command.slice(-2)).toEqual([workspace.repository, workspace.branch]);
+    expect(request).toMatchObject({ workingDirectory: "/workspace", env: { GH_TOKEN: agentToken } });
+    expect(sandboxes.attached).toHaveLength(1);
+  });
+
+  it("does not touch the workspace when the task asks for none", async () => {
+    const sandboxes = fakeSandboxes();
+
+    await harness(sandboxes.api).run(task(), observe().observer);
+
+    expect(sandboxes.execs).toEqual([]);
+  });
+
+  it("fails the task with the checkout's error output when the workspace cannot be checked out", async () => {
+    const sandboxes = fakeSandboxes({}, () => ({ exitCode: 128, stdout: "", stderr: `fatal: could not read from ${agentToken}` }));
+
+    const result = await harness(sandboxes.api, { secrets }).run(
+      { taskId: "task-1", message: withWorkspace(), profile: developer(withToken) },
+      observe().observer,
+    );
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("fatal: could not read") });
+    expect(result.message).not.toContain(agentToken);
+    expect(sandboxes.attached).toEqual([]);
+    expect(sandboxes.destroyed).toEqual(["sandbox1"]);
+  });
+
+  it("fails the task when the workspace it asks for is malformed", async () => {
+    const sandboxes = fakeSandboxes();
+
+    const result = await harness(sandboxes.api).run({ taskId: "task-1", message: withWorkspace({ branch: "x" }), profile: developer() }, observe().observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("dev.tendworks/workspace") });
+    expect(sandboxes.created).toEqual([]);
   });
 });
