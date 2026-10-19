@@ -72,5 +72,11 @@ describe("triggers through the control plane and the trigger gateway", () => {
         [first.fired[1]!.runId, "hello-agent", { issue: { number: 102, title: "Fix the typo", url: "https://issues.example/example/playground/102" } }],
       ].sort(),
     );
+    const run = runs.find((candidate) => candidate.id === first.fired[0]!.runId);
+    expect(run?.startedBy).toEqual({
+      kind: "trigger",
+      binding: "issue-ready-for-agent",
+      issue: { repository: "example/playground", number: 101, title: "Add a greeting", url: "https://issues.example/example/playground/101" },
+    });
   });
 });

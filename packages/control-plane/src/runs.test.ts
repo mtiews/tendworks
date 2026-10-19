@@ -55,7 +55,9 @@ describe("runs API", () => {
     const run = body as Run;
     expect(run).toMatchObject({ workflow: "build", status: "pending", input: { issue: 7 } });
     expect(headers.get("location")).toBe(`/runs/${run.id}`);
-    expect(runs.started).toEqual([{ workflow: expect.objectContaining({ document: expect.objectContaining({ name: "build" }) }), input: { issue: 7 } }]);
+    expect(runs.started).toEqual([
+      { workflow: expect.objectContaining({ document: expect.objectContaining({ name: "build" }) }), input: { issue: 7 }, startedBy: { kind: "manual" } },
+    ]);
   });
 
   it("hands the caller's traceparent to orchestration, so the run joins the caller's trace", async () => {
@@ -67,6 +69,17 @@ describe("runs API", () => {
 
     expect(status).toBe(201);
     expect(runs.started).toEqual([expect.objectContaining({ traceparent })]);
+  });
+
+  it("hands what started the run to orchestration, and declares a run without an origin as started by hand", async () => {
+    const runs = createInMemoryRuns();
+    const { request } = setup(runs);
+    const startedBy = { kind: "trigger", binding: "ready", issue: { repository: "acme/app", number: 7, url: "https://issues.example/7" } };
+
+    await request("POST", "/runs", { workflow: "build", startedBy });
+    await request("POST", "/runs", { workflow: "build" });
+
+    expect(runs.started.map((run) => run.startedBy)).toEqual([startedBy, { kind: "manual" }]);
   });
 
   it("rejects a malformed traceparent", async () => {

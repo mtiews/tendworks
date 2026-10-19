@@ -76,6 +76,7 @@ export function createInMemoryRuns(): RunsPort & { started: (StartRunRequest & {
         workflow: document?.name ?? "unknown",
         status: "pending",
         input: request.input ?? {},
+        startedBy: request.startedBy ?? { kind: "manual" },
         steps: [],
         createdAt: new Date().toISOString(),
       };

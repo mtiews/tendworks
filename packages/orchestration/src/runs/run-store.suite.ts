@@ -25,6 +25,7 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       workflow: "hello",
       status: "pending",
       input: { issue: { number: 7 } },
+      startedBy: { kind: "trigger", binding: "ready-issues", issue: { repository: "acme/app", number: 7, url: "https://issues.example/7" } },
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       steps: [],
       createdAt: "2026-10-18T10:00:00.000Z",

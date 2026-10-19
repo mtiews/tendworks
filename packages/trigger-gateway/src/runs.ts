@@ -1,4 +1,7 @@
 import type { ControlPlane } from "@tendworks/shared";
+
+/** What started a run, as the control plane records it. */
+export type RunOrigin = ControlPlane.components["schemas"]["runOrigin"];
 import createClient from "openapi-fetch";
 
 export interface StartRun {
@@ -7,6 +10,8 @@ export interface StartRun {
   input: Record<string, unknown>;
   /** W3C trace context the run joins: the trace of the trigger that fired. */
   traceparent?: string;
+  /** The binding and the issue that start the run. */
+  startedBy?: RunOrigin;
 }
 
 /**

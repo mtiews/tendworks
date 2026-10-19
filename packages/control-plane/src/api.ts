@@ -96,7 +96,10 @@ export function createControlPlaneApi({
     if (!definition) {
       return problem(400, "Unknown workflow", `no workflow '${body.workflow}' is configured (configured: ${configuration.workflowNames.join(", ") || "none"})`);
     }
-    const run = await runs.start({ workflow: definition as unknown as Record<string, unknown>, input: body.input ?? {} }, traceparent ? { traceparent } : {});
+    const run = await runs.start(
+      { workflow: definition as unknown as Record<string, unknown>, input: body.input ?? {}, startedBy: body.startedBy ?? { kind: "manual" } },
+      traceparent ? { traceparent } : {},
+    );
     return c.json(run satisfies Schemas["run"], 201, { location: `/runs/${run.id}` });
   });
 

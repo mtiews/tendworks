@@ -165,6 +165,20 @@ describe("trigger gateway", () => {
     ]);
   });
 
+  it("declares each run as started by the binding for the issue it matched", async () => {
+    const { runs, gateway } = setup([binding([issue(1, { title: "Fix the login" })])]);
+
+    await gateway.check("ready-issues");
+
+    expect(runs.started.map((run) => run.startedBy)).toEqual([
+      {
+        kind: "trigger",
+        binding: "ready-issues",
+        issue: { repository: "acme/playground", number: 1, title: "Fix the login", url: "https://issues.example/acme/playground/1" },
+      },
+    ]);
+  });
+
   it("starts each run in the trace of its trigger.fired event", async () => {
     const { runs, store, gateway } = setup([binding([issue(1), issue(2)])]);
 

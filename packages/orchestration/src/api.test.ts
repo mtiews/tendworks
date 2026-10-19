@@ -139,6 +139,21 @@ describe("orchestration API", () => {
     expect((await store.publisher.events(run.id))[0]!.traceparent).toBe(run.traceparent);
   });
 
+  it("records what started the run, and a run nobody declares as started by hand", async () => {
+    const { request } = setup();
+    const startedBy = {
+      kind: "trigger",
+      binding: "ready-issues",
+      issue: { repository: "acme/playground", number: 7, title: "Fix it", url: "https://issues.example/acme/playground/7" },
+    };
+
+    const triggered = (await request("POST", "/runs", { workflow, startedBy })).body as Run;
+    const manual = (await request("POST", "/runs", { workflow })).body as Run;
+
+    expect((await request("GET", `/runs/${triggered.id}`)).body).toMatchObject({ startedBy });
+    expect((await request("GET", `/runs/${manual.id}`)).body).toMatchObject({ startedBy: { kind: "manual" } });
+  });
+
   it("refuses a malformed traceparent", async () => {
     const { request } = setup();
 

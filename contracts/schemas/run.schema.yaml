@@ -22,6 +22,8 @@ $defs:
         $ref: '#/$defs/runStatus'
       input:
         description: Input the run was started with.
+      startedBy:
+        $ref: '#/$defs/runOrigin'
       traceparent:
         type: string
         pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
@@ -47,6 +49,48 @@ $defs:
       finishedAt:
         type: string
         format: date-time
+  runOrigin:
+    title: RunOrigin
+    description: >-
+      What started the run, as its starter declared it: `manual` (a client such as the
+      CLI or a script) or `trigger` (a trigger binding, for the issue it matched). Absent
+      for runs recorded before origins were.
+    oneOf:
+      - title: ManualRunOrigin
+        type: object
+        additionalProperties: false
+        required: [kind]
+        properties:
+          kind:
+            const: manual
+      - title: TriggerRunOrigin
+        type: object
+        additionalProperties: false
+        required: [kind, binding, issue]
+        properties:
+          kind:
+            const: trigger
+          binding:
+            type: string
+            description: Name of the trigger binding that fired.
+          issue:
+            $ref: '#/$defs/issueReference'
+  issueReference:
+    title: RunIssueReference
+    description: The issue a trigger matched.
+    type: object
+    additionalProperties: false
+    required: [repository, number, url]
+    properties:
+      repository:
+        type: string
+        description: Repository as `<owner>/<name>`.
+      number:
+        type: integer
+      title:
+        type: string
+      url:
+        type: string
   runStatus:
     title: RunStatus
     description: >-

@@ -227,10 +227,17 @@ function formatTable(report: PlatformStatus): string {
 
 function formatRunList(list: RunList): string {
   const rows = [
-    ["ID", "WORKFLOW", "STATUS", "CREATED", "FINISHED"],
-    ...list.items.map((run) => [run.id, run.workflow, run.status, run.createdAt, run.finishedAt ?? ""]),
+    ["ID", "WORKFLOW", "STATUS", "STARTED BY", "CREATED", "FINISHED"],
+    ...list.items.map((run) => [run.id, run.workflow, run.status, formatOrigin(run.startedBy), run.createdAt, run.finishedAt ?? ""]),
   ];
   return table(rows);
+}
+
+/** `manual`, or `trigger <binding>: <owner>/<name>#<n>`; empty for runs recorded without an origin. */
+function formatOrigin(origin: Run["startedBy"], { url = false }: { url?: boolean } = {}): string {
+  if (!origin) return "";
+  if (origin.kind === "manual") return "manual";
+  return `trigger ${origin.binding}: ${origin.issue.repository}#${origin.issue.number}${url ? ` (${origin.issue.url})` : ""}`;
 }
 
 function formatAgentList(list: AgentList): string {
@@ -261,6 +268,7 @@ function formatRun(run: Run): string {
     ["RUN", run.id],
     ["WORKFLOW", run.workflow],
     ["STATUS", run.status],
+    ...(run.startedBy ? [["STARTED BY", formatOrigin(run.startedBy, { url: true })]] : []),
     ["CREATED", run.createdAt],
     ["STARTED", run.startedAt ?? ""],
     ["FINISHED", run.finishedAt ?? ""],

@@ -39,6 +39,7 @@ alter table orchestration.steps add column if not exists cost jsonb;
 alter table orchestration.steps add column if not exists artifacts jsonb;
 alter table orchestration.runs add column if not exists traceparent text;
 alter table orchestration.steps add column if not exists workspace jsonb;
+alter table orchestration.runs add column if not exists started_by jsonb;
 create table if not exists orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
@@ -89,6 +90,7 @@ interface RunRow {
   workflow: string;
   status: Run["status"];
   input: unknown;
+  started_by: NonNullable<Run["startedBy"]> | null;
   traceparent: string | null;
   output: unknown;
   error: NonNullable<Run["error"]> | null;
@@ -153,11 +155,11 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
   return {
     async create(run) {
       await pool.query(
-        `insert into orchestration.runs (id, workflow, status, input, traceparent, output, error, created_at, started_at, finished_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        `insert into orchestration.runs (id, workflow, status, input, started_by, traceparent, output, error, created_at, started_at, finished_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
-          run.id, run.workflow, run.status, json(run.input), run.traceparent ?? null, json(run.output), json(run.error), run.createdAt,
-          run.startedAt ?? null, run.finishedAt ?? null,
+          run.id, run.workflow, run.status, json(run.input), json(run.startedBy), run.traceparent ?? null, json(run.output), json(run.error),
+          run.createdAt, run.startedAt ?? null, run.finishedAt ?? null,
         ],
       );
     },
@@ -209,6 +211,7 @@ function toRun(row: RunRow, steps: StepRow[]): Run {
     workflow: row.workflow,
     status: row.status,
     input: row.input,
+    ...(row.started_by === null ? {} : { startedBy: row.started_by }),
     ...(row.traceparent === null ? {} : { traceparent: row.traceparent }),
     ...(row.output === null ? {} : { output: row.output }),
     ...(row.error === null ? {} : { error: row.error }),

@@ -70,16 +70,17 @@ export function createTriggerGateway({
       if (!(await store.claim(key))) continue;
       // A firing starts a trace; the run and all its events belong to it.
       const traceparent = newTraceparent();
+      const reference = { repository: issue.repository, number: issue.number, title: issue.title, url: issue.url };
       let runId: string;
       try {
-        runId = (await runs.start({ workflow, input: mapInput(input, { issue }) as Record<string, unknown>, traceparent })).id;
+        const startedBy = { kind: "trigger" as const, binding: name, issue: reference };
+        runId = (await runs.start({ workflow, input: mapInput(input, { issue }) as Record<string, unknown>, traceparent, startedBy })).id;
       } catch (error) {
         await store.release(key);
         result.failed.push({ issue: key.item, error: error instanceof Error ? error.message : String(error) });
         continue;
       }
       // From here on the run exists: the claim is never released again, so no second run starts.
-      const reference = { repository: issue.repository, number: issue.number, title: issue.title, url: issue.url };
       await store.fired(key, runId, triggerFired({ ...key, workflow, runId, issue: reference, time: now().toISOString(), traceparent }));
       result.fired.push({ issue: key.item, runId });
     }
