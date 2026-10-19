@@ -130,6 +130,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /sessions:
+    get:
+      operationId: listAgentSessions
+      summary: List the active agent sessions, the most recently started first
+      description: >-
+        Every agent session that has not ended: those of runs' steps (with run and step,
+        as the step's message named them) and those of chats. Finished tasks, ended and
+        failed chats are left out.
+      responses:
+        "200":
+          description: The active agent sessions.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/agent-session.schema.yaml#/$defs/agentSessionList"
   /tasks/{taskId}/transcript:
     get:
       operationId: getTaskTranscript

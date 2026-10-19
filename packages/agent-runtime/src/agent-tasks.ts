@@ -24,6 +24,12 @@ export interface SendMessageOptions {
   onTask?: (task: A2A.Task) => void | Promise<void>;
 }
 
+/**
+ * `SendMessageRequest.metadata` keys a run's step names itself by (ADR 0002); the runtime
+ * keeps them in `Task.metadata`, so the task's agent session names its run and step.
+ */
+export const RUN_ID = "dev.tendworks/runId";
+export const STEP_REFERENCE = "dev.tendworks/stepReference";
 /** `Task.metadata` key: reference to the transcript of the agent session (string). */
 export const TRANSCRIPT = "dev.tendworks/transcript";
 /** `Task.metadata` key: what the agent session cost, `{ amount, currency }`. */

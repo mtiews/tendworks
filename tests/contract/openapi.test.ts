@@ -358,7 +358,36 @@ describe("control plane: agents", () => {
 
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
-    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"] });
+    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+  });
+
+  it("shows the active agent sessions of a run's step and of a chat under their profiles, and leaves out finished ones", async () => {
+    const working: (() => void)[] = [];
+    const client = controlPlane({}, { sleep: () => new Promise<void>((resolve) => working.push(resolve)) });
+    const { data: run } = await client.POST("/runs", { body: { workflow: "slow-agent" } });
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    for (let attempt = 0; attempt < 200 && working.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+    const sessionsOf = async (name: string) => (await client.GET("/agents")).data?.items.find((agent) => agent.name === name)?.sessions;
+
+    const step = await sessionsOf("fake-slow-developer");
+    const chatting = await sessionsOf("fake-assistant");
+    working.splice(0).forEach((resolve) => resolve());
+    await client.POST("/chats/{chatId}/end", { params: { path: { chatId: chat!.id } } });
+    for (let attempt = 0; attempt < 200 && (await client.GET("/runs/{runId}", { params: { path: { runId: run!.id } } })).data?.status === "running"; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    expect(step).toEqual([
+      { kind: "run-step", agent: "fake-slow-developer", taskId: expect.any(String), status: "working", startedAt: expect.any(String), run: run!.id, step: "/do/0/implement" },
+    ]);
+    expect(chatting).toEqual([{ kind: "chat", agent: "fake-assistant", taskId: chat!.id, status: "working", startedAt: chat!.startedAt, chat: chat!.id }]);
+    expect([await sessionsOf("fake-slow-developer"), await sessionsOf("fake-assistant")]).toEqual([[], []]);
+  });
+
+  it("answers 503 when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+
+    expect((await client.GET("/agents")).response.status).toBe(503);
   });
 });
 

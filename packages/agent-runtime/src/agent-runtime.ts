@@ -6,7 +6,8 @@ import { chatEnded, chatStarted } from "./chat-events.js";
 import { addCost, CHAT, ChatBusyError, ChatEndedError, chatFacts, ChatNotAllowedError, toChat, type Chat, type ChatFacts } from "./chats.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Cost, Harness, HarnessResult, HarnessSession, HarnessTurn, OpenSession } from "./harness.js";
-import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
+import { activeSession, runStepOf, type AgentSession } from "./sessions.js";
+import { createInMemoryTaskStore, TERMINAL_STATES, type TaskStore } from "./task-store.js";
 import { createLiveTranscripts } from "./transcripts/live-transcripts.js";
 import {
   createInMemoryTranscriptStore,
@@ -34,12 +35,7 @@ export interface AgentRuntimeOptions {
   now?: () => Date;
 }
 
-const TERMINAL: ReadonlySet<A2A.TaskState> = new Set([
-  "TASK_STATE_COMPLETED",
-  "TASK_STATE_FAILED",
-  "TASK_STATE_CANCELED",
-  "TASK_STATE_REJECTED",
-]);
+const TERMINAL: ReadonlySet<A2A.TaskState> = new Set(TERMINAL_STATES);
 
 /** The agent runtime: the A2A boundary, and the transcripts of its tasks' agent sessions. */
 export interface AgentRuntime extends AgentTasks {
@@ -76,6 +72,8 @@ export interface AgentRuntime extends AgentTasks {
   getChat(chatId: string): Promise<Chat | undefined>;
   /** All chats, the most recently started first. */
   listChats(): Promise<Chat[]>;
+  /** The agent sessions that have not ended, of runs' steps and of chats, the most recently started first. */
+  listSessions(): Promise<AgentSession[]>;
 }
 
 /** A chat this process works on: its open agent session and what it records. */
@@ -216,6 +214,7 @@ export function createAgentRuntime({
   async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest, { onTask }: SendMessageOptions = {}): Promise<A2A.Task> {
     const startedAt = now();
     const taskId = crypto.randomUUID();
+    const runStep = runStepOf(request.metadata);
     const claimed = await store.claim({
       messageId: request.message.messageId,
       agent: profile.metadata.name,
@@ -225,13 +224,15 @@ export function createAgentRuntime({
         ...(request.message.contextId === undefined ? {} : { contextId: request.message.contextId }),
         status: { state: "TASK_STATE_WORKING", timestamp: startedAt.toISOString() },
         history: [request.message],
+        ...(runStep ? { metadata: runStep } : {}),
       },
     });
     if (TERMINAL.has(claimed.task.status.state)) return claimed.task;
 
     const id = claimed.task.id;
     const transcript = transcripts.open(id);
-    let metadata: Record<string, unknown> = { ...claimed.task.metadata, [TRANSCRIPT]: transcript.ref };
+    // A task kept before it named its run and step learns them when it is resumed.
+    let metadata: Record<string, unknown> = { ...claimed.task.metadata, ...runStep, [TRANSCRIPT]: transcript.ref };
     if (id !== taskId) {
       // Known but unfinished: this process did not start it, so it was interrupted.
       metadata = { ...metadata, [RESUMED]: Number(metadata[RESUMED] ?? 0) + 1 };
@@ -420,6 +421,12 @@ export function createAgentRuntime({
         const current = chats.get(task.id)?.task ?? task;
         const facts = chatFacts(current);
         return facts ? [toChat(current, facts)] : [];
+      });
+    },
+    async listSessions() {
+      return (await store.active()).flatMap((stored) => {
+        const session = activeSession({ ...stored, task: chats.get(stored.task.id)?.task ?? stored.task });
+        return session ? [session] : [];
       });
     },
   };

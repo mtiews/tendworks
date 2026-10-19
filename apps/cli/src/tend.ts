@@ -143,7 +143,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .command("agent")
     .description("inspect agent profiles")
     .command("list")
-    .description("list the configured agent profiles")
+    .description("list the configured agent profiles with their active agent sessions (count; -o json|yaml for the sessions)")
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
@@ -300,8 +300,8 @@ function formatOrigin(origin: Run["startedBy"], { url = false }: { url?: boolean
 
 function formatAgentList(list: AgentList): string {
   const rows = [
-    ["NAME", "HARNESS", "SANDBOX", "SKILLS"],
-    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", ")]),
+    ["NAME", "HARNESS", "SANDBOX", "SKILLS", "SESSIONS"],
+    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", "), String(agent.sessions.length)]),
   ];
   return table(rows);
 }

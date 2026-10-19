@@ -64,7 +64,10 @@ $defs:
           Free map. On tasks of agent sessions Tendworks sets `dev.tendworks/transcript`
           (reference to the session's transcript, kept outside the sandbox) and
           `dev.tendworks/cost` (what the session cost: `{amount, currency}`, see
-          run.schema.yaml#/$defs/cost).
+          run.schema.yaml#/$defs/cost). A task of a run's step also keeps
+          `dev.tendworks/runId` and `dev.tendworks/stepReference` from the
+          `SendMessageRequest.metadata` that started it, so its agent session can name its
+          run and step.
         $ref: '#/$defs/struct'
   taskStatus:
     title: TaskStatus
