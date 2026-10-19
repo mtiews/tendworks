@@ -5,6 +5,7 @@ export {
   createAgentRuntimeClient,
   createInMemoryAgentRuntime,
   type AgentRuntimePort,
+  type AgentSession,
   type Chat,
   type InMemoryAgentRuntimeOptions,
   type StartChatRequest,

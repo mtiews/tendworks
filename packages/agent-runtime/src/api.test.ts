@@ -56,6 +56,26 @@ describe("agent runtime API", () => {
     ]);
   });
 
+  it("lists the active agent sessions while the agent works, and none once its task ended", async () => {
+    const { runtime, get, finish } = setup();
+    const done = runtime.sendMessage("slow", {
+      message: { messageId: "run-1/do/0/work", role: "ROLE_USER", parts: [{ text: "work" }] },
+      metadata: { "dev.tendworks/runId": "run-1", "dev.tendworks/stepReference": "/do/0/work" },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const working = await get("/sessions");
+    finish();
+    await done;
+    const ended = await get("/sessions");
+
+    expect(working.status).toBe(200);
+    expect(await working.json()).toEqual({
+      items: [{ kind: "run-step", agent: "slow", taskId: expect.any(String), status: "working", startedAt: expect.any(String), run: "run-1", step: "/do/0/work" }],
+    });
+    expect(await ended.json()).toEqual({ items: [] });
+  });
+
   it("answers 404 for a task it does not know", async () => {
     const response = await setup().get("/tasks/unknown/transcript");
 

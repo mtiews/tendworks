@@ -5,6 +5,7 @@ import createClient from "openapi-fetch";
 export type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
 export type Chat = ControlPlane.components["schemas"]["chat"];
 export type StartChatRequest = ControlPlane.components["schemas"]["startChatRequest"];
+export type AgentSession = ControlPlane.components["schemas"]["agentSession"];
 
 export interface TranscriptStreamOptions {
   /** Position of the last entry the client received; the stream continues after it. */
@@ -57,6 +58,8 @@ export interface AgentRuntimePort {
   sendChatMessage(chatId: string, text: string): Promise<Chat | undefined>;
   /** Ends a chat; undefined for an unknown chat. */
   endChat(chatId: string): Promise<Chat | undefined>;
+  /** The agent sessions that have not ended, of runs' steps and of chats, the most recently started first. */
+  listSessions(): Promise<AgentSession[]>;
 }
 
 /** Reaches the agent runtime through its internal API (contracts/openapi/agent-runtime.yaml). */
@@ -109,6 +112,11 @@ export function createAgentRuntimeClient(options: { baseUrl: string; fetch?: (re
       if (response.status === 404) return undefined;
       throw failed(response, error);
     },
+    async listSessions() {
+      const { data, response } = await client.GET("/sessions");
+      if (data) return data.items;
+      throw failed(response);
+    },
   };
 }
 
@@ -145,10 +153,30 @@ export function createInMemoryAgentRuntime({ chatAgents = [] }: InMemoryAgentRun
     return structuredClone(chat);
   };
 
+  // Run steps whose agent session works; a step leaves with finishStep.
+  const steps = new Map<string, AgentSession & { kind: "run-step" }>();
+
   const runtime = {
     transcripts,
     running,
     chats,
+    /** A run's step hands a task to `agent`: its agent session works until finishStep. */
+    startStep({ agent, run, step }: { agent: string; run: string; step: string }) {
+      const session = { kind: "run-step" as const, agent, taskId: crypto.randomUUID(), status: "working" as const, startedAt: now(), run, step };
+      steps.set(session.taskId, session);
+      return structuredClone(session);
+    },
+    finishStep(taskId: string) {
+      steps.delete(taskId);
+    },
+    async listSessions(): Promise<AgentSession[]> {
+      const open = [...chats.values()].flatMap((chat): AgentSession[] =>
+        chat.status === "working" || chat.status === "input-required"
+          ? [{ kind: "chat", agent: chat.agent, taskId: chat.id, status: chat.status, startedAt: chat.startedAt, chat: chat.id }]
+          : [],
+      );
+      return [...open, ...steps.values()].reverse().sort((a, b) => b.startedAt.localeCompare(a.startedAt)).map((session) => structuredClone(session));
+    },
     /** Ends the running turn of a chat with the agent's answer; the chat waits for the next message. */
     finishTurn(chatId: string, reply: string, cost?: { amount: number; currency: string }) {
       record(chatId, { type: "message-chunk", text: reply });

@@ -1,0 +1,81 @@
+$id: https://tendworks.dev/schemas/v1/schemas/agent-session.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: AgentSession
+description: >-
+  An active agent session: one agent profile working on one A2A task right now, either
+  for a run's step (`run-step`) or in a chat (`chat`). Only sessions that have not ended
+  are listed; a finished step or an ended or failed chat has none.
+$ref: '#/$defs/agentSession'
+$defs:
+  agentSession:
+    title: AgentSession
+    oneOf:
+      - $ref: '#/$defs/runStepSession'
+      - $ref: '#/$defs/chatSession'
+  runStepSession:
+    title: RunStepSession
+    description: The agent session of a run's step that handed a task to an agent.
+    type: object
+    additionalProperties: false
+    required: [kind, agent, taskId, status, startedAt, run, step]
+    properties:
+      kind:
+        const: run-step
+      agent:
+        type: string
+        description: Name of the agent profile the session runs with.
+      taskId:
+        type: string
+        description: Id of the session's A2A task; its transcript is read through the run's step.
+      status:
+        $ref: '#/$defs/agentSessionStatus'
+      startedAt:
+        type: string
+        format: date-time
+      run:
+        type: string
+        description: Id of the run.
+      step:
+        type: string
+        description: Reference of the step in the run's workflow, e.g. `/do/0/implement`.
+  chatSession:
+    title: ChatSession
+    description: The agent session of a chat.
+    type: object
+    additionalProperties: false
+    required: [kind, agent, taskId, status, startedAt, chat]
+    properties:
+      kind:
+        const: chat
+      agent:
+        type: string
+        description: Name of the agent profile the chat is held with.
+      taskId:
+        type: string
+        description: Id of the session's A2A task, the same as the chat's id.
+      status:
+        $ref: '#/$defs/agentSessionStatus'
+      startedAt:
+        type: string
+        format: date-time
+      chat:
+        type: string
+        description: Id of the chat.
+  agentSessionStatus:
+    title: AgentSessionStatus
+    description: >-
+      `working`: the agent works (also while the session is resumed after a restart).
+      `input-required`: the agent ended its turn and waits for the next message of a chat.
+    type: string
+    enum: [working, input-required]
+  agentSessionList:
+    title: AgentSessionList
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        description: Active agent sessions, the most recently started first.
+        items:
+          $ref: '#/$defs/agentSession'

@@ -2,7 +2,10 @@ import type { A2A } from "@tendworks/shared";
 import type pg from "pg";
 import type { HarnessSession } from "../harness.js";
 import type { ChatEventPublisher } from "../chat-events.js";
-import type { StoredTask, TaskKind, TaskStore } from "../task-store.js";
+import { TERMINAL_STATES, type StoredTask, type TaskKind, type TaskStore } from "../task-store.js";
+
+/** A task that has not ended; the partial index and the query share it, so the index serves the query. */
+const ACTIVE = `(task->'status'->>'state') not in (${TERMINAL_STATES.map((state) => `'${state}'`).join(", ")})`;
 
 // The agent runtime owns the schema `agent_runtime`; no other domain reads these tables.
 const SCHEMA = `
@@ -20,6 +23,8 @@ alter table agent_runtime.tasks add column if not exists session jsonb;
 -- What kind of work the task is: a run's step (task) or a chat.
 alter table agent_runtime.tasks add column if not exists kind text not null default 'task';
 create index if not exists tasks_kind_started_at on agent_runtime.tasks (kind, started_at desc);
+-- The tasks that have not ended: the active agent sessions.
+create index if not exists tasks_active on agent_runtime.tasks (started_at desc) where ${ACTIVE};
 `;
 
 /** Creates the agent runtime's tables if they do not exist yet. */
@@ -106,6 +111,12 @@ export function createPostgresTaskStore({ pool, publisher }: PostgresTaskStoreOp
     async list({ kind }) {
       const { rows } = await pool.query<Pick<Row, "task">>("select task from agent_runtime.tasks where kind = $1 order by started_at desc, updated_at desc", [kind]);
       return rows.map((row) => row.task);
+    },
+    async active() {
+      const { rows } = await pool.query<Row>(
+        `select message_id, agent, started_at, task, session, kind from agent_runtime.tasks where ${ACTIVE} order by started_at desc, updated_at desc`,
+      );
+      return rows.map(toStored);
     },
     async get(taskId) {
       const { rows } = await pool.query<Pick<Row, "task">>("select task from agent_runtime.tasks where task_id = $1", [taskId]);

@@ -115,7 +115,7 @@ const agentRuntime = createAgentRuntimeApi({ runtime: agents });
 const fetch = (request: Request) => {
   const { pathname } = new URL(request.url);
   if (pathname === "/health") return health.fetch(request);
-  if (pathname.startsWith("/tasks/") || pathname === "/chats" || pathname.startsWith("/chats/")) return agentRuntime.fetch(request);
+  if (pathname.startsWith("/tasks/") || pathname === "/chats" || pathname.startsWith("/chats/") || pathname === "/sessions") return agentRuntime.fetch(request);
   return orchestration.fetch(request);
 };
 

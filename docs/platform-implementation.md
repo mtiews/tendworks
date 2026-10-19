@@ -122,6 +122,8 @@ The workspace (`/workspace`) and the harness's home and config directory (`/sess
 6. `docker compose -f deploy/compose.yaml restart worker`.
 7. Within about a minute (the engine's heartbeat timeout) the transcript (`tend run logs <id> -o yaml` shows the entry types) shows `task-resumed` and `session-resumed` with the same session id, not `session-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
+Who works right now comes from the agent runtime: `GET /sessions` of the agent runtime API lists the agent sessions whose task has not ended (from `agent_runtime.tasks`, partial index on non-terminal tasks), kind `run-step` with the run and step the step's `SendMessageRequest.metadata` named (kept in the task's metadata), or kind `chat`. `GET /agents` of the control plane puts them under their profile (`sessions`, schema `contracts/schemas/agent-session.schema.yaml`) and answers 503 when the agent runtime cannot be reached; `tend agent list` shows their number, `-o json|yaml` the sessions.
+
 ### Smoke test scripts
 
 The manual smoke tests below are automated in `scripts/smoke/` (bash; on Windows Git Bash). Each prints its checks and ends with PASS or FAIL. They need the stack running with `deploy/.env` set up and `TEND_API_TOKEN` exported (they send it with every request, since reading needs a token too, and stop early when the control plane refuses it); the GitHub ones also need `gh` logged in.

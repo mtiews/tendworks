@@ -134,6 +134,23 @@ export function describeTaskStore(name: string, setup: () => Promise<TaskStoreSu
       expect(listed).not.toContain(other.task.id);
     });
 
+    it("lists the tasks that have not ended, of every kind, the most recently started first", async () => {
+      const at = (startedAt: string, kind?: "chat") => ({ ...candidate(), startedAt, ...(kind ? { kind } : {}) });
+      const step = at("2026-10-18T09:00:00.000Z");
+      const chat = at("2026-10-18T11:00:00.000Z", "chat");
+      const waiting = at("2026-10-18T10:00:00.000Z", "chat");
+      const finished = at("2026-10-18T12:00:00.000Z");
+      const ended = at("2026-10-18T12:00:00.000Z", "chat");
+      for (const task of [step, chat, waiting, finished, ended]) await store.claim(task);
+      await store.update({ ...waiting.task, status: { state: "TASK_STATE_INPUT_REQUIRED" } });
+      await store.update({ ...finished.task, status: { state: "TASK_STATE_COMPLETED" } });
+      await store.update({ ...ended.task, status: { state: "TASK_STATE_FAILED" } });
+
+      const active = (await store.active()).filter((stored) => [step, chat, waiting, finished, ended].some((task) => task.messageId === stored.messageId));
+
+      expect(active).toEqual([chat, { ...waiting, task: { ...waiting.task, status: { state: "TASK_STATE_INPUT_REQUIRED" } } }, step]);
+    });
+
     it("finds a task as it is kept, with its kind and harness session", async () => {
       const chat = { ...candidate(), kind: "chat" as const };
       await store.claim(chat);

@@ -612,10 +612,11 @@ paths:
   /agents:
     get:
       operationId: listAgents
-      summary: List the configured agent profiles, ordered by name
+      summary: List the configured agent profiles with their active agent sessions, ordered by name
       description: >-
         The agent profiles workflows can hand tasks to (`agent://<name>`), as the
-        configuration defines them.
+        configuration defines them, each with the agent sessions that work right now:
+        those of runs' steps and those of chats. Answers whether an agent is running.
       responses:
         "200":
           description: Agent profiles.
@@ -630,6 +631,12 @@ paths:
               description: "`Bearer`"
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns agent sessions, cannot be reached.
           content:
             application/json:
               schema:
@@ -1057,8 +1064,8 @@ components:
             $ref: "#/components/schemas/Agent"
     Agent:
       type: object
-      description: An agent profile of the configuration.
-      required: [name, harness]
+      description: An agent profile of the configuration with its active agent sessions.
+      required: [name, harness, sessions]
       additionalProperties: false
       properties:
         name:
@@ -1080,6 +1087,11 @@ components:
           items:
             type: string
           description: Names of the secrets the profile passes into its sandbox (never their values).
+        sessions:
+          type: array
+          description: The profile's active agent sessions, the most recently started first; empty when none works.
+          items:
+            $ref: "../schemas/agent-session.schema.yaml#/$defs/agentSession"
     StartRunRequest:
       type: object
       required: [workflow]

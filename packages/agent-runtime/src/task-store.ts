@@ -2,6 +2,9 @@ import type { A2A } from "@tendworks/shared";
 import type { ChatEvent } from "./chat-events.js";
 import type { HarnessSession } from "./harness.js";
 
+/** States in which a task has ended for good. */
+export const TERMINAL_STATES: readonly A2A.TaskState[] = ["TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"];
+
 /** What kind of work a task is: a run's step hands one to an agent (`task`), a human starts a chat (`chat`). */
 export type TaskKind = "task" | "chat";
 
@@ -39,6 +42,8 @@ export interface TaskStore {
   find(taskId: string): Promise<StoredTask | undefined>;
   /** The tasks of a kind, the most recently started first. */
   list(filter: { kind: TaskKind }): Promise<A2A.Task[]>;
+  /** The tasks of every kind that have not ended (no terminal state), as they are kept, the most recently started first. */
+  active(): Promise<StoredTask[]>;
   /** Replaces the harness session kept with a claimed task. */
   saveSession(taskId: string, session: HarnessSession): Promise<void>;
 }
@@ -74,6 +79,13 @@ export function createInMemoryTaskStore(): TaskStore & { published: ChatEvent[] 
         .filter((stored) => (stored.kind ?? "task") === kind)
         .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
         .map((stored) => structuredClone(stored.task));
+    },
+    async active() {
+      return [...byMessage.values()]
+        .reverse()
+        .filter((stored) => !TERMINAL_STATES.includes(stored.task.status.state))
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+        .map((stored) => structuredClone(stored));
     },
     async saveSession(taskId, session) {
       find(taskId).session = structuredClone(session);
