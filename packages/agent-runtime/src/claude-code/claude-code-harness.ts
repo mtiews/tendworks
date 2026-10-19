@@ -33,6 +33,8 @@ export interface ClaudeCodeHarnessOptions {
    * either; without it, their tasks fail with a hint.
    */
   platformMcp?: { url: string; token: string };
+  /** How long a cancelled turn of a chat gets to stop before its harness process is given up; 10 s by default. */
+  cancelGraceMs?: number;
 }
 
 // Fixed paths inside the sandbox image (images/sandbox-claude-code). The workspace and
@@ -89,6 +91,7 @@ export function createClaudeCodeHarness({
   keepAliveMs = 60_000,
   timeoutMs = 60 * 60_000,
   platformMcp,
+  cancelGraceMs = 10_000,
 }: ClaudeCodeHarnessOptions): Harness {
   const failed = (message: string): HarnessResult => ({ state: "TASK_STATE_FAILED", message });
 
@@ -310,7 +313,7 @@ export function createClaudeCodeHarness({
       async function connect(prepared: Prepared) {
         if (current?.acp.open) return current;
         if (current) {
-          // The adapter ended between turns; its sandbox cannot be reattached.
+          // The adapter ended (or was given up after a cancel it did not answer); its sandbox cannot be reattached.
           await current.acp.close();
           current = undefined;
         }
@@ -339,6 +342,7 @@ export function createClaudeCodeHarness({
           redact: prepared.redact,
           mcpServers: prepared.mcpServers,
           keepAliveMs,
+          cancelGraceMs,
           onSession: (sessionId) => keep({ sessionId, sandboxId }),
           ...(kept?.sessionId === undefined ? {} : { resume: { sessionId: kept.sessionId } }),
         });
@@ -350,13 +354,21 @@ export function createClaudeCodeHarness({
         return current;
       }
 
+      /** Set when the running turn is cancelled before its prompt reached the agent. */
+      let cancelled = false;
+
       return {
         async turn(message, { interrupted = false } = {}) {
+          cancelled = false;
           const prepared = prepare(profile);
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
           try {
             const connected = await connect(prepared);
             if ("failure" in connected) return { state: "TASK_STATE_FAILED", message: connected.failure.message };
+            if (cancelled) {
+              observer.record({ type: "turn-ended", reason: "cancelled" });
+              return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf("cancelled", "") };
+            }
             // A resumed session holds the interrupted turn's message already; a new one gets it again.
             const prompt = interrupted && connected.acp.resumed ? [{ type: "text" as const, text: CHAT_CONTINUE }] : message.parts.flatMap(toContent);
             const turn = await connected.acp.prompt(prompt, { timeoutMs });
@@ -365,6 +377,10 @@ export function createClaudeCodeHarness({
           } catch (error) {
             return { state: "TASK_STATE_FAILED", message: prepared.redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`) };
           }
+        },
+        async cancel() {
+          cancelled = true;
+          await current?.acp.cancel();
         },
         async suspend() {
           // Taken at once, so a turn that starts meanwhile connects to a new sandbox.

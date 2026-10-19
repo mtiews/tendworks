@@ -264,6 +264,14 @@ export function createControlPlaneApi({
     });
   });
 
+  app.post("/chats/:chatId/cancel", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.cancelChatTurn(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
   app.post("/chats/:chatId/end", authenticated, async (c) => {
     const chatId = c.req.param("chatId");
     return throughRuntime(async (runtime) => {

@@ -304,7 +304,7 @@ Tendworks has two first-party clients, both built only on the public control pla
 - `tend status` — platform health, active runs, pending approvals
 - `tend run list|get|logs|cancel|resume` — runs and steps; `--follow` streams live events
 - `tend trigger list|fire` — triggers including the next scheduled execution; fire one manually
-- `tend agent list` and `tend chat <profile> [--repo …]` — start or attach to an agent session in the terminal
+- `tend agent list` and `tend chat <profile> [--repo …]` — start an agent session in the terminal; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
 - `tend approval list|approve|reject` — answer gates from the terminal
 - `tend config validate|diff|apply` — check configuration against the JSON Schemas; apply directly in local mode, otherwise open a pull request
 - `tend context use <name>` — switch between laptop, server and cluster

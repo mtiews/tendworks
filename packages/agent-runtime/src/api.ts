@@ -10,7 +10,7 @@ import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 type Schemas = Contract.components["schemas"];
 
 export interface AgentRuntimeApiOptions {
-  runtime: Pick<AgentRuntime, "transcript" | "follow" | "startChat" | "sendChatMessage" | "endChat" | "getChat" | "listChats" | "listSessions">;
+  runtime: Pick<AgentRuntime, "transcript" | "follow" | "startChat" | "sendChatMessage" | "cancelChatTurn" | "endChat" | "getChat" | "listChats" | "listSessions">;
   /** How long a transcript stream may stay silent before a comment keeps it open; 15 s by default. */
   keepAliveMs?: number;
 }
@@ -70,6 +70,17 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
       return chat ? c.json(chat satisfies Chat, 200) : noChat(chatId);
     } catch (error) {
       if (error instanceof ChatBusyError) return problem(409, "Turn in progress", error.message);
+      if (error instanceof ChatEndedError) return problem(409, "Chat ended", error.message);
+      throw error;
+    }
+  });
+
+  app.post("/chats/:chatId/cancel", async (c) => {
+    const chatId = c.req.param("chatId");
+    try {
+      const chat = await runtime.cancelChatTurn(chatId);
+      return chat ? c.json(chat satisfies Chat, 200) : noChat(chatId);
+    } catch (error) {
       if (error instanceof ChatEndedError) return problem(409, "Chat ended", error.message);
       throw error;
     }
