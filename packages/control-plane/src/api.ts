@@ -107,6 +107,22 @@ export function createControlPlaneApi({
     return run ? c.json(run satisfies Schemas["run"], 200) : problem(404, "Run not found");
   });
 
+  app.get("/agents", (c) => {
+    const items = configuration.agentProfiles
+      .map(({ metadata, spec }): Schemas["Agent"] => {
+        const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
+        return {
+          name: metadata.name,
+          harness: spec.harness,
+          ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
+          ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
+          ...(secrets.length > 0 ? { secrets } : {}),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ items } satisfies Schemas["AgentList"], 200);
+  });
+
   app.get("/triggers", async (c) => {
     let items;
     try {

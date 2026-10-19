@@ -12,6 +12,7 @@ type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
+type AgentList = ControlPlane.components["schemas"]["AgentList"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -91,6 +92,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       if (response.status === 404) throw new Error(`run ${runId} not found`);
       if (!data) throw new AnswerError(response, error);
       io.stdout(render(data, options.output, formatRun));
+    });
+
+  program
+    .command("agent")
+    .description("inspect agent profiles")
+    .command("list")
+    .description("list the configured agent profiles")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/agents").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatAgentList));
     });
 
   program
@@ -213,6 +229,14 @@ function formatRunList(list: RunList): string {
   const rows = [
     ["ID", "WORKFLOW", "STATUS", "CREATED", "FINISHED"],
     ...list.items.map((run) => [run.id, run.workflow, run.status, run.createdAt, run.finishedAt ?? ""]),
+  ];
+  return table(rows);
+}
+
+function formatAgentList(list: AgentList): string {
+  const rows = [
+    ["NAME", "HARNESS", "SANDBOX", "SKILLS"],
+    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", ")]),
   ];
   return table(rows);
 }

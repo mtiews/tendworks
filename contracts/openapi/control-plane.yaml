@@ -132,6 +132,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /agents:
+    get:
+      operationId: listAgents
+      summary: List the configured agent profiles, ordered by name
+      description: >-
+        The agent profiles workflows can hand tasks to (`agent://<name>`), as the
+        configuration defines them.
+      responses:
+        "200":
+          description: Agent profiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
   /triggers:
     get:
       operationId: listTriggers
@@ -471,6 +485,40 @@ components:
           properties:
             refused:
               $ref: "#/components/schemas/MergeRefusal"
+    AgentList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+    Agent:
+      type: object
+      description: An agent profile of the configuration.
+      required: [name, harness]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Name workflows address it by, as `agent://<name>`.
+        harness:
+          type: string
+          description: What answers its tasks, as the profile's `spec.harness` names it.
+        sandbox:
+          type: string
+          description: Sandbox template its sandboxes are created from, if it runs in one.
+        skills:
+          type: array
+          items:
+            type: string
+          description: Skills copied into its sandbox.
+        secrets:
+          type: array
+          items:
+            type: string
+          description: Names of the secrets the profile passes into its sandbox (never their values).
     StartRunRequest:
       type: object
       required: [workflow]

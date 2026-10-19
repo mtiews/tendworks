@@ -130,6 +130,16 @@ describe("control plane: runs, through orchestration", () => {
   });
 });
 
+describe("control plane: agents", () => {
+  it("lists the agent profiles of the example configuration", async () => {
+    const { data, response } = await controlPlane().GET("/agents");
+
+    expect(response.status).toBe(200);
+    expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
+    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"] });
+  });
+});
+
 describe("control plane: the API token", () => {
   it("refuses operations that change state without the API token", async () => {
     const client = controlPlane({}, { token: "wrong-token" });
