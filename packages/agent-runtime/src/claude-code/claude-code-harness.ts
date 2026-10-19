@@ -1,11 +1,11 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { SecretResolver } from "@tendworks/platform";
 import type { A2A } from "@tendworks/shared";
-import { runAcpTurn, type AcpTurn } from "../acp/acp-turn.js";
+import { openAcpSession, runAcpTurn, type AcpSession, type AcpTurn } from "../acp/acp-turn.js";
 import type { LoadedAgentProfile } from "../agent-profiles.js";
 import { parseReportedArtifacts, toArtifact } from "../artifacts.js";
 import type { Harness, HarnessObserver, HarnessResult, HarnessSession } from "../harness.js";
-import type { Sandboxes, SandboxTemplate, VolumeMount } from "../sandboxes.js";
+import type { Sandboxes, SandboxProcess, SandboxTemplate, VolumeMount } from "../sandboxes.js";
 import type { SkillFile } from "../skills.js";
 import type { TranscriptRecord } from "../transcripts/transcript-store.js";
 import { checkoutCommand, workspaceOf, type Workspace } from "../workspace.js";
@@ -44,7 +44,18 @@ const CONTINUE =
   "The platform restarted while you were working on this task, and your last turn was interrupted. " +
   "Check the state of the workspace, then continue the task where you left off and finish it.";
 
-/** What every session is told about the platform, after the profile's role description. */
+/** The volumes of a task's agent session, mounted into every sandbox it runs in. */
+const volumesOf = (taskId: string): VolumeMount[] => [
+  { volume: `${taskId}-workspace`, path: WORKSPACE },
+  { volume: `${taskId}-session`, path: SESSION },
+];
+
+/** What a chat's session is told about the platform, after the profile's role description. */
+const CHAT_INSTRUCTIONS = `You are in a chat with an operator of the Tendworks platform, who reads your answers and replies turn by turn; ask when you need something.
+You work in a sandbox; your workspace is ${WORKSPACE}. Your credentials do not allow you to push, open pull requests or merge, so your work stays in the workspace.
+When the operator does not answer for a while, the sandbox is removed and the session continues later in a new one, with the workspace and this conversation kept; processes you started in the background do not survive that.`;
+
+/** What every unattended session is told about the platform, after the profile's role description. */
 const PLATFORM_INSTRUCTIONS = `You work unattended in a sandbox; nobody answers questions during the session.
 When you produce a result others need to find, such as a pull request, record it in ${ARTIFACTS} (also in $TENDWORKS_ARTIFACTS) as a JSON array of {"name": "<lowercase-name>", "url": "<absolute URL>", "description": "<optional>"}, e.g. [{"name": "pull-request", "url": "https://..."}]. Write the whole array each time.`;
 
@@ -107,10 +118,7 @@ export function createClaudeCodeHarness({
     session: HarnessSession | undefined,
     observer: HarnessObserver,
   ): Promise<{ sandboxId: string; volumes: VolumeMount[] } | { failure: HarnessResult }> {
-    const volumes = [
-      { volume: `${taskId}-workspace`, path: WORKSPACE },
-      { volume: `${taskId}-session`, path: SESSION },
-    ];
+    const volumes = volumesOf(taskId);
     if (session?.sandboxId !== undefined) {
       observer.progress("removing the sandbox of the interrupted session");
       await sandboxes.destroy(session.sandboxId).catch(() => {});
@@ -147,6 +155,34 @@ export function createClaudeCodeHarness({
     return failed(redact(`cannot check out ${workspace.repository} on ${workspace.branch}: ${checkout.stderr.trim().slice(-1_000)}`));
   }
 
+  /** Adapter: the harness's ACP adapter started over stdio in the sandbox, with the profile's secrets and the one credential. */
+  async function attachAdapter(sandboxId: string, env: Record<string, string>, credential: ClaudeCodeCredential): Promise<SandboxProcess> {
+    return sandboxes.attach(sandboxId, {
+      command: [ADAPTER],
+      workingDirectory: WORKSPACE,
+      env: {
+        ...env,
+        HOME,
+        CLAUDE_CONFIG_DIR: CONFIG_DIR,
+        DISABLE_AUTOUPDATER: "1", // versions are pinned in the image
+        TENDWORKS_ARTIFACTS: ARTIFACTS,
+        [CREDENTIAL_VARIABLES[credential.kind]]: credential.value,
+        ...(baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: baseUrl }),
+      },
+    });
+  }
+
+  /** Preparation: validation and secrets, and how to redact them from what the harness writes. */
+  function prepare(profile: LoadedAgentProfile): { template: SandboxTemplate; credential: ClaudeCodeCredential; env: Record<string, string>; redact: (text: string) => string } | { failure: HarnessResult } {
+    const valid = validate(profile);
+    if ("failure" in valid) return valid;
+    const resolved = resolveSecrets(profile);
+    if ("failure" in resolved) return resolved;
+    const hidden = [valid.credential.value, ...Object.values(resolved.env)].filter((value) => value !== "");
+    const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
+    return { ...valid, env: resolved.env, redact };
+  }
+
   /** ACP turn: the harness's ACP adapter over stdio, one prompt turn, resumed when the session was interrupted. */
   async function runTurn(
     { sandboxId, profile, message, session, env, credential, observer, redact }: {
@@ -160,19 +196,7 @@ export function createClaudeCodeHarness({
       redact: (text: string) => string;
     },
   ): Promise<AcpTurn> {
-    const process = await sandboxes.attach(sandboxId, {
-      command: [ADAPTER],
-      workingDirectory: WORKSPACE,
-      env: {
-        ...env,
-        HOME,
-        CLAUDE_CONFIG_DIR: CONFIG_DIR,
-        DISABLE_AUTOUPDATER: "1", // versions are pinned in the image
-        TENDWORKS_ARTIFACTS: ARTIFACTS,
-        [CREDENTIAL_VARIABLES[credential.kind]]: credential.value,
-        ...(baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: baseUrl }),
-      },
-    });
+    const process = await attachAdapter(sandboxId, env, credential);
     observer.progress("harness started");
     const instructions = [profile.role, PLATFORM_INSTRUCTIONS].filter(Boolean).join("\n\n");
     return runAcpTurn({
@@ -212,16 +236,11 @@ export function createClaudeCodeHarness({
 
   return {
     async run({ taskId, profile, message, session }, observer) {
-      const valid = validate(profile);
+      const valid = prepare(profile);
       if ("failure" in valid) return valid.failure;
-      const resolved = resolveSecrets(profile);
-      if ("failure" in resolved) return resolved.failure;
-      const { env } = resolved;
+      const { env, redact } = valid;
       const requested = workspaceOf(message);
       if ("problem" in requested) return failed(requested.problem);
-
-      const hidden = [valid.credential.value, ...Object.values(env)].filter((value) => value !== "");
-      const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
 
       const started = await startSandbox(taskId, valid.template, session, observer);
       if ("failure" in started) return started.failure;
@@ -246,7 +265,97 @@ export function createClaudeCodeHarness({
         await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume)));
       }
     },
+
+    /**
+     * A chat's agent session: the sandbox and the ACP adapter stay up between turns, so
+     * each turn is one more prompt in the same ACP session. A session whose sandbox or
+     * adapter is gone (e.g. after a restart) resumes on the kept volumes with the next
+     * turn. The volumes go only when the session ends.
+     */
+    open({ taskId, profile, session }, observer) {
+      let kept = session;
+      let current: { sandboxId: string; acp: AcpSession } | undefined;
+      const keep = async (next: HarnessSession) => {
+        kept = next;
+        await observer.saveSession(next);
+      };
+
+      /** The open ACP session, started (or resumed) in a new sandbox when there is none. */
+      async function connect(prepared: { template: SandboxTemplate; credential: ClaudeCodeCredential; env: Record<string, string>; redact: (text: string) => string }) {
+        if (current?.acp.open) return current;
+        if (current) {
+          // The adapter ended between turns; its sandbox cannot be reattached.
+          await current.acp.close();
+          current = undefined;
+        }
+        const started = await startSandbox(taskId, prepared.template, kept, observer);
+        if ("failure" in started) return started;
+        const { sandboxId } = started;
+        await keep({ ...kept, sandboxId });
+        await completeOnboarding(sandboxes, sandboxId, profile);
+        await copySkills(sandboxId, profile);
+        const process = await attachAdapter(sandboxId, prepared.env, prepared.credential);
+        observer.progress("harness started");
+        const acp = await openAcpSession({
+          process,
+          cwd: WORKSPACE,
+          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS].filter(Boolean).join("\n\n") } },
+          observer,
+          redact: prepared.redact,
+          keepAliveMs,
+          onSession: (sessionId) => keep({ sessionId, sandboxId }),
+          ...(kept?.sessionId === undefined ? {} : { resume: { sessionId: kept.sessionId } }),
+        });
+        if ("outcome" in acp) {
+          await sandboxes.destroy(sandboxId).catch(() => {});
+          return { failure: failed(acp.error) };
+        }
+        current = { sandboxId, acp };
+        return current;
+      }
+
+      return {
+        async turn(message) {
+          const prepared = prepare(profile);
+          if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
+          try {
+            const connected = await connect(prepared);
+            if ("failure" in connected) return { state: "TASK_STATE_FAILED", message: connected.failure.message };
+            const turn = await connected.acp.prompt(message.parts.flatMap(toContent), { timeoutMs });
+            if (turn.outcome === "error") return { state: "TASK_STATE_FAILED", message: turn.error };
+            return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf(turn.stopReason, turn.reply), ...(turn.cost ? { cost: turn.cost } : {}) };
+          } catch (error) {
+            return { state: "TASK_STATE_FAILED", message: prepared.redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`) };
+          }
+        },
+        async end() {
+          // Destroying the sandbox first also ends a running turn and its background commands.
+          const sandboxIds = new Set([current?.sandboxId, kept?.sandboxId].filter((id) => id !== undefined));
+          for (const sandboxId of sandboxIds) await sandboxes.destroy(sandboxId).catch(() => {});
+          await current?.acp.close();
+          current = undefined;
+          await Promise.all(volumesOf(taskId).map(({ volume }) => sandboxes.deleteVolume(volume)));
+        },
+      };
+    },
   };
+}
+
+/** What the agent answered in a turn, or how the turn ended when it wrote nothing. */
+function answerOf(stopReason: acp.StopReason, reply: string): string {
+  if (reply) return reply;
+  switch (stopReason) {
+    case "end_turn":
+      return "";
+    case "refusal":
+      return "the agent refused";
+    case "cancelled":
+      return "the turn was cancelled";
+    case "max_tokens":
+      return "the agent stopped early: it reached its token limit";
+    case "max_turn_requests":
+      return "the agent stopped early: it reached its limit of model requests per turn";
+  }
 }
 
 /** The artifacts the agent recorded in its artifacts file; a malformed file is recorded and ignored. */

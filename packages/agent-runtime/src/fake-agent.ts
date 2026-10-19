@@ -30,5 +30,24 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
         cost,
       };
     },
+    open({ profile }, observer) {
+      return {
+        async turn() {
+          const { outcome = "completed", delaySeconds = 0, message: reply } = profile.spec.fake ?? {};
+          observer.progress("working");
+          if (delaySeconds > 0) await sleep(delaySeconds * 1_000);
+          if (outcome === "failed") {
+            const text = reply ?? "the fake agent failed as configured";
+            observer.record({ type: "error", message: text });
+            return { state: "TASK_STATE_FAILED", message: text };
+          }
+          const text = reply ?? "done";
+          observer.record({ type: "message-chunk", text });
+          observer.record({ type: "turn-ended", reason: "completed" });
+          return { state: "TASK_STATE_INPUT_REQUIRED", message: text, cost: { amount: 0, currency: "USD" } };
+        },
+        async end() {},
+      };
+    },
   };
 }

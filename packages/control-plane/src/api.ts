@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
-import type { AgentRuntimePort } from "./agent-runtime.js";
+import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
 import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
@@ -195,6 +195,89 @@ export function createControlPlaneApi({
     if (!stream) return problem(404, "Transcript not found", `task ${taskId} has no transcript`);
     // Passed through as it comes (ADR 0017); the agent runtime ends it when the task ends.
     return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+  });
+
+  // Chats (ADR 0015) live in the agent runtime; the control plane passes them through.
+  const POSITION = /^(0|[1-9][0-9]*)$/;
+  const runtimeUnavailable = (detail: string) => problem(503, "Agent runtime unavailable", detail);
+  /** Calls the agent runtime, mapping its refusals to 400/409 and anything else to 503. */
+  const throughRuntime = async (work: (runtime: AgentRuntimePort) => Promise<Response>): Promise<Response> => {
+    if (!agentRuntime) return runtimeUnavailable("no agent runtime is configured");
+    try {
+      return await work(agentRuntime);
+    } catch (error) {
+      if (error instanceof ChatRefusedError) return problem(400, error.title, error.detail);
+      if (error instanceof ChatConflictError) return problem(409, error.title, error.detail);
+      return runtimeUnavailable(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const noChat = (chatId: string) => problem(404, "Chat not found", `no chat '${chatId}' exists`);
+  const textOf = (body: Record<string, unknown> | undefined) => (typeof body?.text === "string" && body.text !== "" ? body.text : undefined);
+
+  app.post("/chats", authenticated, async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+    const text = textOf(body);
+    if (typeof body?.agent !== "string" || text === undefined) {
+      return problem(400, "Invalid request", "the body must be { agent, text } with the name of an agent profile that allows chats and the first message");
+    }
+    const agent = body.agent;
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.startChat({ agent, text });
+      return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
+    });
+  });
+
+  app.get("/chats", async (c) => throughRuntime(async (runtime) => c.json({ items: await runtime.listChats() } satisfies Schemas["chatList"], 200)));
+
+  app.get("/chats/:chatId", async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.getChat(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.post("/chats/:chatId/messages", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    const text = textOf((await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined);
+    if (text === undefined) return problem(400, "Invalid request", "the body must be { text } with the next message");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.sendChatMessage(chatId, text);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.post("/chats/:chatId/end", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.endChat(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.get("/chats/:chatId/transcript", async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      // Only a chat's transcript: a task id of a run's step is no chat.
+      if (!(await runtime.getChat(chatId))) return noChat(chatId);
+      const items = await runtime.transcript(chatId);
+      return items ? c.json({ items } satisfies Schemas["TranscriptEntryList"], 200) : noChat(chatId);
+    });
+  });
+
+  app.get("/chats/:chatId/transcript/stream", async (c) => {
+    const chatId = c.req.param("chatId");
+    const lastEventId = c.req.header("last-event-id");
+    if (lastEventId !== undefined && !POSITION.test(lastEventId)) {
+      return problem(400, "Invalid Last-Event-ID", "Last-Event-ID must be the position of a transcript entry, e.g. 41");
+    }
+    return throughRuntime(async (runtime) => {
+      if (!(await runtime.getChat(chatId))) return noChat(chatId);
+      const stream = await runtime.streamTranscript(chatId, lastEventId === undefined ? {} : { after: Number(lastEventId) });
+      if (!stream) return noChat(chatId);
+      // Passed through as it comes (ADR 0017); the agent runtime ends it when the chat ends.
+      return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+    });
   });
 
   app.get("/agents", (c) => {

@@ -27,6 +27,11 @@ export interface AgentScript {
   noResume?: boolean;
   /** Written to the file named by TENDWORKS_ARTIFACTS before the turn ends. */
   artifacts?: string;
+  /**
+   * Answers with every prompt of the session so far, one per line after "I remember:",
+   * instead of `reply`: what it remembers lives in its session file, like Claude Code's.
+   */
+  recall?: boolean;
 }
 
 /** What the scripted agent was asked, across all its processes. */
@@ -71,6 +76,7 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
   const update = (ctx: { client: acp.AgentContext; params: { sessionId: string } }, sessionUpdate: acp.SessionUpdate) =>
     ctx.client.notify(acp.methods.client.session.update, { sessionId: ctx.params.sessionId, update: sessionUpdate });
   let cancel: () => void = () => {};
+  let cost = 0;
   const sessionFile = (sessionId: string) => `${env.CLAUDE_CONFIG_DIR}/projects/${sessionId}.jsonl`;
 
   const connection = acp
@@ -96,6 +102,10 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
     })
     .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
       observed.prompts.push(ctx.params);
+      const file = sessionFile(ctx.params.sessionId);
+      const said = ctx.params.prompt.map((block) => (block.type === "text" ? block.text : "")).join(" ");
+      const remembered = `${decode(disk.read(file) ?? new Uint8Array())}${JSON.stringify({ prompt: said })}\n`;
+      disk.write(file, encode(remembered));
       const hang = script.hang === true || (script.hang === "first" && observed.prompts.length === 1);
       const cancelled = new Promise<void>((resolve) => (cancel = resolve));
       if (script.askPermission) {
@@ -116,9 +126,16 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
       }
       if (script.delayMs) await new Promise((resolve) => setTimeout(resolve, script.delayMs));
       for (const extra of script.updates ?? []) await update(ctx, extra);
-      for (const text of script.reply ?? ["Hello"]) await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      const prompts = remembered
+        .split("\n")
+        .filter((line) => line.includes('"prompt"'))
+        .map((line) => (JSON.parse(line) as { prompt: string }).prompt);
+      const reply = script.recall ? [`I remember: ${prompts.join(" | ")}`] : (script.reply ?? ["Hello"]);
+      for (const text of reply) await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
       if (script.artifacts !== undefined) disk.write(env.TENDWORKS_ARTIFACTS!, encode(script.artifacts));
-      await update(ctx, { sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: script.cost ?? 0.42, currency: "USD" } });
+      // Cumulative for the session, as ACP defines it; this process knows only its own turns.
+      cost += script.cost ?? 0.42;
+      await update(ctx, { sessionUpdate: "usage_update", used: 1000, size: 200000, cost: { amount: cost, currency: "USD" } });
       return { stopReason: script.stopReason ?? "end_turn" };
     })
     .onNotification(acp.methods.agent.session.cancel, () => {

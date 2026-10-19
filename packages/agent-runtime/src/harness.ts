@@ -47,6 +47,34 @@ export interface HarnessObserver {
   saveSession(session: HarnessSession): Promise<void>;
 }
 
+/** How one turn of an agent session that waits for input between turns ended. */
+export interface HarnessTurn {
+  /** `TASK_STATE_INPUT_REQUIRED`: the agent ended its turn and the session goes on; `TASK_STATE_FAILED`: the session failed for good. */
+  state: Extract<A2A.TaskState, "TASK_STATE_INPUT_REQUIRED" | "TASK_STATE_FAILED">;
+  /** The agent's answer in this turn, or why the session failed. */
+  message: string;
+  /** What this turn cost, if the harness knows. */
+  cost?: Cost;
+}
+
+/**
+ * An agent session held open across turns, e.g. a chat's (ADR 0015): one task, one
+ * agent session, any number of prompt turns. Between turns the session and its
+ * workspace are kept until `end`.
+ */
+export interface OpenSession {
+  /**
+   * Runs one prompt turn with `message`. The first turn starts the session; a session
+   * whose sandbox is gone (e.g. after a restart) is resumed first.
+   */
+  turn(message: A2A.Message): Promise<HarnessTurn>;
+  /** Ends the session for good, also during a turn: removes its sandbox and its volumes. */
+  end(): Promise<void>;
+}
+
+/** A task without its message, for a session whose messages arrive turn by turn. */
+export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs">;
+
 /**
  * The harness port: runs one agent session for a task, e.g. Claude Code over ACP in a
  * sandbox, or the fake agent. Agent-level failures end in a result with state
@@ -57,4 +85,9 @@ export interface HarnessObserver {
  */
 export interface Harness {
   run(task: HarnessTask, observer: HarnessObserver): Promise<HarnessResult>;
+  /**
+   * Opens an agent session that waits for input between turns (a chat). Nothing starts
+   * before the first turn. Harnesses without it cannot hold chats.
+   */
+  open?(task: HarnessSessionTask, observer: HarnessObserver): OpenSession;
 }

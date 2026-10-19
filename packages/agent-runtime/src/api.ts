@@ -1,13 +1,15 @@
 import { serverSentEventStream, type ServerSentEvent } from "@tendworks/platform";
-import type { AgentRuntime as Contract } from "@tendworks/shared";
+import type { A2A, AgentRuntime as Contract } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { AgentRuntime } from "./agent-runtime.js";
+import { AgentNotFoundError } from "./agent-tasks.js";
+import { ChatBusyError, ChatEndedError, ChatNotAllowedError, type Chat } from "./chats.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 type Schemas = Contract.components["schemas"];
 
 export interface AgentRuntimeApiOptions {
-  runtime: Pick<AgentRuntime, "transcript" | "follow">;
+  runtime: Pick<AgentRuntime, "transcript" | "follow" | "startChat" | "sendChatMessage" | "endChat" | "getChat" | "listChats">;
   /** How long a transcript stream may stay silent before a comment keeps it open; 15 s by default. */
   keepAliveMs?: number;
 }
@@ -21,8 +23,57 @@ const POSITION = /^(0|[1-9][0-9]*)$/;
  */
 export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRuntimeApiOptions): { fetch(request: Request): Promise<Response> } {
   const app = new Hono();
-  const problem = (status: 400 | 404, title: string, detail?: string): Response =>
+  const problem = (status: 400 | 404 | 409, title: string, detail?: string): Response =>
     Response.json({ title, status, ...(detail === undefined ? {} : { detail }) } satisfies Schemas["Problem"], { status });
+
+  const textOf = async (request: Request): Promise<string | undefined> => {
+    const body = (await request.json().catch(() => undefined)) as { text?: unknown } | undefined;
+    return typeof body?.text === "string" && body.text !== "" ? body.text : undefined;
+  };
+  const userMessage = (text: string): A2A.Message => ({ messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text }] });
+  const noChat = (chatId: string) => problem(404, "Chat not found", `no chat '${chatId}' exists`);
+
+  app.post("/chats", async (c) => {
+    const body = (await c.req.raw.clone().json().catch(() => undefined)) as { agent?: unknown } | undefined;
+    const text = await textOf(c.req.raw);
+    if (typeof body?.agent !== "string" || text === undefined) {
+      return problem(400, "Invalid request", "the body must be { agent, text } with the name of an agent profile and the first message");
+    }
+    try {
+      const chat = await runtime.startChat(body.agent, userMessage(text));
+      return c.json(chat satisfies Chat, 201, { location: `/chats/${chat.id}` });
+    } catch (error) {
+      if (error instanceof AgentNotFoundError) return problem(400, "Unknown agent profile", error.message);
+      if (error instanceof ChatNotAllowedError) return problem(400, "Chat not allowed", error.message);
+      throw error;
+    }
+  });
+
+  app.get("/chats", async (c) => c.json({ items: await runtime.listChats() } satisfies Schemas["chatList"], 200));
+
+  app.get("/chats/:chatId", async (c) => {
+    const chat = await runtime.getChat(c.req.param("chatId"));
+    return chat ? c.json(chat satisfies Chat, 200) : noChat(c.req.param("chatId"));
+  });
+
+  app.post("/chats/:chatId/messages", async (c) => {
+    const chatId = c.req.param("chatId");
+    const text = await textOf(c.req.raw);
+    if (text === undefined) return problem(400, "Invalid request", "the body must be { text } with the next message");
+    try {
+      const chat = await runtime.sendChatMessage(chatId, userMessage(text));
+      return chat ? c.json(chat satisfies Chat, 200) : noChat(chatId);
+    } catch (error) {
+      if (error instanceof ChatBusyError) return problem(409, "Turn in progress", error.message);
+      if (error instanceof ChatEndedError) return problem(409, "Chat ended", error.message);
+      throw error;
+    }
+  });
+
+  app.post("/chats/:chatId/end", async (c) => {
+    const chat = await runtime.endChat(c.req.param("chatId"));
+    return chat ? c.json(chat satisfies Chat, 200) : noChat(c.req.param("chatId"));
+  });
 
   app.get("/tasks/:taskId/transcript", async (c) => {
     const taskId = c.req.param("taskId");

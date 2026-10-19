@@ -6,6 +6,7 @@ import {
   createInMemoryTaskStore,
   createInMemoryTranscriptStore,
   createPostgresTaskStore,
+  type ChatEventPublisher,
   type Harness,
   type Sandboxes,
   type TaskStore,
@@ -98,6 +99,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "agent-runtime/TaskStore": port<TaskStore>({ postgres: createPostgresTaskStore, "in-memory": createInMemoryTaskStore }),
   "agent-runtime/TranscriptStore": port<TranscriptStore>({ files: createFileTranscriptStore, "in-memory": createInMemoryTranscriptStore }),
   "agent-runtime/Sandboxes": port<Sandboxes>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
+  "agent-runtime/ChatEventPublisher": port<ChatEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 
   "sandbox/SandboxApi": port<SandboxApi>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
 
