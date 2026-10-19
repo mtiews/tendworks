@@ -1,0 +1,64 @@
+$id: https://tendworks.dev/schemas/v1/schemas/approval-request.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ApprovalRequests
+description: >-
+  Approval requests human interaction records when a policy decides that a gated action
+  needs the human's decision first. The run waits until the request is decided.
+$defs:
+  approvalRequest:
+    title: ApprovalRequest
+    description: A question to the human about one gated action of one run.
+    type: object
+    additionalProperties: false
+    required: [id, runId, workflow, action, policy, question, status, createdAt]
+    properties:
+      id:
+        type: string
+        description: Approval request id, assigned by the platform.
+      runId:
+        type: string
+        description: Run that waits for the decision.
+      workflow:
+        type: string
+        description: Workflow the run executes.
+      action:
+        $ref: '#/$defs/gatedAction'
+      pullRequest:
+        type: string
+        description: For `merge`, the web URL of the pull request to merge.
+      policy:
+        type: string
+        description: Name of the policy that asked for the approval.
+      question:
+        type: string
+        description: The question in one line, e.g. "Merge https://…/pull/7 for run 1f3c… of develop-issue?".
+      status:
+        $ref: '#/$defs/approvalStatus'
+      traceparent:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        description: W3C trace context of the run that waits; the request's events carry it.
+      createdAt:
+        type: string
+        format: date-time
+      decidedAt:
+        type: string
+        format: date-time
+        description: When the request was approved or rejected.
+  gatedAction:
+    title: GatedAction
+    description: The action the approval request is about. For now only merging a pull request.
+    type: string
+    enum: [merge]
+  approvalStatus:
+    title: ApprovalStatus
+    description: >-
+      `pending` until decided, then `approved` or `rejected`. A decided request never
+      changes again.
+    type: string
+    enum: [pending, approved, rejected]
+  approvalDecision:
+    title: ApprovalDecision
+    description: The human's answer to an approval request.
+    type: string
+    enum: [approve, reject]

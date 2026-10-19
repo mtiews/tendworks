@@ -1,5 +1,9 @@
 # Laptop profile of Tendworks: `docker compose -f deploy/compose.yaml up --wait`.
 # Only the control plane API is published, and only on localhost.
+# Parallel stacks (e.g. one per worktree): set COMPOSE_PROJECT_NAME, TEND_PORT and
+# TEND_ENGINE_UI_PORT, and point TEND_URL at http://localhost:$TEND_PORT.
+# Configuration (workflows, agent profiles, ...) is read from TEND_CONFIG_PATH,
+# by default the example folder in this repository.
 name: tendworks
 
 services:
@@ -24,16 +28,25 @@ services:
     volumes:
       - temporal-data:/home/temporal # mounted on the existing home so the volume is owned by the engine user
     ports:
-      - "127.0.0.1:8233:8233" # engine web UI for debugging
+      - "127.0.0.1:${TEND_ENGINE_UI_PORT:-8233}:8233" # engine web UI for debugging
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
       interval: 2s
       timeout: 5s
       retries: 30
 
-  # The only way to the Docker API (ADR 0001). Endpoints are opened per need;
-  # sandbox creation (containers, images, volumes, exec, POST) follows with the sandbox API.
+  # The only way to the Docker API (ADR 0001). Only what the sandbox adapter needs is open:
+  # /_ping, /version, /containers/** (create, start, archive, delete), /exec/**,
+  # /volumes/** (deleting the volumes of a finished agent session) and /networks/**
+  # (creating the sandbox network once), with POST enabling every write method on those. Images are not reachable, so
+  # sandbox images must already be on the host. Every other section is closed,
+  # including the events stream the proxy opens by default.
   # It sits on its own internal network that only the worker joins.
+  # Remaining risk: the proxy filters paths, not bodies, so whoever reaches it can
+  # still create a privileged container. Keep the worker the only client.
+  # Idle connections are cut after 10 minutes (haproxy timeout), so keep exec calls
+  # short-lived or send output regularly; the Claude Code harness keeps its attached
+  # ACP stream alive with a request every minute.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     volumes:
@@ -41,6 +54,12 @@ services:
     environment:
       PING: 1
       VERSION: 1
+      CONTAINERS: 1
+      EXEC: 1
+      VOLUMES: 1
+      NETWORKS: 1
+      POST: 1
+      EVENTS: 0
     networks:
       - sandbox-backend
 
@@ -50,10 +69,19 @@ services:
       dockerfile: deploy/Dockerfile
       target: server
     environment:
-      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
+      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend # betterleaks:allow laptop default password
       TEND_WORKER_URL: http://worker:8081
+      TEND_CONFIG_DIR: /config
+      # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
+      # merge gate merges pull requests on github.com with it. Never in a sandbox.
+      TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
+      # API token for operations that change state (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
+      # The default is for the laptop profile only: set your own in deploy/.env.
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+    volumes:
+      - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:${TEND_PORT:-8080}:8080"
     depends_on:
       postgres:
         condition: service_healthy
@@ -74,10 +102,35 @@ services:
     environment:
       TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
       TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
+      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend # betterleaks:allow laptop default password
+      TEND_CONFIG_DIR: /config
+      TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
+      # Workflows reach the control plane API (and only it) from here, e.g. the merge step,
+      # with the API token. The token is no agent secret, so it never enters a sandbox.
+      TEND_CONTROL_PLANE_URL: http://server:8080
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+      # Sandboxes run on their own Docker network, not on this stack's networks, so they
+      # cannot reach the server, worker, store or socket proxy by name or address.
+      TEND_SANDBOX_NETWORK: tendworks-sandboxes
+      # Harness credentials from deploy/.env. Only the one TEND_CLAUDE_CODE_CREDENTIAL
+      # selects (oauth-token or api-key) is passed into sandboxes, never both.
+      TEND_CLAUDE_CODE_CREDENTIAL: ${TEND_CLAUDE_CODE_CREDENTIAL:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # Secrets agent profiles pass into sandboxes (spec.env); only TENDWORKS_AGENT_*
+      # variables resolve. The platform token never belongs here.
+      TENDWORKS_AGENT_GITHUB_TOKEN: ${TENDWORKS_AGENT_GITHUB_TOKEN:-}
+    volumes:
+      - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      # Transcripts of agent sessions, kept outside the sandboxes.
+      - transcripts:/var/lib/tendworks/transcripts
     networks:
       - default
       - sandbox-backend
     depends_on:
+      postgres:
+        condition: service_healthy
       temporal:
         condition: service_healthy
       docker-proxy:
@@ -89,6 +142,23 @@ services:
       timeout: 3s
       retries: 30
 
+  # Sandbox image for agent profiles with harness claude-code. Never started by compose;
+  # the platform does not pull images, so build it once on the sandbox host:
+  #   docker compose -f deploy/compose.yaml --profile sandbox-images build
+  sandbox-claude-code:
+    profiles: [sandbox-images]
+    image: tendworks/sandbox-claude-code:0.85.1-1
+    build:
+      context: ../images/sandbox-claude-code
+
+  # Test image of the end-to-end restart test (a scripted ACP agent, no model). Never
+  # started by compose; `pnpm e2e` builds it.
+  sandbox-scripted-acp:
+    profiles: [test-images]
+    image: tendworks/sandbox-scripted-acp:test
+    build:
+      context: ../images/sandbox-scripted-acp
+
 networks:
   sandbox-backend:
     internal: true
@@ -96,3 +166,4 @@ networks:
 volumes:
   postgres-data:
   temporal-data:
+  transcripts:

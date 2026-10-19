@@ -9,5 +9,16 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@gabrielbryk/jq-ts": "1.7.0",
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "hono": "4.13.13",
+    "openapi-fetch": "0.17.0",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

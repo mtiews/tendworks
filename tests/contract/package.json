@@ -1,0 +1,20 @@
+{
+  "name": "@tendworks/contract-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Both sides of internal APIs and boundaries in one process.",
+  "dependencies": {
+    "@tendworks/agent-runtime": "workspace:*",
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/health": "workspace:*",
+    "@tendworks/human-interaction": "workspace:*",
+    "@tendworks/orchestration": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openapi-fetch": "0.17.0",
+    "yaml": "2.9.1"
+  }
+}

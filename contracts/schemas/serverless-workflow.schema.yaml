@@ -1,0 +1,463 @@
+$id: https://tendworks.dev/schemas/v1/schemas/serverless-workflow.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Workflow
+description: >-
+  The subset of the Serverless Workflow DSL that the Tendworks interpreter supports.
+  Every document valid here is also valid against the official schema; anything the
+  interpreter cannot execute is rejected.
+$comment: >-
+  Derived from the official Serverless Workflow DSL 1.0.3 schema
+  (https://serverlessworkflow.io/schemas/1.0.3/workflow.yaml, source
+  https://github.com/serverlessworkflow/specification/blob/v1.0.3/schema/workflow.yaml,
+  Apache License 2.0). Definitions are copied and narrowed: taskBase properties are
+  inlined into each task, and only the tasks, call types and fields listed here are
+  kept. Supported: task `do`; task `call` with `a2a` and method `message/send`, where
+  the agent card endpoint names an agent profile as `agent://<profile>`; task `call`
+  with `http` (method, endpoint, headers, body; output `content`); data flow via
+  `input.from`, `output.as` and `export.as`; the `then` flow directive (`continue`,
+  `exit`, `end` or the name of a task in the same list); task `switch`; task `listen`
+  for one event (`to.one`) filtered by its type; runtime expression arguments
+  `$context`, `$input`, `$workflow` and `$runtime`. Add a definition from the official
+  schema here when the interpreter learns it.
+type: object
+required: [document, do]
+additionalProperties: false
+properties:
+  document:
+    type: object
+    title: Document
+    description: Documents the workflow.
+    additionalProperties: false
+    properties:
+      dsl:
+        type: string
+        const: 1.0.3
+        title: WorkflowDSL
+        description: The version of the DSL used by the workflow.
+      namespace:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        title: WorkflowNamespace
+        description: The workflow's namespace.
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        title: WorkflowName
+        description: The workflow's name.
+      version:
+        type: string
+        pattern: ^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$
+        title: WorkflowVersion
+        description: The workflow's semantic version.
+      title:
+        type: string
+        title: WorkflowTitle
+        description: The workflow's title.
+      summary:
+        type: string
+        title: WorkflowSummary
+        description: The workflow's Markdown summary.
+      tags:
+        type: object
+        title: WorkflowTags
+        description: A key/value mapping of the workflow's tags, if any.
+        additionalProperties: true
+      metadata:
+        type: object
+        title: WorkflowMetadata
+        description: Holds additional information about the workflow.
+        additionalProperties: true
+    required: [dsl, namespace, name, version]
+  input:
+    $ref: '#/$defs/input'
+  do:
+    $ref: '#/$defs/taskList'
+  output:
+    $ref: '#/$defs/output'
+$defs:
+  taskList:
+    title: TaskList
+    description: List of named tasks to perform.
+    type: array
+    minItems: 1
+    items:
+      type: object
+      title: TaskItem
+      minProperties: 1
+      maxProperties: 1
+      additionalProperties:
+        $ref: '#/$defs/task'
+  task:
+    title: Task
+    description: A discrete unit of work that contributes to achieving the overall objectives defined by the workflow.
+    # if/then/else instead of the official oneOf yields one precise error per mistake.
+    # tsType tells the type generator what the conditional means.
+    tsType: CallA2ATask | CallHTTPTask | DoTask | SwitchTask | ListenTask
+    type: object
+    if:
+      properties:
+        call: true
+      required: [call]
+    then:
+      if:
+        properties:
+          call:
+            const: http
+      then:
+        $ref: '#/$defs/callHttpTask'
+      else:
+        $ref: '#/$defs/callA2ATask'
+    else:
+      if:
+        properties:
+          switch: true
+        required: [switch]
+      then:
+        $ref: '#/$defs/switchTask'
+      else:
+        if:
+          properties:
+            listen: true
+          required: [listen]
+        then:
+          $ref: '#/$defs/listenTask'
+        else:
+          $ref: '#/$defs/doTask'
+  callHttpTask:
+    title: CallHTTPTask
+    description: >-
+      Calls an HTTP endpoint. Tendworks runs it from the worker and only lets it reach the
+      control plane API, whose base URL runtime expressions read as
+      `$runtime.metadata.controlPlaneUrl`. The output is the response content (JSON
+      parsed); a status outside 200–299 fails the task with the problem details the
+      endpoint answered.
+    type: object
+    additionalProperties: false
+    required: [call, with]
+    properties:
+      call:
+        type: string
+        const: http
+      with:
+        $ref: '#/$defs/httpArguments'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  httpArguments:
+    type: object
+    title: HTTPArguments
+    description: The HTTP call arguments.
+    additionalProperties: false
+    required: [method, endpoint]
+    properties:
+      method:
+        type: string
+        enum: [get, post, put, patch, delete, GET, POST, PUT, PATCH, DELETE]
+        title: HTTPMethod
+        description: The HTTP request method.
+      endpoint:
+        type: string
+        title: HTTPEndpoint
+        description: An absolute URI, or a runtime expression that yields one.
+        anyOf:
+          - pattern: ^\s*\$\{.+\}\s*$
+          - pattern: ^[A-Za-z][A-Za-z0-9+\-.]*://.*
+      headers:
+        type: object
+        title: HTTPHeaders
+        description: Header names and values; values may be runtime expressions.
+        additionalProperties:
+          type: string
+      body:
+        title: HTTPBody
+        tsType: unknown
+        description: The request body, sent as JSON. String leaves of the form `${ ... }` are runtime expressions.
+  callA2ATask:
+    title: CallA2ATask
+    description: Hands a task to an agent profile using the A2A task model.
+    type: object
+    additionalProperties: false
+    required: [call, with]
+    properties:
+      call:
+        type: string
+        const: a2a
+      with:
+        $ref: '#/$defs/a2aArguments'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  a2aArguments:
+    type: object
+    title: A2AArguments
+    description: The A2A call arguments.
+    additionalProperties: false
+    required: [method, agentCard, parameters]
+    properties:
+      method:
+        type: string
+        const: message/send
+        title: WithA2AMethod
+        description: The A2A method to send. Only `message/send` is supported; the call waits until the task is finished.
+      agentCard:
+        $ref: '#/$defs/agentCard'
+      parameters:
+        $ref: '#/$defs/a2aSendMessageParameters'
+  agentCard:
+    type: object
+    title: WithA2AAgentCard
+    description: The agent to call. The endpoint names an agent profile as `agent://<profile>`.
+    additionalProperties: false
+    required: [endpoint]
+    properties:
+      name:
+        type: string
+        title: ExternalResourceName
+        description: The name of the external resource, if any.
+      endpoint:
+        type: string
+        title: AgentProfileEndpoint
+        pattern: ^agent://[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+  a2aSendMessageParameters:
+    type: object
+    title: WithA2AParameters
+    description: >-
+      The parameters of `message/send` in the A2A 0.3 shape used by the DSL. String leaves of
+      the form `${ ... }` are runtime expressions.
+    additionalProperties: false
+    required: [message]
+    properties:
+      message:
+        type: object
+        title: A2AMessage
+        additionalProperties: false
+        required: [parts]
+        properties:
+          role:
+            type: string
+            const: user
+          parts:
+            type: array
+            minItems: 1
+            items:
+              $ref: '#/$defs/a2aPart'
+          metadata:
+            type: object
+            title: A2AMessageMetadata
+            additionalProperties: true
+            description: >-
+              Free map sent along with the message (A2A message metadata). Tendworks agents
+              read `dev.tendworks/workspace` (contracts/schemas/a2a.schema.yaml#/$defs/workspace).
+  a2aPart:
+    title: A2APart
+    tsType: A2ATextPart | A2ADataPart
+    type: object
+    if:
+      properties:
+        kind:
+          const: data
+    then:
+      $ref: '#/$defs/a2aDataPart'
+    else:
+      $ref: '#/$defs/a2aTextPart'
+  a2aTextPart:
+    type: object
+    title: A2ATextPart
+    additionalProperties: false
+    required: [kind, text]
+    properties:
+      kind:
+        type: string
+        const: text
+      text:
+        type: string
+  a2aDataPart:
+    type: object
+    title: A2ADataPart
+    additionalProperties: false
+    required: [kind, data]
+    properties:
+      kind:
+        type: string
+        const: data
+      data:
+        type: [object, array, string, number, boolean, 'null']
+  doTask:
+    type: object
+    title: DoTask
+    description: Allows to execute a list of tasks in sequence.
+    additionalProperties: false
+    required: [do]
+    properties:
+      do:
+        $ref: '#/$defs/taskList'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  switchTask:
+    type: object
+    title: SwitchTask
+    description: >-
+      Picks how the workflow goes on: the first case whose `when` holds (a runtime
+      expression on the task's input) decides with its `then`; a case without `when` is
+      the default. When no case matches, the workflow continues with the next task. The
+      output is the task's input.
+    additionalProperties: false
+    required: [switch]
+    properties:
+      switch:
+        type: array
+        title: SwitchTaskConfiguration
+        minItems: 1
+        items:
+          type: object
+          title: SwitchItem
+          minProperties: 1
+          maxProperties: 1
+          additionalProperties:
+            $ref: '#/$defs/switchCase'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  switchCase:
+    type: object
+    title: SwitchCase
+    description: A condition and the flow directive to follow when it holds.
+    additionalProperties: false
+    required: [then]
+    properties:
+      when:
+        type: string
+        title: SwitchCaseCondition
+        description: A runtime expression; the case matches when it yields true.
+      then:
+        $ref: '#/$defs/flowDirective'
+  listenTask:
+    type: object
+    title: ListenTask
+    description: >-
+      Waits until an event arrives that matches the filter. Tendworks delivers to a run
+      only the events that carry its run id (CloudEvent extension `runid`), including
+      events that arrived before the task started listening; each event is consumed once.
+      The output is an array with the consumed event: its `data` (`read: data`, the
+      default) or the whole CloudEvent (`read: envelope`).
+    additionalProperties: false
+    required: [listen]
+    properties:
+      listen:
+        type: object
+        title: ListenTaskConfiguration
+        additionalProperties: false
+        required: [to]
+        properties:
+          to:
+            type: object
+            title: ListenTo
+            description: The event to listen to; only `one` is supported.
+            additionalProperties: false
+            required: [one]
+            properties:
+              one:
+                $ref: '#/$defs/eventFilter'
+          read:
+            type: string
+            title: ListenAndReadAs
+            enum: [data, envelope]
+            default: data
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  eventFilter:
+    type: object
+    title: EventFilter
+    description: Selects events by their attributes; only the event type is supported.
+    additionalProperties: false
+    required: [with]
+    properties:
+      with:
+        type: object
+        title: WithEvent
+        additionalProperties: false
+        required: [type]
+        properties:
+          type:
+            type: string
+            title: EventType
+            description: The CloudEvent type, e.g. `dev.tendworks.approval.decided`.
+  flowDirective:
+    title: FlowDirective
+    description: >-
+      Where the workflow goes on after a task: `continue` (the next task, the default),
+      `exit` (leave the enclosing task list), `end` (end the workflow) or the name of a
+      task in the same list.
+    type: string
+  taskMetadata:
+    type: object
+    title: TaskMetadata
+    description: Holds additional information about the task.
+    additionalProperties: true
+  input:
+    type: object
+    title: Input
+    description: Configures the input of a workflow or task.
+    additionalProperties: false
+    properties:
+      from:
+        $ref: '#/$defs/transformation'
+  output:
+    type: object
+    title: Output
+    description: Configures the output of a workflow or task.
+    additionalProperties: false
+    properties:
+      as:
+        $ref: '#/$defs/transformation'
+  export:
+    type: object
+    title: Export
+    description: Sets the content of the context.
+    additionalProperties: false
+    properties:
+      as:
+        $ref: '#/$defs/transformation'
+  transformation:
+    title: Transformation
+    description: >-
+      A runtime expression (with or without `${ }`), or an object whose string leaves of the
+      form `${ ... }` are runtime expressions.
+    type: [string, object]

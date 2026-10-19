@@ -8,11 +8,15 @@
     "src"
   ],
   "exclude": [
-    "src/**/*.test.ts"
+    "src/**/*.test.ts",
+    "src/**/*.suite.ts"
   ],
   "references": [
     {
       "path": "../../packages/health"
+    },
+    {
+      "path": "../../packages/shared"
     }
   ]
 }

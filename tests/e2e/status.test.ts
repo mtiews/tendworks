@@ -1,8 +1,5 @@
-import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
-
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
+import { client } from "./support/control-plane.js";
 
 describe("platform status on the compose stack", () => {
   it("reports the platform and all components it depends on as healthy", async () => {

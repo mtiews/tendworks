@@ -1,0 +1,208 @@
+$id: https://tendworks.dev/schemas/v1/schemas/run.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Run
+description: >-
+  Runtime state of a run and its steps as orchestration reports it. Shared by the
+  public control plane API and the internal orchestration API.
+$defs:
+  run:
+    title: Run
+    description: One execution of a workflow.
+    type: object
+    additionalProperties: false
+    required: [id, workflow, status, input, steps, createdAt]
+    properties:
+      id:
+        type: string
+        description: Run id, assigned by the platform.
+      workflow:
+        type: string
+        description: Name of the workflow (`document.name`) the run executes.
+      status:
+        $ref: '#/$defs/runStatus'
+      input:
+        description: Input the run was started with.
+      startedBy:
+        $ref: '#/$defs/runOrigin'
+      traceparent:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        description: >-
+          W3C trace context of the run. Every event of the run (run and step events, and
+          the approval events of its gated actions) carries it; a run started by a trigger
+          shares the trigger's trace.
+      output:
+        description: Output of the workflow; set when the run completed.
+      error:
+        $ref: '#/$defs/workflowError'
+      steps:
+        type: array
+        description: Steps in the order they started.
+        items:
+          $ref: '#/$defs/step'
+      createdAt:
+        type: string
+        format: date-time
+      startedAt:
+        type: string
+        format: date-time
+      finishedAt:
+        type: string
+        format: date-time
+  runOrigin:
+    title: RunOrigin
+    description: >-
+      What started the run, as its starter declared it: `manual` (a client such as the
+      CLI or a script) or `trigger` (a trigger binding, for the issue it matched). Absent
+      for runs recorded before origins were.
+    oneOf:
+      - title: ManualRunOrigin
+        type: object
+        additionalProperties: false
+        required: [kind]
+        properties:
+          kind:
+            const: manual
+      - title: TriggerRunOrigin
+        type: object
+        additionalProperties: false
+        required: [kind, binding, issue]
+        properties:
+          kind:
+            const: trigger
+          binding:
+            type: string
+            description: Name of the trigger binding that fired.
+          issue:
+            $ref: '#/$defs/issueReference'
+  issueReference:
+    title: RunIssueReference
+    description: The issue a trigger matched.
+    type: object
+    additionalProperties: false
+    required: [repository, number, url]
+    properties:
+      repository:
+        type: string
+        description: Repository as `<owner>/<name>`.
+      number:
+        type: integer
+      title:
+        type: string
+      url:
+        type: string
+  runStatus:
+    title: RunStatus
+    description: >-
+      `pending` until the execution engine picks the run up, `running` while steps
+      execute, then `completed` or `failed`.
+    type: string
+    enum: [pending, running, completed, failed]
+  step:
+    title: Step
+    description: One task of the workflow.
+    type: object
+    additionalProperties: false
+    required: [name, reference, status, startedAt]
+    properties:
+      name:
+        type: string
+        description: Task name in the workflow.
+      reference:
+        type: string
+        description: JSON pointer of the task in the workflow, e.g. `/do/0/implement`. Unique within a run.
+      status:
+        $ref: '#/$defs/stepStatus'
+      taskId:
+        type: string
+        description: Id of the A2A task the step handed to an agent, if any.
+      transcript:
+        type: string
+        description: >-
+          Where the transcript of the step's agent session is kept, outside the sandbox
+          (e.g. a `file://` URL on the worker's transcript volume).
+      cost:
+        $ref: '#/$defs/cost'
+      workspace:
+        $ref: '#/$defs/stepWorkspace'
+      artifacts:
+        type: array
+        description: >-
+          Links the step's agent reported as results of its task (A2A artifacts with a
+          URL), e.g. the pull request it opened. The merge gate only merges a pull request
+          the run reported this way, from the step's workspace.
+        items:
+          $ref: '#/$defs/stepArtifact'
+      error:
+        $ref: '#/$defs/workflowError'
+      startedAt:
+        type: string
+        format: date-time
+      finishedAt:
+        type: string
+        format: date-time
+  stepWorkspace:
+    title: StepWorkspace
+    description: >-
+      The workspace the step handed to its agent (the run's workflow set it, not the
+      agent): the repository checked out and the branch the agent works on. The merge
+      gate only merges a pull request of this repository from this branch.
+    type: object
+    additionalProperties: false
+    required: [repository, branch]
+    properties:
+      repository:
+        type: string
+        description: Clone URL, e.g. `https://github.com/acme/playground.git`.
+      branch:
+        type: string
+  stepArtifact:
+    title: StepArtifact
+    description: A result an agent reported as a link.
+    type: object
+    additionalProperties: false
+    required: [name, url]
+    properties:
+      name:
+        type: string
+        description: What the link is, e.g. `pull-request`.
+      url:
+        type: string
+      description:
+        type: string
+  cost:
+    title: Cost
+    description: What an agent session cost, as its harness reports it (with a subscription an estimate, not a bill).
+    type: object
+    additionalProperties: false
+    required: [amount, currency]
+    properties:
+      amount:
+        type: number
+        minimum: 0
+      currency:
+        type: string
+        description: ISO 4217 code, e.g. `USD`.
+  stepStatus:
+    title: StepStatus
+    type: string
+    enum: [running, completed, failed]
+  workflowError:
+    title: WorkflowError
+    description: Why a step or run failed, as RFC 7807 problem details (Serverless Workflow error).
+    type: object
+    additionalProperties: false
+    required: [type, status, instance, title]
+    properties:
+      type:
+        type: string
+        description: Error type URI, e.g. `https://serverlessworkflow.io/spec/1.0.0/errors/runtime`.
+      status:
+        type: integer
+      instance:
+        type: string
+        description: JSON pointer of the task that raised the error.
+      title:
+        type: string
+      detail:
+        type: string

@@ -1,0 +1,30 @@
+# Restart smoke test for the real developer agent: a task that takes over a minute, so the
+# platform can be restarted while the agent works. Needs the sandbox image, a harness
+# credential and the agent token; see docs/platform-implementation.md.
+# Start it with: POST /runs {"workflow": "restart-developer"}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: restart-developer
+  version: '0.1.0'
+  summary: Asks the developer agent for a slow two-step task in its workspace.
+do:
+  - write-files:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: >-
+                  Create the file before.txt in the current directory with the single line
+                  "before". Then run the shell command `for i in $(seq 1 18); do echo "tick $i"; sleep 5; done`
+                  in the foreground (never in the background) and wait until it has printed
+                  "tick 18"; it takes about 90 seconds. Then create after.txt with
+                  the single line "after". Finally answer with the names of all .txt files in
+                  the current directory, one per line, and nothing else.
+      output:
+        as: '${ { taskId: .id, state: .status.state, reply: .status.message.parts[0].text, resumed: (.metadata["dev.tendworks/resumed"] // 0) } }'

@@ -1,0 +1,60 @@
+$id: https://tendworks.dev/schemas/v1/schemas/notification.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Notification
+description: >-
+  Notifications human interaction records for the operator. A notification is recorded
+  before delivery is attempted, so it survives a failing delivery channel.
+$defs:
+  notification:
+    title: Notification
+    description: A message to the human that needs no decision, e.g. that a run finished or that an approval request waits.
+    type: object
+    additionalProperties: false
+    required: [id, kind, runId, title, createdAt, delivery]
+    properties:
+      id:
+        type: string
+        description: Notification id, assigned by the platform.
+      kind:
+        $ref: '#/$defs/notificationKind'
+      runId:
+        type: string
+        description: Run the notification is about.
+      title:
+        type: string
+        description: One line for the human, e.g. "Run 1f3c… of hello-agent completed".
+      detail:
+        type: string
+        description: More context, e.g. why a run failed.
+      createdAt:
+        type: string
+        format: date-time
+      delivery:
+        $ref: '#/$defs/delivery'
+  notificationKind:
+    title: NotificationKind
+    description: What the notification is about.
+    type: string
+    enum: [run.completed, run.failed, approval.requested]
+  delivery:
+    title: NotificationDelivery
+    description: Outcome of the latest delivery attempt through the notification channel.
+    type: object
+    additionalProperties: false
+    required: [status]
+    properties:
+      status:
+        $ref: '#/$defs/deliveryStatus'
+      attemptedAt:
+        type: string
+        format: date-time
+        description: When delivery was last attempted.
+      error:
+        type: string
+        description: Why the last delivery attempt failed.
+  deliveryStatus:
+    title: DeliveryStatus
+    description: >-
+      `pending` until delivery has been attempted, then `delivered` or `failed`.
+    type: string
+    enum: [pending, delivered, failed]

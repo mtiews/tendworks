@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 const require = createRequire(import.meta.url);
 const { forbidden } = require("../../.dependency-cruiser.cjs");
 
-// A tiny repository with two domains, shared types and the health library.
+// A tiny repository with two domains, shared types and the platform libraries.
 const fixture = fileURLToPath(new URL("./fixtures", import.meta.url));
 
 async function violationsIn(path: string): Promise<IViolation[]> {
@@ -21,6 +21,12 @@ it("rejects a domain importing another domain", async () => {
   expect(violations.map((v) => [v.rule.name, v.to])).toEqual([["no-cross-domain-imports", "packages/beta/src/index.ts"]]);
 });
 
-it("allows a domain to use generated types and the health library", async () => {
+it("allows a domain to use generated types and the platform libraries", async () => {
   expect(await violationsIn("packages/alpha/src/allowed.ts")).toEqual([]);
+});
+
+it("rejects a platform library that knows a domain", async () => {
+  const violations = await violationsIn("packages/platform/src/violation.ts");
+
+  expect(violations.map((v) => [v.rule.name, v.to])).toEqual([["platform-libraries-are-leaves", "packages/beta/src/index.ts"]]);
 });

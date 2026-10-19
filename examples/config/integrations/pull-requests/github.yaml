@@ -1,0 +1,11 @@
+# Merges pull requests on github.com with the platform token (deploy/.env), which needs
+# contents and pull requests read/write on the playground repository. Never in a sandbox.
+apiVersion: tendworks.dev/v1
+kind: PullRequestIntegration
+metadata:
+  name: github
+spec:
+  host: github.com
+  integration: github
+  github:
+    token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }

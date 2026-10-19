@@ -48,6 +48,7 @@ tendworks/
     mcp-platform/            # read-only MCP server on the control plane API
     shared/                  # only types generated from contracts/
     health/                  # platform library, not a domain: health probes and the runtime health API
+    platform/                # platform library, not a domain: CloudEvent envelope and trace context, secret references
   apps/
     server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction
     worker/                  # walking skeleton: bundles orchestration, agent-runtime (mcp-platform from milestone 1b)
@@ -75,9 +76,9 @@ Packages under `packages/` map to the domains; apps under `apps/` are only bundl
 | `server` | control plane API, web UI, time trigger | yes |
 | `worker` | workflow interpreter, agent runtime with ACP, MCP server for the chat | yes |
 | `sandbox-claude-code` | sandbox image, started via Docker (isolation class `container`, `gvisor` opt-in) | yes |
-| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch |
-| tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend trigger list, tend notification list, tend approval list/approve; tend chat in milestone 1b |
-| Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only the endpoints it needs | yes |
+| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR 0014 (interim-bearer-token-on-the-control-plane-api)) |
+| tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend agent list, tend trigger list, tend notification list, tend approval list/approve; tend chat in milestone 1b |
+| Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers`, `/exec`, `/volumes` and `/networks` (writes allowed; networks for creating the sandbox network once), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
 | web UI | run list, run detail, notifications, chat | milestone 1b |
 
 ## Walking skeleton: build order (milestone 1)
@@ -87,7 +88,7 @@ Every slice ends with a working `docker compose up`. Configuration lives in `exa
 | # | Slice | Proves |
 | --- | --- | --- |
 | S0 | Scaffold: pnpm workspaces, dependency-cruiser rules, Compose with Postgres and Temporal (dev mode), empty `server` and `worker`, `tend status` | repo structure, domain boundaries |
-| S1 | `POST /runs` → minimal workflow interpreter (`do`, `call`) → A2A task → fake agent; `tend run list/get`; restart test for the workflow | control plane contract, interpreter, A2A seam, generated client, durable execution |
+| S1 | `POST /runs` → minimal workflow interpreter (`do`, `call`) → A2A task → fake agent; `tend run list/get`; restart test for the workflow; durable agent tasks resumed after a restart (ADR 0004) | control plane contract, interpreter, A2A seam, generated client, durable execution |
 | S2 | Fake agent replaced by Claude Code via ACP in a `container` sandbox (through the socket proxy); transcript and cost on a local volume; resume via `session/resume`; restart test for the agent session | sandbox API, ACP, agent runtime |
 | S3 | Time trigger plus GitHub polling for `ready-for-agent` in the playground repo | trigger gateway, TriggerBinding, integration port |
 | S4 | Pull request by the agent, merge as a workflow step behind `merge: auto \| ask`, event bus (Postgres outbox) with its first consumer, persisted notifications and approval requests, fake notification adapter | event bus, human interaction, milestone 1 success criterion |
@@ -96,16 +97,78 @@ Every slice ends with a working `docker compose up`. Configuration lives in `exa
 Rules for the skeleton:
 
 - **Fakes first.** Each seam gets its fake before its real adapter; the fake stays as the second implementation of the port.
-- **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5.
+- **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5 (ADR 0013 (contract-and-port-fitness-functions)): `tests/contract` checks the HTTP APIs and events against their contracts, `tests/architecture` checks product names and ports.
 - **Interpreter grows with demand.** `listen` and `switch` are added when the merge gate needs them, test-driven.
-- **Event bus with its first consumer.** Until S4 the control plane reads runs synchronously through the orchestration API.
+- **Event bus with its first consumer.** The control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker). Run and step events go onto the event bus in the transaction of the run state (ADR 0003, ADR 0005); the first consumer is human interaction, which records a notification for every completed or failed run and every approval request before delivering it. Human interaction publishes `approval.requested` and `approval.decided` the same way; orchestration consumes every other domain's event that names a run and hands it to that run's `listen` tasks.
 - **Resume is tested from S1 on**, not at the end.
+- **Policies are YAML before they are Rego.** The architecture names Rego evaluated by OPA for policies; the skeleton has no OPA. Until it does, a policy is a configuration document `kind: Policy` (`contracts/schemas/policy.schema.yaml`, `spec.merge: auto | ask`, optionally `spec.workflows`), evaluated by a pure decision function `decide()` in human interaction (`allow | ask`, the strictest applicable policy wins). The function's signature is the seam a policy engine replaces later; the `kind: Policy` documents then become Rego modules with tests.
+
+### Triggers: one firing per issue
+
+A trigger binding starts at most one run per matching issue, also when that run fails, so a persistently failing issue never starts a paid run at every check (ADR 0006 (trigger-gateway-fires-once-per-issue-through-the-public-api)). To retry an issue, start the workflow by hand with the same input, e.g. `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"issue":{...}}}'`; that run is recorded as started `manual`. `tend trigger list` shows each binding's last check (`LAST CHECK`): a check that could not ask its source (rate limit, API error, a secret that is not set) or could not start a run is `failed` with the reason. A suspended binding (`spec.suspend: true`) is never checked on its schedule.
+
+## Claude Code harness
+
+Agent profiles with `harness: claude-code` run Claude Code through `@agentclientprotocol/claude-agent-acp` (pinned in `images/sandbox-claude-code/package-lock.json`) in a sandbox from the profile's sandbox template. The agent runtime attaches to the adapter's stdio through the sandbox API, marks the harness onboarding complete and sets `bypassPermissions` in the session's config before it starts (for a profile with `attribution: false` also an empty `attribution` setting, so Claude Code adds no co-author trailers, generated-with lines or session links to commits and pull requests), records the ACP stream as the transcript and destroys the sandbox when the session ends (ADR 0007 (agent-runtime-records-transcripts-and-cost-from-acp)). The regular test suites use a scripted ACP agent behind the fake sandbox. The end-to-end suite runs the harness on the real path with a scripted ACP agent image instead of Claude Code (`images/sandbox-scripted-acp`, workflow `restart-scripted`): sandbox through the socket proxy, session volumes, ACP over the attached stdio, and `session/resume` in a new sandbox after a platform restart (`tests/e2e/restart-acp.test.ts`). `pnpm e2e` builds that image; the harness still needs a credential selected (`TEND_CLAUDE_CODE_CREDENTIAL=api-key` with any `ANTHROPIC_API_KEY` will do, as in CI), and the test is skipped without one. The real harness with Claude Code is a manual smoke test:
+
+1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
+2. In `deploy/.env` set `TEND_API_TOKEN` (`openssl rand -hex 32`; export it in your shell too, the `tend` CLI and the `curl` calls below read it) and `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox. Run steps 3 and 4 once with each credential kind (restart the worker after switching): both must complete, and the transcript must show the selected variable's value nowhere. The `developer` profile also passes the agent token in, so set `TENDWORKS_AGENT_GITHUB_TOKEN` (fine-grained, playground repository only, contents and pull requests read/write).
+3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
+4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, a non-zero `COST` (an estimate with `oauth-token`, the billed amount with `api-key`; zero means the harness reported none, which is a failure of this test) and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox, `docker volume ls --filter label=dev.tendworks.volume` no leftover volume.
+
+The workspace (`/workspace`) and the harness's home and config directory (`/session`) are volumes of the agent session, and the ACP session id is kept with the task, so after a platform restart the harness resumes the session with `session/resume` in a new sandbox (ADR 0009 (agent-sessions-resume-on-their-volumes)). Manual restart smoke test with the real harness, after steps 1–3:
+
+5. Run steps 5–7 automatically with `scripts/smoke/restart-developer.sh` (Git Bash; prints PASS or FAIL), or by hand: start `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
+6. `docker compose -f deploy/compose.yaml restart worker`.
+7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
+
+### Smoke test scripts
+
+The manual smoke tests below are automated in `scripts/smoke/` (bash; on Windows Git Bash). Each prints its checks and ends with PASS or FAIL. They need the stack running with `deploy/.env` set up and `TEND_API_TOKEN` exported; the GitHub ones also need `gh` logged in.
+
+| Script | Steps | Acceptance (#18) |
+| --- | --- | --- |
+| `hello-developer.sh` | 3–4 | run status, transcript and cost visible |
+| `restart-developer.sh` | 5–7 | restarting the platform mid-run resumes the run |
+| `pull-request-auto.sh <issue>` | 8–12 | labelled issue → merged pull request with `merge: auto` |
+| `pull-request-ask.sh <issue> [approve|reject]` | 14 | `merge: ask`: waits across a restart, merges after approval (or not after rejection) |
+
+The pull request scripts label the issue `ready-for-agent` themselves and refuse to run while other open playground issues carry the label, since each would start its own run. Configuration changes they need (binding not suspended, `develop-issue` in or out of `ask-before-merge`) stay manual; the scripts check them and say what to change.
+
+### Pull request smoke test
+
+The `develop-issue` workflow hands an issue to the `developer` agent. The runtime checks the issue's repository out in the workspace on a branch fixed by the run, copies the profile's skills into the sandbox, passes the agent token in as `GH_TOKEN` and appends the role description to the harness's system prompt; the agent pushes the branch, opens the pull request and records it, so the run's output shows it (ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)). The regular suites cover this with the scripted agent and a local bare repository; against the playground repository, after steps 1–3:
+
+8. Open an issue in `mtiews/tendworks-playground` with a small, clear change, e.g. "Add a file GREETING.md that says hello".
+9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"issue":{"repository":"mtiews/tendworks-playground","number":<n>,"title":"<title>","body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the time trigger find it: the binding `examples/config/triggers/playground-ready-for-agent.yaml` is shipped suspended; set `TENDWORKS_PLATFORM_GITHUB_TOKEN`, remove `suspend: true`, restart the server and label the issue `ready-for-agent`. `tend trigger list` shows its last check; `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` means the token did not reach the server. The run's `STARTED BY` names the binding and the issue.
+
+10. `tend run get <id>` shows the run completed, with `pullRequest` and `branch` (`tendworks/issue-<n>-<first 8 characters of the run id>`) under OUTPUT. The pull request on GitHub comes from that branch, describes the change and references the issue. The transcript has a `workspace-checkout` entry with exit code 0 and an `artifacts` entry; no token appears in the transcript or the run.
+11. Retry: restart the worker while the agent works (step 6). The resumed session continues on the same branch, and no second pull request appears.
+
+After the agent step the platform merges the pull request as the workflow's `merge` step: the worker calls the control plane's `POST /pull-requests/merge { run, pullRequest }`, whose merge gate checks orchestration's record of the run (running, reported this pull request), decides by the policies that apply to the workflow (`examples/config/policies/`; `merge-gate` applies to all with `merge: auto`, the strictest applicable policy wins) and merges with `TENDWORKS_PLATFORM_GITHUB_TOKEN`, which only the server holds (ADR 0011 (the-platform-merges-through-a-gate-on-the-control-plane-api), ADR 0012 (the-merge-gate-decides-by-the-run-and-waits-for-approval-requests)). The regular suites merge in the fake integration (`fake-develop-and-merge`); against the playground repository, with `TENDWORKS_PLATFORM_GITHUB_TOKEN` set (fine-grained, playground only: contents and pull requests read/write, issues read):
+
+12. In step 10, `tend run get <id>` additionally shows the `merge` step completed and `merged: true` and the merge `commit` under OUTPUT; on GitHub the pull request is merged by the platform token's owner, not by the agent. The server log names no token.
+13. Failure: run `develop-issue` for an issue the agent cannot finish, or set the token to an invalid value and restart the server. The run fails at `/do/1/merge` with a readable title and detail (e.g. "No pull request to merge", "Repository unavailable: GitHub answered 401: Bad credentials ..."); nothing is merged.
+14. Approval: add `develop-issue` to `workflows` of `examples/config/policies/ask-before-merge.yaml` and restart the server. After the agent step the run waits: `tend status` shows `PENDING APPROVALS 1`, `tend notification list` an `approval.requested` notification, `tend approval list --pending` the request with the pull request in its question, and the pull request stays open. A platform restart (`docker compose -f deploy/compose.yaml restart server worker`) changes nothing. `tend approval approve <id>` lets the run merge and complete (`decision: ask`, `approval: approve` under OUTPUT); `tend approval reject <id>` ends the run without a merge (`merged: false`). The regular suites cover both with `fake-develop-and-ask`.
+
+## Quality gates
+
+| Gate | Where | Enforced by |
+| --- | --- | --- |
+| Type check (strict), generated contract types | `pnpm check` | CI, required status check on `main` |
+| Lint: ESLint with type-aware rules (`no-floating-promises`, `no-misused-promises`, exhaustive switches) | `pnpm check` | CI |
+| Architecture rules: domain boundaries (dependency-cruiser), product names, ≥ 2 implementations per port | `pnpm check` | CI |
+| Contract tests: OpenAPI requests/responses, CloudEvent schemas | `pnpm check` | CI |
+| Unit, integration and end-to-end tests | `pnpm check`, `pnpm coverage`, `pnpm e2e` | CI |
+| Coverage thresholds (global and per package, measured over unit + integration tests) | `pnpm coverage` | CI; thresholds only go up |
+| Secret scanning of staged changes (Betterleaks) | pre-commit hook | locally, against accidents (`--no-verify` skips it); GitHub secret scanning with push protection on the server |
+| Changes reach `main` only through a pull request with green CI, no force push, no deletion | repository ruleset | GitHub, no bypass |
 
 ## Open items
 
 - [x] Define the build order of the walking skeleton
 - [x] Write the concrete `compose.yaml`
-- [ ] Example configuration for the existing issue agent (trigger, profile, skills, sandbox template)
+- [x] Example configuration for the existing issue agent (profile, skills, sandbox template, workflow `develop-issue`, the suspended playground trigger binding `playground-ready-for-agent`)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token
 - [ ] Design review for milestone 1b (chat session model) once S2 works

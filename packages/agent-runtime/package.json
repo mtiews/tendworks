@@ -9,5 +9,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "1.7.0",
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "ajv": "8.20.0",
+    "pg": "8.23.1",
+    "yaml": "2.9.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

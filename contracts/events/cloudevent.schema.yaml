@@ -1,0 +1,41 @@
+$id: https://tendworks.dev/schemas/v1/events/cloudevent.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: TendworksCloudEvent
+description: >-
+  Envelope of every Tendworks event: a CloudEvent 1.0.2 in structured JSON mode with the
+  extension attributes `runid`, `stepid` and `traceparent` (W3C Trace Context, CloudEvents
+  distributed tracing extension). Each event type narrows `type` and `data`.
+type: object
+required: [specversion, id, source, type, time, datacontenttype, runid, traceparent, data]
+properties:
+  specversion:
+    const: '1.0'
+  id:
+    type: string
+    minLength: 1
+    description: Unique per source; consumers deduplicate on it.
+  source:
+    type: string
+    minLength: 1
+    description: URI reference of the producing domain, e.g. `/tendworks/orchestration`.
+  type:
+    type: string
+    pattern: ^dev\.tendworks\.
+  subject:
+    type: string
+  time:
+    type: string
+    format: date-time
+  datacontenttype:
+    const: application/json
+  runid:
+    type: string
+    description: Run the event belongs to.
+  stepid:
+    type: string
+    description: Step the event belongs to (its reference in the workflow), if any.
+  traceparent:
+    type: string
+    pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+  data:
+    type: object

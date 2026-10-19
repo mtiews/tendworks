@@ -14,6 +14,7 @@
     "yaml": "2.9.1"
   },
   "devDependencies": {
-    "@tendworks/control-plane": "workspace:*"
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/human-interaction": "workspace:*"
   }
 }

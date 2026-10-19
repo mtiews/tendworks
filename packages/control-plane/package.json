@@ -12,10 +12,13 @@
   },
   "dependencies": {
     "@tendworks/health": "workspace:*",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
+    "ajv": "8.20.0",
     "hono": "4.13.13",
     "openapi-fetch": "0.17.0",
-    "pg": "8.23.1"
+    "pg": "8.23.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/pg": "8.23.1"

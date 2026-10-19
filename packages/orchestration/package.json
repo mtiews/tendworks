@@ -11,7 +11,21 @@
     }
   },
   "dependencies": {
+    "@gabrielbryk/jq-ts": "1.7.0",
+    "@temporalio/activity": "1.24.0",
     "@temporalio/client": "1.24.0",
-    "@tendworks/health": "workspace:*"
+    "@temporalio/common": "1.24.0",
+    "@temporalio/worker": "1.24.0",
+    "@temporalio/workflow": "1.24.0",
+    "@tendworks/health": "workspace:*",
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "ajv": "8.20.0",
+    "hono": "4.13.13",
+    "pg": "8.23.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

@@ -4,18 +4,23 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "src/**/*.test.ts"
-  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
+    {
+      "path": "../../packages/agent-runtime"
+    },
+    {
+      "path": "../../packages/event-bus"
+    },
     {
       "path": "../../packages/health"
     },
     {
       "path": "../../packages/orchestration"
+    },
+    {
+      "path": "../../packages/platform"
     },
     {
       "path": "../../packages/sandbox"

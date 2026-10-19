@@ -1,0 +1,12 @@
+# Test sandbox for the end-to-end restart test: a scripted ACP agent in place of Claude
+# Code (images/sandbox-scripted-acp). `pnpm e2e` builds the image; no model, no credentials.
+apiVersion: tendworks.dev/v1
+kind: SandboxTemplate
+metadata:
+  name: scripted-acp
+spec:
+  image: tendworks/sandbox-scripted-acp:test
+  isolationClass: container
+  resources:
+    cpus: 1
+    memoryMb: 512

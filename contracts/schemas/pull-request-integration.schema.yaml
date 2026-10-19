@@ -1,0 +1,134 @@
+$id: https://tendworks.dev/schemas/v1/schemas/pull-request-integration.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: PullRequestIntegration
+description: >-
+  How the platform reaches the pull requests on one host, with the platform's own
+  credentials, never an agent's. The merge gate merges a run's pull request through the
+  integration configured for the host of its URL; a host without one cannot be merged.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: PullRequestIntegration
+  metadata:
+    type: object
+    title: PullRequestIntegrationMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+  spec:
+    $ref: '#/$defs/pullRequestIntegrationSpec'
+$defs:
+  pullRequestIntegrationSpec:
+    title: PullRequestIntegrationSpec
+    type: object
+    required: [host, integration]
+    additionalProperties: false
+    properties:
+      host:
+        type: string
+        pattern: ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$
+        description: >-
+          Host name of the pull requests' web URLs this integration serves, e.g.
+          `github.com`. At most one integration per host.
+      integration:
+        type: string
+        enum: [fake, github]
+        description: >-
+          Which integration answers. `fake` serves the pull requests listed under `fake`
+          in memory, for tests and demos; `github` uses the GitHub REST API with the
+          settings under `github`.
+      fake:
+        $ref: '#/$defs/fakePullRequests'
+      github:
+        $ref: '#/$defs/githubPullRequests'
+    allOf:
+      - if:
+          properties:
+            integration:
+              const: github
+        then:
+          required: [github]
+          properties:
+            github: true
+      - if:
+          properties:
+            integration:
+              const: fake
+        then:
+          required: [fake]
+          properties:
+            fake: true
+  fakePullRequests:
+    title: FakePullRequests
+    description: >-
+      The pull requests the fake integration serves; others are not found. A merged pull
+      request stays merged, so merging it again succeeds.
+    type: object
+    required: [pullRequests]
+    additionalProperties: false
+    properties:
+      pullRequests:
+        type: array
+        items:
+          $ref: '#/$defs/fakePullRequest'
+  fakePullRequest:
+    title: FakePullRequest
+    type: object
+    required: [url, headBranch]
+    additionalProperties: false
+    properties:
+      url:
+        type: string
+        pattern: ^https://[^/\s]+/[^/\s]+/[^/\s]+/pull/[0-9]+$
+        description: Web URL, `https://<host>/<owner>/<name>/pull/<number>`; the repository is `<owner>/<name>` on the host.
+      headBranch:
+        type: string
+        minLength: 1
+        description: The branch the pull request merges from.
+      headRepository:
+        type: string
+        pattern: ^[^/\s]+/[^/\s]+$
+        description: Repository of the head branch as `<owner>/<name>`, e.g. a fork. Defaults to the pull request's repository.
+      state:
+        type: string
+        enum: [open, closed, merged]
+        description: Defaults to `open`.
+      mergeable:
+        type: boolean
+        description: Whether an open pull request merges cleanly. Defaults to true.
+  githubPullRequests:
+    title: GithubPullRequests
+    description: How the `github` integration reaches the repositories.
+    type: object
+    required: [token]
+    additionalProperties: false
+    properties:
+      token:
+        $ref: '#/$defs/secretRef'
+        description: >-
+          Platform token that may read and merge the pull requests (contents and pull
+          requests read/write).
+  secretRef:
+    title: PlatformSecretRef
+    description: >-
+      Reference to a secret the platform holds; platform integrations may only reference
+      platform secrets (`TENDWORKS_PLATFORM_*`, ADR 0008).
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^TENDWORKS_PLATFORM_[A-Z0-9_]+$

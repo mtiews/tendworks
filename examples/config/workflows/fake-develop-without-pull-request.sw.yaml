@@ -1,0 +1,30 @@
+# Like fake-develop-and-merge, but the fake agent reports no pull request, so the merge
+# step fails and says why. Used by the end-to-end tests.
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: fake-develop-without-pull-request
+  version: '0.1.0'
+  summary: A fake agent reports no pull request, so the merge step fails.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+      output:
+        as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          run: '${ $workflow.id }'
+          pullRequest: '${ .pullRequest }'

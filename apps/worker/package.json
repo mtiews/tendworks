@@ -9,8 +9,15 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",
+    "@tendworks/agent-runtime": "workspace:*",
+    "@tendworks/event-bus": "workspace:*",
     "@tendworks/health": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
-    "@tendworks/sandbox": "workspace:*"
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/sandbox": "workspace:*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

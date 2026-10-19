@@ -7,7 +7,9 @@ Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agent
 ## Commands
 
 - `pnpm install` (pnpm via corepack: `corepack enable pnpm`)
-- `pnpm check`: generate types from `contracts/`, typecheck, architecture rules (dependency-cruiser), unit tests
+- `pnpm check`: generate types from `contracts/`, typecheck, lint (ESLint with type-aware rules), architecture rules (dependency-cruiser), unit tests
+- `pnpm coverage`: unit + integration tests with coverage thresholds (see `vitest.config.ts`); thresholds may only be raised, never lowered without a reason in the pull request
+- Pre-commit hook: Betterleaks scans staged changes for secrets (`.githooks/`, installed by `pnpm install`; needs `betterleaks` on PATH). Known dummy values carry `betterleaks:allow` with a reason
 - `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` against it
 - `node apps/cli/dist/main.js status` after `pnpm build`: the `tend` CLI against `http://localhost:8080` (override with `--url` or `TEND_URL`)
 
@@ -51,7 +53,7 @@ Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision chang
 contracts/   openapi/, events/ (CloudEvent JSON Schemas), schemas/ (per kind)
 packages/    control-plane, trigger-gateway, orchestration, agent-runtime, sandbox,
              human-interaction, event-bus, mcp-platform, shared (generated types only),
-             health (platform library, not a domain)
+             health, platform (platform libraries, not domains)
 apps/        server, worker, web, cli   (bundles only, no domain logic)
 images/      sandbox-claude-code
 deploy/      compose.yaml, profiles/

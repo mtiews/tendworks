@@ -4,16 +4,19 @@ info:
   version: 0.1.0
   description: >-
     Public API of the Tendworks control plane. The web UI, the tend CLI, the
-    meta-agent and any script use only this API.
+    meta-agent and any script use only this API. Operations that change state (start a
+    run, merge a pull request, decide an approval request) need the platform's API token
+    as a bearer token; reading does not. This is an interim scheme until identity (OIDC)
+    arrives.
 paths:
   /status:
     get:
       operationId: getPlatformStatus
       summary: Platform health
       description: >-
-        Health of the platform and of each component it depends on. Answers 200
-        when the platform is healthy and 503 when it is not; both carry the same
-        body.
+        Health of the platform and of each component it depends on, and how many
+        approval requests wait for a decision. Answers 200 when the platform is healthy
+        and 503 when it is not; both carry the same body.
       responses:
         "200":
           description: Platform is healthy.
@@ -27,8 +30,530 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlatformStatus"
+  /runs:
+    post:
+      operationId: startRun
+      security:
+        - apiToken: []
+      summary: Start a run of a configured workflow
+      description: >-
+        Starts a run of the workflow named `workflow` (its `document.name`) from the
+        configuration. The run executes in the background; poll `GET /runs/{runId}`.
+        A caller that traces its work (e.g. the trigger gateway) passes its W3C
+        `traceparent`; the run and all its events then belong to that trace. Without
+        one the run starts a new trace.
+      parameters:
+        - $ref: "#/components/parameters/Traceparent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunRequest"
+      responses:
+        "201":
+          description: Run started.
+          headers:
+            Location:
+              description: URL of the new run.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "400":
+          description: >-
+            The request is invalid, e.g. no workflow with this name is configured or the
+            traceparent is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listRuns
+      summary: List runs, newest first
+      responses:
+        "200":
+          description: Runs with their status and steps.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunList"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /runs/{runId}:
+    get:
+      operationId: getRun
+      summary: Get one run with its steps and errors
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "404":
+          description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /agents:
+    get:
+      operationId: listAgents
+      summary: List the configured agent profiles, ordered by name
+      description: >-
+        The agent profiles workflows can hand tasks to (`agent://<name>`), as the
+        configuration defines them.
+      responses:
+        "200":
+          description: Agent profiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
+  /triggers:
+    get:
+      operationId: listTriggers
+      summary: List trigger bindings with their next scheduled execution
+      responses:
+        "200":
+          description: Triggers, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"
+        "503":
+          description: The trigger gateway, which owns the schedule, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /notifications:
+    get:
+      operationId: listNotifications
+      summary: List notifications, newest first
+      description: >-
+        Notifications the platform recorded, e.g. when a run completed or failed, with
+        the status of their delivery.
+      responses:
+        "200":
+          description: Notifications with their delivery status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "503":
+          description: Notifications cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /pull-requests/merge:
+    post:
+      operationId: mergePullRequest
+      security:
+        - apiToken: []
+      summary: Merge a run's pull request behind the gate of its policies
+      description: >-
+        Merges the pull request with the platform's credentials, never an agent's.
+        The caller names the run and the pull request; everything else comes from the
+        platform's own records: the run must be running and must have reported the pull
+        request (an artifact of one of its steps), the repository host must confirm that
+        the pull request belongs to the repository of the workspace that step handed to
+        its agent and merges from exactly the workspace's branch (not from a fork), and
+        the policies that apply to the run's workflow decide (the strictest wins). With `allow` the pull request is
+        merged right away. With `ask` the merge needs an approved approval request for
+        this run and pull request: the first request creates one (202), later requests
+        answer 202 while it is pending, merge once it is approved and are refused (403)
+        once it is rejected. Merging a pull request that is already merged succeeds, so
+        a repeated request is harmless. Workflows call this as a step after the agent
+        opened the pull request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergePullRequestRequest"
+      responses:
+        "200":
+          description: The pull request is merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestMerge"
+        "202":
+          description: >-
+            The policy asks for an approval and the approval request is pending; the
+            body names it. Nothing is merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestMerge"
+        "400":
+          description: >-
+            The request is invalid: no pull request given (e.g. the agent reported none),
+            an unknown run, a pull request the run did not report, a pull request that is
+            not from the repository and branch of the run's workspace, no policy that
+            applies to the run's workflow, or no integration for the pull request's host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The approval request for this merge was rejected.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: >-
+            The run is not running, or the repository refused the merge, e.g. the pull
+            request is closed or has conflicts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "502":
+          description: The repository could not be reached or refused the platform's credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The merge gate is not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /approval-requests:
+    get:
+      operationId: listApprovalRequests
+      summary: List approval requests, newest first
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Only requests with this status, e.g. `pending`.
+          schema:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalStatus"
+      responses:
+        "200":
+          description: Approval requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequestList"
+        "400":
+          description: The status filter is not an approval status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Approval requests cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /approval-requests/{approvalRequestId}/decision:
+    post:
+      operationId: decideApprovalRequest
+      security:
+        - apiToken: []
+      summary: Approve or reject an approval request
+      description: >-
+        Records the decision and emits `approval.decided`, which the waiting run
+        receives. Deciding a request again the same way changes nothing; a decided
+        request cannot be decided the other way.
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApprovalDecisionRequest"
+      responses:
+        "200":
+          description: The decided approval request.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+        "400":
+          description: The decision is neither `approve` nor `reject`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No approval request with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The approval request was already decided the other way.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Approval requests cannot be read or written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The platform's API token (`TEND_API_TOKEN`), shared by the operator's clients and
+        the worker's merge step. Interim until OIDC; never handed to sandboxes.
+  parameters:
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context of the caller (version 00).
+      schema:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
   schemas:
+    ApprovalRequestList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+    ApprovalDecisionRequest:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalDecision"
+    NotificationList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/notification.schema.yaml#/$defs/notification"
+    MergePullRequestRequest:
+      type: object
+      required: [run, pullRequest]
+      additionalProperties: false
+      properties:
+        run:
+          type: string
+          description: Id of the running run whose pull request to merge.
+        pullRequest:
+          type: [string, "null"]
+          description: >-
+            Web URL of the pull request, as the run's agent reported it. `null` (no pull
+            request reported) is answered with 400 and a message saying so.
+    PullRequestMerge:
+      type: object
+      required: [pullRequest, policy, decision, merged]
+      additionalProperties: false
+      properties:
+        pullRequest:
+          type: string
+        policy:
+          type: string
+          description: Name of the policy whose decision applied (the strictest that applies).
+        decision:
+          $ref: "../schemas/policy.schema.yaml#/$defs/decision"
+        merged:
+          type: boolean
+          description: True once merged; false while the approval request is pending.
+        commit:
+          type: string
+          description: The merge commit, when the repository reports one.
+        approvalRequest:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+          description: With decision `ask`, the approval request the merge waits for or merged after.
+    MergeRefusal:
+      type: object
+      description: >-
+        Why the merge gate did not merge, as human interaction answers the control plane;
+        `POST /pull-requests/merge` maps the reason to its status. `invalid` (400): the
+        request cannot be served (no or unreported pull request, not from the run's
+        workspace, unknown run, no applicable policy, unknown host). `rejected` (403): the
+        approval request was rejected. `conflict` (409): the run is not running.
+        `refused` (409): the repository refused. `unavailable` (502): the repository could
+        not be asked.
+      required: [reason, title, detail]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [invalid, rejected, conflict, refused, unavailable]
+        title:
+          type: string
+        detail:
+          type: string
+    MergeOutcome:
+      description: >-
+        What the merge gate did: `merged`, `pending` (the policy asks and the approval
+        request is not decided yet; nothing is merged) or `refused`.
+      oneOf:
+        - type: object
+          required: [merged]
+          additionalProperties: false
+          properties:
+            merged:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [pending]
+          additionalProperties: false
+          properties:
+            pending:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [refused]
+          additionalProperties: false
+          properties:
+            refused:
+              $ref: "#/components/schemas/MergeRefusal"
+    AgentList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+    Agent:
+      type: object
+      description: An agent profile of the configuration.
+      required: [name, harness]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Name workflows address it by, as `agent://<name>`.
+        harness:
+          type: string
+          description: What answers its tasks, as the profile's `spec.harness` names it.
+        sandbox:
+          type: string
+          description: Sandbox template its sandboxes are created from, if it runs in one.
+        skills:
+          type: array
+          items:
+            type: string
+          description: Skills copied into its sandbox.
+        secrets:
+          type: array
+          items:
+            type: string
+          description: Names of the secrets the profile passes into its sandbox (never their values).
+    StartRunRequest:
+      type: object
+      required: [workflow]
+      additionalProperties: false
+      properties:
+        workflow:
+          type: string
+          description: Name of a configured workflow (`document.name`).
+        input:
+          type: object
+          additionalProperties: true
+          description: Workflow input; defaults to an empty object.
+        startedBy:
+          $ref: "../schemas/run.schema.yaml#/$defs/runOrigin"
+          description: What starts the run, e.g. a trigger binding for an issue; defaults to `manual`.
+    RunList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/run.schema.yaml#/$defs/run"
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [title, status]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
     HealthState:
       type: string
       enum: [healthy, unhealthy]
@@ -46,6 +571,12 @@ components:
         checkedAt:
           type: string
           format: date-time
+        pendingApprovals:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of approval requests waiting for a decision; absent when approval
+            requests cannot be read.
     ComponentStatus:
       type: object
       required: [name, status]

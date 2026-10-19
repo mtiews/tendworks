@@ -1,0 +1,24 @@
+# End-to-end restart test through the Claude Code harness with a scripted ACP agent: the
+# agent's first turn writes before.txt and works for 90 s, so the platform can be
+# restarted mid-turn; the resumed session writes after.txt and says it was resumed.
+# Start it with: POST /runs {"workflow": "restart-scripted"}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: restart-scripted
+  version: '0.1.0'
+  summary: Hands a slow task to the scripted ACP agent in a sandbox.
+do:
+  - write-files:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://scripted-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: Write before.txt, work for a while, then write after.txt and list the .txt files.
+      output:
+        as: '${ { taskId: .id, state: .status.state, reply: .status.message.parts[0].text, resumed: (.metadata["dev.tendworks/resumed"] // 0) } }'

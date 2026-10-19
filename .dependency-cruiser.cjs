@@ -4,17 +4,17 @@ module.exports = {
     {
       name: "no-cross-domain-imports",
       comment:
-        "A domain package may not import another domain package. Use the published API or events; shared types come from @tendworks/shared, which is generated from contracts/. @tendworks/health is a platform library, not a domain.",
+        "A domain package may not import another domain package. Use the published API or events; shared types come from @tendworks/shared, which is generated from contracts/. @tendworks/health and @tendworks/platform are platform libraries, not domains.",
       severity: "error",
-      from: { path: "^packages/([^/]+)/" },
-      to: { path: "^packages/", pathNot: ["^packages/$1/", "^packages/shared/", "^packages/health/"] },
+      from: { path: "^packages/([^/]+)/", pathNot: "^packages/(health|platform)/" },
+      to: { path: "^packages/", pathNot: ["^packages/$1/", "^packages/shared/", "^packages/health/", "^packages/platform/"] },
     },
     {
-      name: "health-is-a-leaf-library",
-      comment: "@tendworks/health may only use generated types; it must never know a domain.",
+      name: "platform-libraries-are-leaves",
+      comment: "Platform libraries (@tendworks/health, @tendworks/platform) may only use generated types; they must never know a domain or each other.",
       severity: "error",
-      from: { path: "^packages/health/" },
-      to: { path: "^(packages|apps)/", pathNot: ["^packages/health/", "^packages/shared/"] },
+      from: { path: "^packages/(health|platform)/" },
+      to: { path: "^(packages|apps)/", pathNot: ["^packages/$1/", "^packages/shared/"] },
     },
     {
       name: "shared-is-generated-types-only",

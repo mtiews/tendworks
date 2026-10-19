@@ -18,10 +18,17 @@ jobs:
           node-version: 24
       - run: corepack enable pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Typecheck, architecture rules, unit tests
+      - name: Typecheck, lint, architecture rules, contract tests, unit tests
         run: pnpm check
+      - name: Unit and adapter integration tests with coverage thresholds
+        run: pnpm coverage
       - name: End-to-end tests on the compose stack
         run: pnpm e2e
+        env:
+          # The restart test runs the Claude Code harness against a scripted ACP agent; the
+          # harness needs some credential selected, which the scripted agent ignores.
+          TEND_CLAUDE_CODE_CREDENTIAL: api-key
+          ANTHROPIC_API_KEY: scripted-agent-needs-no-key
       - name: Compose logs on failure
         if: failure()
         run: docker compose -f deploy/compose.yaml logs

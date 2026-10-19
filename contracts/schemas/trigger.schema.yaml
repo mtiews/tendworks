@@ -1,0 +1,64 @@
+$id: https://tendworks.dev/schemas/v1/schemas/trigger.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Trigger
+description: >-
+  Runtime view of a trigger binding as the trigger gateway reports it. Shared by the
+  public control plane API and the internal trigger gateway API.
+$defs:
+  trigger:
+    title: Trigger
+    type: object
+    additionalProperties: false
+    required: [name, workflow, schedule, nextExecutionAt]
+    properties:
+      name:
+        type: string
+        description: Name of the trigger binding.
+      workflow:
+        type: string
+        description: Workflow each match starts.
+      schedule:
+        $ref: './trigger-binding.schema.yaml#/$defs/schedule'
+      nextExecutionAt:
+        type: string
+        format: date-time
+        description: When the trigger next checks its source.
+      suspended:
+        type: boolean
+        description: Present and true when the binding is suspended and never checked on its schedule.
+      lastEvaluation:
+        $ref: '#/$defs/evaluation'
+  evaluation:
+    title: TriggerEvaluation
+    description: >-
+      How the binding's last check went. `failed` when its source could not be asked
+      (e.g. rate limit, API error, a secret that is not set) or a matching issue's run
+      could not be started; the message says why, naming secrets but never values.
+      Absent until the binding was checked once.
+    type: object
+    additionalProperties: false
+    required: [at, status, startedRuns]
+    properties:
+      at:
+        type: string
+        format: date-time
+      status:
+        type: string
+        enum: [succeeded, failed]
+      startedRuns:
+        type: integer
+        minimum: 0
+        description: Runs the check started.
+      message:
+        type: string
+  triggerList:
+    title: TriggerList
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        description: Triggers, ordered by name.
+        items:
+          $ref: '#/$defs/trigger'
