@@ -1,0 +1,26 @@
+# Contracts are checked in process, product names only select adapters, ports are declared
+
+The fitness functions of milestone 1 run in `pnpm check`, without the compose stack:
+
+- **API contracts.** A guard wraps a fetch handler with its OpenAPI document (`tests/contract/support/openapi-contract.ts`). Every exchange must address a documented operation; path and query parameters and the body are validated against the request schemas, the response status must be documented and its body must match the response schema (Ajv 2020-12 with formats; OpenAPI 3.1 schemas are JSON Schema). A request the contract forbids may only be answered with a 4xx, so a client that sends one or a server that accepts one fails. `tests/contract/openapi.test.ts` runs the control plane, orchestration, the trigger gateway and the health API with in-process domains and fakes, and fails unless together the tests produce **every documented response** of each contract. The existing cross-domain contract tests route their internal calls through the same guards. The sandbox API has no HTTP binding; its shared port suite validates each backend's answers against the contract's component schemas, so the Docker adapter is checked in the integration job.
+- **Events.** The catalog of emitted types is read from the producers' sources (`type: "dev.tendworks.…"`); every type needs a `$defs` entry in `contracts/events` whose `type` is that const, and the events the domains really emit in `tests/contract/events.test.ts` must validate against it. The flows must emit every catalogued type.
+- **Product names.** One list (`tests/architecture/product-names.ts`) of products. No name the contracts define may contain one: keys (properties, definitions, paths), enum and const values (event types among them), titles, operation ids. Prose (`description`, `summary`, `examples`) and references are not checked; they may cite a product as an example or source. The only exception is an **adapter selector**: an enum value with which an operator selects an adapter in configuration, and the settings block keyed by it (`harness: claude-code`, `integration: github` with its `github` settings, isolation class `gvisor`). Each selector is listed with file, JSON pointer and reason; a hit outside them fails, a listed selector no contract needs any more fails, and an event schema can never be one.
+- **Ports.** A port is an interface whose doc comment carries `@port`. `tests/architecture/ports.ts` names at least two implementations per port (real adapter and fake, or another domain's object that fills it structurally); the type checker holds each to the interface, and a test fails when the tagged interfaces and the declared ports differ or a port has fewer than two.
+
+The JSON Schemas under `contracts/` carry `$id`s that mirror their paths (`https://tendworks.dev/schemas/v1/<path under contracts/>`), so relative `$ref`s resolve by id as they do on disk; a test keeps it so.
+
+## Considered Options
+
+- **Schemathesis against the running stack**: property-based fuzzing finds more edge cases, but needs Python in CI, a running stack and stateful setup for every operation (a running run with a reported pull request for the merge endpoint); it cannot reach 502/503 paths or check the internal APIs between domains. Worth adding against the compose stack later; not as the contract test.
+- **Pact (consumer-driven)**: fits many teams with independent deployments; here both sides live in one repository and one PR (contract-first), so the OpenAPI document already is the agreement. It would add a broker and a second source of truth.
+- **An OpenAPI validator library** (e.g. express-openapi-validator, openapi-backend): framework-bound or OpenAPI 3.0 first, and none checks that every documented response is produced. The guard is about 200 lines on the pinned Ajv the repository already uses.
+- **Products allowed nowhere, not even in configuration**: would force indirections like `harness: acp-agent-1` that only hide which adapter is meant; the operator must be able to say what runs. Configuration names an adapter; APIs between domains and event types never do.
+- **Ports found by heuristics** (interfaces named `*Port`, `*Store`, files with suites): silently passes on a port nobody recognised. The `@port` tag makes the declaration explicit and reviewable.
+
+## Consequences
+
+- A new response, operation or event type needs a test that produces it; a new product name in a contract needs either a different name or a listed selector with a reason; a new port needs `@port` and two implementations in the manifest.
+- The OpenAPI test fails when run filtered (`-t`), because the responses of the skipped tests count as not produced.
+- Control-plane fakes (`createInMemoryApprovals`, `createInMemoryTriggers`, `createFakeMerges`), `createStaticHealthProbe`, `createFakeHarness` and `InMemoryAgentTaskExecutor` are now exported, so the manifest can name them.
+- Writing the guard found two undocumented answers of the control plane: 400 for an invalid approval status filter and 503 from the merge endpoint without a merge gate. Both are now in the contract.
+- `EventInbox` is not a port (no product behind it, one implementation used by both run engines); its doc comment says so.

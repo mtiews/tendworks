@@ -463,10 +463,10 @@ In the web UI, a chat window opens an agent session with a chosen profile and re
 
 **Fitness functions (run in CI, protect openness)**
 
-- Contract tests for every API and every event schema (e.g. Pact or Schemathesis against the OpenAPI).
-- Every port has at least two implementations; the second may be a fake that runs in tests.
+- Contract tests for every API and every event schema: every exchange is validated in process against the OpenAPI document and every documented response must be produced; every emitted event type has a JSON Schema its events are validated against (ADR XXXX (contract-and-port-fitness-functions)).
+- Every port has at least two implementations; the second may be a fake that runs in tests. Ports are declared with `@port` and listed with their implementations in `tests/architecture/ports.ts`.
 - No service imports code from or reads tables of another domain (architecture test, e.g. via import rules and separate DB roles).
-- Product names (Temporal, NATS, Garage, Claude …) appear in no contract and no event type.
+- Product names (Temporal, NATS, Garage, Claude …) appear in no contract and no event type. Only configuration may name a product, where it selects an adapter (e.g. `harness: claude-code`); each such selector is listed in `tests/architecture/product-names.ts`.
 - A workflow runs identically against real agents and against A2A fakes; the end-to-end tests run in CI against the laptop profile.
 
 ## Open decisions and risks
