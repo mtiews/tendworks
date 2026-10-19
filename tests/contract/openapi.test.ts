@@ -250,7 +250,9 @@ describe("control plane: chats, through the agent runtime", () => {
       }
       throw new Error("the turn did not end");
     }
-    return { client, of, answer };
+    /** Forgets the wait of a turn that was cancelled, so `answer` lets the next turn end. */
+    const forget = () => void turns.splice(0);
+    return { client, of, answer, forget };
   }
   async function events(body: ReadableStream<Uint8Array> | null | undefined) {
     const all: { id?: string; event?: string; data: string }[] = [];
@@ -291,6 +293,36 @@ describe("control plane: chats, through the agent runtime", () => {
     expect((await events(stream.data)).map((event) => event.id ?? event.event)).toEqual(["2", "3", "4", "5", "6", "7", "8", "end"]);
   });
 
+  it("cancels a running turn, takes the next message, and refuses to cancel once the chat ended", async () => {
+    const { client, of, answer, forget } = chatting();
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Work forever" } });
+    const id = chat!.id;
+
+    const cancelled = await client.POST("/chats/{chatId}/cancel", of(id));
+    forget();
+    const idle = await client.POST("/chats/{chatId}/cancel", of(id));
+    const next = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Something quick instead" } });
+    await answer(id);
+    await client.POST("/chats/{chatId}/end", of(id));
+    const afterEnd = await client.POST("/chats/{chatId}/cancel", of(id));
+    const transcript = await client.GET("/chats/{chatId}/transcript", of(id));
+
+    expect(cancelled.data).toMatchObject({ id, status: "input-required" });
+    expect(idle.data).toMatchObject({ id, status: "input-required" });
+    expect(next.response.status).toBe(200);
+    expect(afterEnd.response.status).toBe(409);
+    expect(transcript.data?.items.map((entry) => entry.type)).toEqual([
+      "task-started",
+      "turn-ended",
+      "input-required",
+      "message-received",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "task-ended",
+    ]);
+  });
+
   it("starts a chat with a repository as its workspace, and refuses a repository with credentials in its URL", async () => {
     const { client } = chatting();
 
@@ -314,6 +346,7 @@ describe("control plane: chats, through the agent runtime", () => {
     expect(refusedId.response.status).toBe(400);
     expect((await client.GET("/chats/{chatId}", of("missing"))).response.status).toBe(404);
     expect((await client.POST("/chats/{chatId}/messages", { ...of("missing"), body: { text: "Hi" } })).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/cancel", of("missing"))).response.status).toBe(404);
     expect((await client.POST("/chats/{chatId}/end", of("missing"))).response.status).toBe(404);
     expect((await client.GET("/chats/{chatId}/transcript", of("missing"))).response.status).toBe(404);
     expect((await client.GET("/chats/{chatId}/transcript/stream", { ...of("missing"), parseAs: "stream" })).response.status).toBe(404);
@@ -328,12 +361,13 @@ describe("control plane: chats, through the agent runtime", () => {
       client.GET("/chats"),
       client.GET("/chats/{chatId}", of),
       client.POST("/chats/{chatId}/messages", { ...of, body: { text: "Hi" } }),
+      client.POST("/chats/{chatId}/cancel", of),
       client.POST("/chats/{chatId}/end", of),
       client.GET("/chats/{chatId}/transcript", of),
       client.GET("/chats/{chatId}/transcript/stream", { ...of, parseAs: "stream" }),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([503, 503, 503, 503, 503, 503, 503]);
+    expect(answers.map(({ response }) => response.status)).toEqual([503, 503, 503, 503, 503, 503, 503, 503]);
   });
 });
 
@@ -412,9 +446,10 @@ describe("control plane: the API token", () => {
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
+    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
@@ -425,9 +460,10 @@ describe("control plane: the API token", () => {
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {

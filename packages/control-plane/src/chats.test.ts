@@ -117,11 +117,63 @@ describe("chats API", () => {
     expect(events.map((event) => event.id ?? event.event)).toEqual(["2", "3", "end"]);
   });
 
+  it("cancels the running turn: the chat waits for the next message and takes it", async () => {
+    const { call } = setup();
+    const { body: chat } = await call("POST", "/chats", { agent: "assistant", text: "Work forever" });
+
+    const cancelled = await call("POST", `/chats/${chat.id}/cancel`);
+    const next = await call("POST", `/chats/${chat.id}/messages`, { text: "Something quick instead" });
+    const transcript = await call("GET", `/chats/${chat.id}/transcript`);
+
+    expect(cancelled).toMatchObject({ status: 200, body: { id: chat.id, status: "input-required" } });
+    expect(next).toMatchObject({ status: 200, body: { status: "working" } });
+    expect(transcript.body.items).toMatchObject([{ type: "task-started" }, { type: "turn-ended", reason: "cancelled" }, { type: "input-required" }, { type: "message-received" }]);
+  });
+
+  it("changes nothing when cancelling while no turn runs, and refuses to cancel in an ended chat", async () => {
+    const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
+    const { call } = setup(agentRuntime);
+    const { body: chat } = await call("POST", "/chats", { agent: "assistant", text: "Hello" });
+    agentRuntime.finishTurn(chat.id, "Hi!");
+    const idle = await call("GET", `/chats/${chat.id}`);
+
+    expect(await call("POST", `/chats/${chat.id}/cancel`)).toEqual({ ...idle, headers: expect.anything() });
+    await call("POST", `/chats/${chat.id}/end`);
+    expect(await call("POST", `/chats/${chat.id}/cancel`)).toMatchObject({ status: 409, body: { title: "Chat ended" } });
+  });
+
+  it("serves two clients of one chat the same entries live, and takes the next message from either", async () => {
+    const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
+    const { call, api } = setup(agentRuntime);
+    const { body: chat } = await call("POST", "/chats", { agent: "assistant", text: "Hello" });
+    const follow = async () => {
+      const response = await api.fetch(new Request(`http://tend.test/chats/${chat.id}/transcript/stream`, { headers: { authorization: "Bearer read-only-test-token" } }));
+      const seen: string[] = [];
+      for await (const event of readServerSentEvents(response.body!)) seen.push(event.event === "entry" ? (JSON.parse(event.data) as TranscriptEntry).type : event.event!);
+      return seen;
+    };
+    const first = follow();
+    const second = follow();
+
+    agentRuntime.finishTurn(chat.id, "Hi!");
+    const fromFirst = await call("POST", `/chats/${chat.id}/messages`, { text: "From the first client" });
+    agentRuntime.finishTurn(chat.id, "Hello first.");
+    const fromSecond = await call("POST", `/chats/${chat.id}/messages`, { text: "From the second client" });
+    agentRuntime.finishTurn(chat.id, "Hello second.");
+    await call("POST", `/chats/${chat.id}/end`);
+
+    expect([fromFirst.status, fromSecond.status]).toEqual([200, 200]);
+    const expected = ["task-started", ...Array(3).fill(["message-chunk", "input-required", "message-received"]).flat().slice(0, -1), "task-ended", "end"];
+    expect(await first).toEqual(expected);
+    expect(await second).toEqual(expected);
+  });
+
   it("answers 404 for a chat it does not know", async () => {
     const { call, api } = setup();
 
     expect(await call("GET", "/chats/unknown")).toMatchObject({ status: 404, body: { title: "Chat not found" } });
     expect(await call("POST", "/chats/unknown/messages", { text: "Hi" })).toMatchObject({ status: 404 });
+    expect(await call("POST", "/chats/unknown/cancel")).toMatchObject({ status: 404 });
     expect(await call("POST", "/chats/unknown/end")).toMatchObject({ status: 404 });
     expect(await call("GET", "/chats/unknown/transcript")).toMatchObject({ status: 404 });
     expect((await api.fetch(new Request("http://tend.test/chats/unknown/transcript/stream", { headers: { authorization: "Bearer test-token" } }))).status).toBe(404);
@@ -145,6 +197,7 @@ describe("chats API", () => {
     expect(await call("GET", `/chats/${chat.id}`, undefined, read)).toMatchObject({ status: 200 });
     expect(await call("POST", "/chats", { agent: "assistant", text: "Hello" }, read)).toMatchObject({ status: 403 });
     expect(await call("POST", `/chats/${chat.id}/messages`, { text: "Hi" }, read)).toMatchObject({ status: 403 });
+    expect(await call("POST", `/chats/${chat.id}/cancel`, undefined, read)).toMatchObject({ status: 403 });
     expect(await call("POST", `/chats/${chat.id}/end`, undefined, read)).toMatchObject({ status: 403 });
   });
 
@@ -156,6 +209,7 @@ describe("chats API", () => {
       expect(await call("POST", "/chats", { agent: "assistant", text: "Hello" })).toMatchObject({ status: 503 });
       expect(await call("GET", "/chats/c-1")).toMatchObject({ status: 503 });
       expect(await call("POST", "/chats/c-1/messages", { text: "Hi" })).toMatchObject({ status: 503 });
+      expect(await call("POST", "/chats/c-1/cancel")).toMatchObject({ status: 503 });
       expect(await call("POST", "/chats/c-1/end")).toMatchObject({ status: 503 });
       expect(await call("GET", "/chats/c-1/transcript")).toMatchObject({ status: 503 });
     }

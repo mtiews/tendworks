@@ -23,6 +23,8 @@ export interface AgentScript {
   crash?: string;
   /** Ends the turn only when cancelled: every turn (`true`) or only the first one of all processes. */
   hang?: boolean | "first";
+  /** Takes note of `session/cancel` but goes on working, so a hanging turn never ends. */
+  ignoreCancel?: boolean;
   /** Does not advertise the ACP resume capability. */
   noResume?: boolean;
   /** Written to the file named by TENDWORKS_ARTIFACTS before the turn ends. */
@@ -140,7 +142,7 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
     })
     .onNotification(acp.methods.agent.session.cancel, () => {
       observed.cancelled = true;
-      cancel();
+      if (!script.ignoreCancel) cancel();
     })
     .onRequest("_tendworks/keepalive", (params) => params, () => {
       observed.keepAlives++;

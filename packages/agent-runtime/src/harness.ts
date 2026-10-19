@@ -71,6 +71,12 @@ export interface OpenSession {
    */
   turn(message: A2A.Message, options?: { interrupted?: boolean }): Promise<HarnessTurn>;
   /**
+   * Asks the agent to stop the running turn, which then ends in `TASK_STATE_INPUT_REQUIRED`
+   * with a `turn-ended` entry of reason `cancelled`; the session goes on. Resolves once
+   * the request is made, not once the turn ended. Nothing happens while no turn runs.
+   */
+  cancel(): Promise<void>;
+  /**
    * Lets go of the session's sandbox between turns, e.g. when a chat is idle (ADR 0015):
    * the sandbox goes, its volumes and what is kept to resume the session stay, so the
    * next turn resumes the session in a new sandbox.

@@ -27,6 +27,29 @@ async function waiting(chatId: string, timeoutMs = 60_000): Promise<Chat> {
   }
 }
 
+/** `tend` run in the server container, with its output collected and its input open until `close`. */
+function tendClient(...args: string[]) {
+  const tend = spawn("docker", ["compose", "-f", composeFile, "exec", "-T", "server", "node", "apps/cli/dist/main.js", "--url", "http://localhost:8080", "--token", API_TOKEN, ...args]);
+  let stdout = "";
+  let stderr = "";
+  tend.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+  tend.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+  const exited = new Promise<number | null>((resolve) => tend.on("close", resolve));
+  return {
+    exited,
+    stdout: () => stdout,
+    stderr: () => stderr,
+    write: (line: string) => tend.stdin.write(`${line}\n`),
+    close: () => tend.stdin.end(),
+    async until(text: string) {
+      for (const deadline = Date.now() + 30_000; !stdout.includes(text); ) {
+        if (Date.now() > deadline) throw new Error(`tend ${args.join(" ")} never printed ${JSON.stringify(text)}: ${stdout}${stderr}`);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+    },
+  };
+}
+
 /** The harness needs some credential selected; the stack gets it from the environment or deploy/.env. */
 function credentialSelected(): boolean {
   if (process.env.TEND_CLAUDE_CODE_CREDENTIAL) return true;
@@ -63,6 +86,48 @@ describe("chats", () => {
     expect(transcript?.items.map((entry) => entry.type)).toEqual(["task-started", "message-chunk", "turn-ended", "input-required", "task-ended"]);
   });
 
+  it("lets a second client attach with the history; both see the same output and either continues the chat", { timeout: 60_000 }, async () => {
+    const { data: started } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const chatId = started!.id;
+    await waiting(chatId);
+
+    const first = tendClient("chat", "attach", chatId);
+    const second = tendClient("chat", "attach", chatId);
+    await first.until("Pretended to answer.");
+    await second.until("Pretended to answer.");
+    first.write("From the first client");
+    await second.until("From the first client");
+    await waiting(chatId);
+    second.write("From the second client");
+    await first.until("From the second client");
+    await waiting(chatId);
+    second.write("/end");
+    first.close();
+    second.close();
+
+    expect(await second.exited, second.stderr()).toBe(0);
+    expect(await first.exited, first.stderr()).toBe(0);
+    expect(await getChat(chatId)).toMatchObject({ status: "ended" });
+    for (const tend of [first, second]) expect(tend.stdout().match(/Pretended to answer\./g)).toHaveLength(3);
+    expect(first.stdout()).toMatch(/human\s+From the second client/);
+    expect(second.stdout()).toMatch(/human\s+From the first client/);
+  });
+
+  it("lists chats and shows one as YAML", async () => {
+    const { data: started } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const chatId = started!.id;
+    await waiting(chatId);
+
+    const listed = tendClient("chat", "list");
+    const got = tendClient("chat", "get", chatId, "-o", "yaml");
+
+    expect(await listed.exited, listed.stderr()).toBe(0);
+    expect(listed.stdout()).toMatch(new RegExp(`^${chatId}\\s+fake-assistant\\s+input-required`, "m"));
+    expect(await got.exited, got.stderr()).toBe(0);
+    expect(got.stdout()).toContain(`id: ${chatId}`);
+    await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
+  });
+
   it("refuses a chat with a profile that does not allow chats", async () => {
     const { response, error } = await client.POST("/chats", { body: { agent: "fake-developer", text: "Hello" } });
 
@@ -97,4 +162,29 @@ describe("chats", () => {
       expect(transcript?.items.at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED" });
     },
   );
+
+  it.skipIf(!credentialSelected())("cancels a long turn in the sandbox; the chat stays open in the same session", { timeout: 180_000 }, async () => {
+    // A prompt without "chat:" makes the scripted agent work for a long time.
+    const { data: started } = await client.POST("/chats", { body: { agent: "scripted-assistant", text: "Work for a long time." } });
+    const chatId = started!.id;
+    const of = { params: { path: { chatId } } };
+    for (const deadline = Date.now() + 120_000; ; ) {
+      const { data } = await client.GET("/chats/{chatId}/transcript", of);
+      if (data?.items.some((entry) => entry.type === "tool-call")) break;
+      if (Date.now() > deadline) throw new Error("the agent never started working");
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+
+    const cancelled = await client.POST("/chats/{chatId}/cancel", of);
+    const sent = await client.POST("/chats/{chatId}/messages", { ...of, body: { text: "chat: Something quick instead." } });
+    const answered = await waiting(chatId);
+    await client.POST("/chats/{chatId}/end", of);
+
+    expect(cancelled.data).toMatchObject({ status: "input-required" });
+    expect(sent.response.status).toBe(200);
+    expect(answered).toMatchObject({ status: "input-required", message: "I remember: Something quick instead." });
+    const { data: transcript } = await client.GET("/chats/{chatId}/transcript", of);
+    expect(transcript?.items.filter((entry) => entry.type === "turn-ended")).toMatchObject([{ reason: "cancelled" }, { reason: "completed" }]);
+    expect(transcript?.items.filter((entry) => entry.type === "session-started")).toHaveLength(1);
+  });
 });

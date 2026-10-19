@@ -107,6 +107,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/cancel:
+    post:
+      operationId: cancelChatTurn
+      summary: Cancel the current turn of a chat
+      description: >-
+        Asks the agent to stop the running turn and answers once the turn has stopped,
+        with the chat's task in `input-required`; the chat stays open for the next
+        message. Cancelling while no turn runs changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The chat, waiting for the next message.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The chat has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /chats/{chatId}/end:
     post:
       operationId: endChat

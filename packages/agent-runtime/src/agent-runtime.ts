@@ -80,6 +80,13 @@ export interface AgentRuntime extends AgentTasks {
    */
   sendChatMessage(chatId: string, message: A2A.Message): Promise<Chat | undefined>;
   /**
+   * Cancels the running turn of a chat without ending the chat: the agent is asked to
+   * stop, and the answer comes once the turn has stopped, with the chat waiting for the
+   * next message. While no turn runs the chat is returned as it is. Rejects with
+   * {@link ChatEndedError} once the chat ended; undefined for an unknown chat.
+   */
+  cancelChatTurn(chatId: string): Promise<Chat | undefined>;
+  /**
    * Ends a chat for good, also during a turn: its sandbox and volumes go, its
    * transcript stays. An ended chat is returned as it is; undefined for an unknown chat.
    */
@@ -453,6 +460,17 @@ export function createAgentRuntime({
         busy.delete(chatId);
         throw error;
       }
+    },
+    async cancelChatTurn(chatId) {
+      const found = await findChat(chatId);
+      if (!found) return undefined;
+      const chat = chats.get(chatId);
+      if (TERMINAL.has(found.task.status.state) || chat?.ending) throw new ChatEndedError(chatId);
+      // A turn this process does not work on cannot be cancelled here, e.g. one interrupted by a restart.
+      if (!chat?.turn || !busy.has(chatId)) return toChat(found.task, found.facts);
+      await chat.session.cancel();
+      await chat.turn;
+      return toChat(chat.task, chat.facts);
     },
     async endChat(chatId) {
       const found = await findChat(chatId);
