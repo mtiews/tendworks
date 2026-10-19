@@ -62,6 +62,18 @@ for (const profile of profiles) {
     if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
+// The platform MCP server (ADR 0016): its address as sandboxes reach it (configuration,
+// since it depends on how sandboxes reach the server's published port) and the read-only
+// token. Both go only to sessions of profiles that list it (mcp: [tendworks]); the API
+// token never enters a sandbox. Never log the token.
+const platformMcpUrl = process.env.TEND_PLATFORM_MCP_URL || undefined;
+const readToken = process.env.TEND_API_READ_TOKEN || undefined;
+const platformMcp = platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken } : undefined;
+for (const profile of profiles) {
+  if (profile.spec.mcp?.includes("tendworks") && !platformMcp) {
+    console.warn(`agent profile ${profile.metadata.name}: lists the platform MCP server, but TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN is not set; its tasks will fail until this is fixed`);
+  }
+}
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
   sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
@@ -69,6 +81,7 @@ const claudeCode = createClaudeCodeHarness({
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
   secrets,
+  ...(platformMcp ? { platformMcp } : {}),
   ...(process.env.ANTHROPIC_BASE_URL ? { baseUrl: process.env.ANTHROPIC_BASE_URL } : {}),
 });
 

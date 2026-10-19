@@ -50,7 +50,7 @@ tendworks/
     health/                  # platform library, not a domain: health probes and the runtime health API
     platform/                # platform library, not a domain: CloudEvent envelope and trace context, secret references, Server-Sent Events
   apps/
-    server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction (mcp-platform from milestone 1b)
+    server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction, mcp-platform
     worker/                  # walking skeleton: bundles orchestration, agent-runtime
     web/                     # web UI: run list, chat
     cli/                     # tend CLI on the generated API client
@@ -123,6 +123,8 @@ The workspace (`/workspace`) and the harness's home and config directory (`/sess
 7. Within about a minute (the engine's heartbeat timeout) the transcript (`tend run logs <id> -o yaml` shows the entry types) shows `task-resumed` and `session-resumed` with the same session id, not `session-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
 Who works right now comes from the agent runtime: `GET /sessions` of the agent runtime API lists the agent sessions whose task has not ended (from `agent_runtime.tasks`, partial index on non-terminal tasks), kind `run-step` with the run and step the step's `SendMessageRequest.metadata` named (kept in the task's metadata), or kind `chat`. `GET /agents` of the control plane puts them under their profile (`sessions`, schema `contracts/schemas/agent-session.schema.yaml`) and answers 503 when the agent runtime cannot be reached; `tend agent list` shows their number, `-o json|yaml` the sessions.
+
+Chat agents read the platform through the platform MCP server (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token), `packages/mcp-platform`, official MCP TypeScript SDK): the server bundle serves it at `/mcp` on the API's port over Streamable HTTP (stateless, JSON responses) with the read-only tools `list_runs` (newest first, `limit` default 20), `get_run`, `list_triggers` and `list_agents`. It is a client of the public control plane API (in process, generated client) with the bearer token its caller presented; a request without a token, or with one the control plane refuses, gets 401 and nothing else, not even the list of tools. A profile lists it with `spec.mcp: [tendworks]` (the example `assistant` does, `developer` does not); for sessions of such profiles, chats and workflow tasks alike, and only those, the Claude Code harness configures it in ACP `session/new` and `session/resume` (`mcpServers`, HTTP, with an `Authorization: Bearer` header holding the read-only token), never through the sandbox's environment, and redacts the token from transcripts and replies. A session of such a profile fails with a hint when the worker has no `TEND_PLATFORM_MCP_URL` or `TEND_API_READ_TOKEN`, or when the harness does not advertise MCP over HTTP; the server refuses to start without a valid `TEND_API_READ_TOKEN` when a profile lists it. `TEND_PLATFORM_MCP_URL` is the address sandboxes reach the server's published port at: compose defaults it to `http://host.docker.internal:${TEND_PORT}/mcp`, which Docker Desktop resolves; on Linux set the sandbox network's gateway address (the Docker adapter adds no `host.docker.internal` entry to sandboxes).
 
 ### Smoke test scripts
 

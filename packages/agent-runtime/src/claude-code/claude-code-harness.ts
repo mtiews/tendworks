@@ -1,7 +1,7 @@
 import type * as acp from "@agentclientprotocol/sdk";
 import type { SecretResolver } from "@tendworks/platform";
 import type { A2A } from "@tendworks/shared";
-import { openAcpSession, runAcpTurn, type AcpSession, type AcpTurn } from "../acp/acp-turn.js";
+import { openAcpSession, runAcpTurn, type AcpSession, type AcpSessionOptions, type AcpTurn } from "../acp/acp-turn.js";
 import type { LoadedAgentProfile } from "../agent-profiles.js";
 import { parseReportedArtifacts, toArtifact } from "../artifacts.js";
 import type { Harness, HarnessObserver, HarnessResult, HarnessSession } from "../harness.js";
@@ -27,6 +27,12 @@ export interface ClaudeCodeHarnessOptions {
   keepAliveMs?: number;
   /** How long one session may run before it is cancelled and the task fails. */
   timeoutMs?: number;
+  /**
+   * The platform MCP server (ADR 0016): its address as sandboxes reach it and the read-only
+   * token it is read with. Only sessions of profiles that list it (`mcp: [tendworks]`) get
+   * either; without it, their tasks fail with a hint.
+   */
+  platformMcp?: { url: string; token: string };
   /** How long a cancelled turn of a chat gets to stop before its harness process is given up; 10 s by default. */
   cancelGraceMs?: number;
 }
@@ -84,6 +90,7 @@ export function createClaudeCodeHarness({
   secrets = { resolve: () => undefined, problem: (name) => `secret ${name} is not set` },
   keepAliveMs = 60_000,
   timeoutMs = 60 * 60_000,
+  platformMcp,
   cancelGraceMs = 10_000,
 }: ClaudeCodeHarnessOptions): Harness {
   const failed = (message: string): HarnessResult => ({ state: "TASK_STATE_FAILED", message });
@@ -112,6 +119,15 @@ export function createClaudeCodeHarness({
     }
     if (unresolved.length > 0) return { failure: failed(`agent profile ${profile.metadata.name}: ${unresolved.join("; ")}`) };
     return { env };
+  }
+
+  /** MCP servers: the platform MCP server, configured for the session only when the profile lists it. */
+  function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers } | { failure: HarnessResult } {
+    if (!profile.spec.mcp?.includes("tendworks")) return { mcpServers: [] };
+    if (!platformMcp) {
+      return { failure: failed(`agent profile ${profile.metadata.name} lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker`) };
+    }
+    return { mcpServers: [{ type: "http", name: "tendworks", url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }] };
   }
 
   /**
@@ -181,26 +197,29 @@ export function createClaudeCodeHarness({
     });
   }
 
-  /** Preparation: validation and secrets, and how to redact them from what the harness writes. */
-  function prepare(profile: LoadedAgentProfile): { template: SandboxTemplate; credential: ClaudeCodeCredential; env: Record<string, string>; redact: (text: string) => string } | { failure: HarnessResult } {
+  /** Preparation: validation, secrets and MCP servers, and how to redact secrets from what the harness writes. */
+  function prepare(profile: LoadedAgentProfile): Prepared | { failure: HarnessResult } {
     const valid = validate(profile);
     if ("failure" in valid) return valid;
     const resolved = resolveSecrets(profile);
     if ("failure" in resolved) return resolved;
-    const hidden = [valid.credential.value, ...Object.values(resolved.env)].filter((value) => value !== "");
+    const servers = mcpServersOf(profile);
+    if ("failure" in servers) return servers;
+    const hidden = [valid.credential.value, ...Object.values(resolved.env), platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
-    return { ...valid, env: resolved.env, redact };
+    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, redact };
   }
 
   /** ACP turn: the harness's ACP adapter over stdio, one prompt turn, resumed when the session was interrupted. */
   async function runTurn(
-    { sandboxId, profile, message, session, env, credential, observer, redact }: {
+    { sandboxId, profile, message, session, env, credential, mcpServers, observer, redact }: {
       sandboxId: string;
       profile: LoadedAgentProfile;
       message: A2A.Message;
       session: HarnessSession | undefined;
       env: Record<string, string>;
       credential: ClaudeCodeCredential;
+      mcpServers: McpServers;
       observer: HarnessObserver;
       redact: (text: string) => string;
     },
@@ -216,6 +235,7 @@ export function createClaudeCodeHarness({
       sessionMeta: { systemPrompt: { append: instructions } },
       observer,
       redact,
+      mcpServers,
       keepAliveMs,
       timeoutMs,
       onSession: (sessionId) => observer.saveSession({ sessionId, sandboxId }),
@@ -247,7 +267,7 @@ export function createClaudeCodeHarness({
     async run({ taskId, profile, message, session }, observer) {
       const valid = prepare(profile);
       if ("failure" in valid) return valid.failure;
-      const { env, redact } = valid;
+      const { env, mcpServers, redact } = valid;
       const requested = workspaceOf(message);
       if ("problem" in requested) return failed(requested.problem);
 
@@ -263,7 +283,7 @@ export function createClaudeCodeHarness({
           const checkoutFailure = await checkOut(sandboxId, requested.workspace, env, observer, redact);
           if (checkoutFailure) return checkoutFailure;
         }
-        const turn = await runTurn({ sandboxId, profile, message, session, env, credential: valid.credential, observer, redact });
+        const turn = await runTurn({ sandboxId, profile, message, session, env, credential: valid.credential, mcpServers, observer, redact });
         return await toResult(turn, sandboxId, taskId, observer, redact);
       } catch (error) {
         return failed(redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`));
@@ -290,7 +310,7 @@ export function createClaudeCodeHarness({
       };
 
       /** The open ACP session, started (or resumed) in a new sandbox when there is none. */
-      async function connect(prepared: { template: SandboxTemplate; credential: ClaudeCodeCredential; env: Record<string, string>; redact: (text: string) => string }) {
+      async function connect(prepared: Prepared) {
         if (current?.acp.open) return current;
         if (current) {
           // The adapter ended (or was given up after a cancel it did not answer); its sandbox cannot be reattached.
@@ -320,6 +340,7 @@ export function createClaudeCodeHarness({
           sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS, checkedOut].filter(Boolean).join("\n\n") } },
           observer,
           redact: prepared.redact,
+          mcpServers: prepared.mcpServers,
           keepAliveMs,
           cancelGraceMs,
           onSession: (sessionId) => keep({ sessionId, sandboxId }),
@@ -385,6 +406,17 @@ export function createClaudeCodeHarness({
       };
     },
   };
+}
+
+type McpServers = NonNullable<AcpSessionOptions["mcpServers"]>;
+
+/** What a session needs before its sandbox starts. */
+interface Prepared {
+  template: SandboxTemplate;
+  credential: ClaudeCodeCredential;
+  env: Record<string, string>;
+  mcpServers: McpServers;
+  redact: (text: string) => string;
 }
 
 /** What the agent answered in a turn, or how the turn ended when it wrote nothing. */

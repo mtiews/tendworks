@@ -274,4 +274,12 @@ do:
 
     expect(loadConfiguration(examples).workflowNames.length).toBeGreaterThan(0);
   });
+
+  it("gives the platform MCP server only to the example assistant, never to an agent with push rights", () => {
+    const examples = fileURLToPath(new URL("../../../examples/config", import.meta.url));
+
+    const readers = loadConfiguration(examples).agentProfiles.filter((profile) => profile.spec.mcp?.includes("tendworks"));
+
+    expect(readers.map((profile) => profile.metadata.name)).toEqual(["assistant"]);
+  });
 });

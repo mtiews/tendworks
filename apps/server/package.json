@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Bundles control-plane, trigger-gateway and human-interaction.",
+  "description": "Bundles control-plane, trigger-gateway, human-interaction and mcp-platform.",
   "scripts": {
     "start": "node dist/main.js"
   },
@@ -12,6 +12,7 @@
     "@tendworks/control-plane": "workspace:*",
     "@tendworks/event-bus": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
+    "@tendworks/mcp-platform": "workspace:*",
     "@tendworks/platform": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",
     "pg": "8.23.1"

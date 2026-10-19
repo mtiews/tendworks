@@ -70,6 +70,18 @@ properties:
           harness default; `false` turns attribution off.
       chat:
         $ref: '#/$defs/chatSettings'
+      mcp:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          enum: [tendworks]
+        description: >-
+          MCP servers the platform configures for the agent's sessions. `tendworks` is the
+          platform MCP server (ADR 0016): read-only tools on the platform's runs, agents and
+          trigger bindings. Only sessions of profiles that list it get its address and the
+          read-only token (`TEND_API_READ_TOKEN`); workflow agents should not. The platform
+          refuses to start when a profile lists it and no valid read-only token is set.
       env:
         type: object
         title: AgentEnvironment

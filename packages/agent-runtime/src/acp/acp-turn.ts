@@ -21,6 +21,8 @@ export interface AcpSessionOptions {
   onSession?: (sessionId: string) => Promise<void>;
   /** An earlier session to resume with `session/resume`; when the agent cannot resume it, a new session starts. */
   resume?: { sessionId: string };
+  /** MCP servers the agent connects to in the session (new or resumed); only HTTP servers so far. */
+  mcpServers?: Extract<acp.McpServer, { type: "http" }>[];
 }
 
 export interface AcpTurnOptions extends Omit<AcpSessionOptions, "resume"> {
@@ -81,7 +83,7 @@ const round = (amount: number) => Math.round(amount * 1e6) / 1e6;
  * still carries traffic until it is closed, so idle connections are not cut.
  */
 export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSession | AcpFailure> {
-  const { process, cwd, observer, keepAliveMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume } = options;
+  const { process, cwd, observer, keepAliveMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume, mcpServers = [] } = options;
   const meta = sessionMeta ? { _meta: sessionMeta } : {};
   const failed = (error: string): AcpFailure => {
     observer.record({ type: "error", message: error });
@@ -99,7 +101,7 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
         case "agent_message_chunk":
           if (update.content.type === "text") {
             reply += update.content.text;
-            observer.progress(reply.trim().slice(-500));
+            observer.progress(redact(reply.trim()).slice(-500));
           }
           break;
         case "tool_call":
@@ -181,10 +183,16 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
       closed,
     ]);
     const harness = init.agentInfo ? { harness: { name: init.agentInfo.name, ...(init.agentInfo.version ? { version: init.agentInfo.version } : {}) } } : {};
+    if (mcpServers.length > 0 && !init.agentCapabilities?.mcpCapabilities?.http) {
+      const names = mcpServers.map(({ name }) => name).join(", ");
+      const failing = failed(`the harness cannot connect to MCP servers over HTTP, but the session needs ${names}`);
+      await close();
+      return failing;
+    }
     if (resume) {
       if (init.agentCapabilities?.sessionCapabilities?.resume) {
         try {
-          await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers: [], ...meta }), closed]);
+          await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers, ...meta }), closed]);
           sessionId = resume.sessionId;
           resumed = true;
           observer.record({ type: "session-resumed", sessionId, ...harness });
@@ -198,7 +206,7 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
       }
     }
     if (sessionId === undefined) {
-      sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [], ...meta }), closed])).sessionId;
+      sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers, ...meta }), closed])).sessionId;
       observer.record({ type: "session-started", sessionId, ...harness });
     }
     await onSession?.(sessionId);
@@ -244,7 +252,7 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
         observer.record(turnEnded(ended.stopReason));
         // The session's cost is cumulative; this turn's is what it added.
         const added = cost && { amount: round(cost.amount - (before?.amount ?? 0)), currency: cost.currency };
-        return { outcome: "stopped", sessionId: id, stopReason: ended.stopReason, reply: reply.trim(), ...(added ? { cost: added } : {}) };
+        return { outcome: "stopped", sessionId: id, stopReason: ended.stopReason, reply: redact(reply.trim()), ...(added ? { cost: added } : {}) };
       } catch (error) {
         return await failure(error);
       } finally {
