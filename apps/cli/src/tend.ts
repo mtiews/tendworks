@@ -39,7 +39,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .addOption(
       new Option("--url <url>", "control plane URL").env("TEND_URL").default("http://localhost:8080"),
     )
-    .addOption(new Option("--token <token>", "the platform's API token, needed by commands that change state").env("TEND_API_TOKEN"))
+    .addOption(new Option("--token <token>", "the platform's API token, or its read-only token for commands that only read").env("TEND_API_TOKEN"))
     .exitOverride()
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr });
 
@@ -228,7 +228,11 @@ class UnreachableError extends Error {
 class AnswerError extends Error {
   constructor(response: Response, problem?: { title?: string; detail?: string }) {
     if (response.status === 401) {
-      super("the control plane refused the API token (HTTP 401); set TEND_API_TOKEN or pass --token");
+      super("the control plane refused the token (HTTP 401); set TEND_API_TOKEN or pass --token");
+      return;
+    }
+    if (response.status === 403 && problem?.detail) {
+      super(`the control plane refused the operation (HTTP 403): ${problem.detail}`);
       return;
     }
     const reason = problem?.title ? `: ${problem.title}${problem.detail ? ` (${problem.detail})` : ""}` : "";

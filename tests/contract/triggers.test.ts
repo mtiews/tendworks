@@ -22,6 +22,7 @@ import { guardedContracts } from "./support/guarded-contracts.js";
 const contracts = guardedContracts("orchestration", "control-plane", "trigger-gateway");
 
 const API_TOKEN = "contract-test-token";
+const READ_TOKEN = "contract-test-read-token";
 
 function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
@@ -41,8 +42,10 @@ function platform() {
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
     triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: contracts["trigger-gateway"].guard((request) => gatewayApi.fetch(request)) }),
     apiToken: API_TOKEN,
+    readToken: READ_TOKEN,
   });
-  return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
+  // Reads like the platform MCP server would: with the read-only token.
+  return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${READ_TOKEN}` }, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
 }
 
 describe("triggers through the control plane and the trigger gateway", () => {

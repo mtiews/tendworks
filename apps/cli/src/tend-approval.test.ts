@@ -23,6 +23,7 @@ async function setup() {
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     apiToken: "test-token",
+    readToken: "test-read-token",
     runs: createInMemoryRuns(),
     approvals: createApprovals({ store, now: () => new Date("2026-10-19T10:05:00.000Z") }),
   });
@@ -47,8 +48,20 @@ describe("tend approval", () => {
     const approved = await tend(["approval", "approve", pending.id]);
 
     expect(refused.exitCode).toBe(1);
-    expect(refused.stderr).toBe("tend: the control plane refused the API token (HTTP 401); set TEND_API_TOKEN or pass --token\n");
+    expect(refused.stderr).toBe("tend: the control plane refused the token (HTTP 401); set TEND_API_TOKEN or pass --token\n");
     expect(approved.exitCode).toBe(0);
+  });
+
+  it("says that the read-only token cannot decide", async () => {
+    const { tend } = await setup();
+
+    const refused = await tend(["--token", "test-read-token", "approval", "approve", pending.id]);
+
+    expect(refused).toEqual({
+      exitCode: 1,
+      stdout: "",
+      stderr: "tend: the control plane refused the operation (HTTP 403): the read-only token cannot change state; this operation needs the platform's API token\n",
+    });
   });
 
   it("lists approval requests with their status and question", async () => {

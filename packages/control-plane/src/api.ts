@@ -36,10 +36,32 @@ export interface ControlPlaneApiOptions {
   /** Human interaction's approval requests; their endpoints answer 503 without it. */
   approvals?: ApprovalsPort;
   /**
-   * The platform's API token: operations that change state need it as a bearer token
-   * (`apiToken` security scheme), reading does not. Interim until OIDC.
+   * The platform's API token (`apiToken` security scheme): every operation accepts it as
+   * a bearer token, and operations that change state need it. Interim until OIDC.
    */
   apiToken: string;
+  /**
+   * The read-only token (`readToken` security scheme): accepted for reading, refused with
+   * 403 by operations that change state. Without it, reading needs the API token.
+   */
+  readToken?: string;
+}
+
+const MINIMUM_TOKEN_LENGTH = 16;
+
+/**
+ * Why the server must not start with these tokens (empty when it may): each must be long
+ * enough to resist guessing, and the read-only token must not be the API token.
+ */
+export function apiTokenProblems({ apiToken, readToken }: Pick<ControlPlaneApiOptions, "apiToken" | "readToken">): string[] {
+  const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
+  const problems: string[] = [];
+  if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
+  if (readToken !== undefined) {
+    if (readToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_READ_TOKEN"));
+    else if (readToken === apiToken) problems.push("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state");
+  }
+  return problems;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -55,6 +77,7 @@ export function createControlPlaneApi({
   merges,
   approvals,
   apiToken,
+  readToken,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   if (!apiToken) throw new Error("the control plane API needs an API token");
   const app = new Hono();
@@ -64,10 +87,31 @@ export function createControlPlaneApi({
   // Compared as digests, so neither the length nor the content leaks through timing.
   const digest = (value: string) => createHash("sha256").update(value).digest();
   const expected = digest(`Bearer ${apiToken}`);
+  const expectedRead = readToken ? digest(`Bearer ${readToken}`) : undefined;
+  const presented = (authorization: string): "admin" | "read" | undefined => {
+    const given = digest(authorization);
+    // Both comparisons always run, so timing does not tell which token was close.
+    const admin = timingSafeEqual(given, expected);
+    const read = expectedRead !== undefined && timingSafeEqual(given, expectedRead);
+    return admin ? "admin" : read ? "read" : undefined;
+  };
+  const challenge = { "www-authenticate": "Bearer" };
+
+  // Reading (GET, and HEAD, which GET routes answer too) needs either token; only
+  // GET /status stays open as the liveness check.
+  app.use(async (c, next) => {
+    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || c.req.path === "/status") return next();
+    if (!presented(c.req.header("authorization") ?? "")) {
+      return problem(401, "Unauthorized", "reading needs the platform's API token or its read-only token as a bearer token", challenge);
+    }
+    await next();
+  });
+
   const authenticated: MiddlewareHandler = async (c, next) => {
-    const authorization = c.req.header("authorization") ?? "";
-    if (!timingSafeEqual(digest(authorization), expected)) {
-      return problem(401, "Unauthorized", "this operation needs the platform's API token as a bearer token", { "www-authenticate": "Bearer" });
+    const token = presented(c.req.header("authorization") ?? "");
+    if (token === "read") return problem(403, "Forbidden", "the read-only token cannot change state; this operation needs the platform's API token");
+    if (token !== "admin") {
+      return problem(401, "Unauthorized", "this operation needs the platform's API token as a bearer token", challenge);
     }
     await next();
   };

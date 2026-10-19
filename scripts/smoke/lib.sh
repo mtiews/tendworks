@@ -26,6 +26,7 @@ field() {
     });' "$1"
 }
 
+# Every request sends the API token: reading needs a token too (ADR 0016).
 # Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.
 api_get() { curl -fsS "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" 2>/dev/null || true; }
 api_post() {
@@ -161,5 +162,12 @@ if ! curl -fsS -o /dev/null "$URL/status" 2>/dev/null && [ "$(curl -s -o /dev/nu
   echo "The control plane at $URL does not answer." >&2
   echo "Check: docker compose -f deploy/compose.yaml ps   and   ... logs server --tail 20" >&2
   echo "After code or contract changes rebuild: docker compose -f deploy/compose.yaml up -d --build --wait" >&2
+  exit 1
+fi
+
+# Reading needs a token too (ADR 0016), so every request above carries TEND_API_TOKEN;
+# fail early when the control plane refuses it instead of polling empty answers.
+if [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/runs" -H "authorization: Bearer $TEND_API_TOKEN")" = 401 ]; then
+  echo "The control plane at $URL refused TEND_API_TOKEN; export the same value as in deploy/.env." >&2
   exit 1
 fi

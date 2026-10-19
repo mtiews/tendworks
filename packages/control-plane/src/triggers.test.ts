@@ -26,7 +26,7 @@ describe("triggers API", () => {
       return Response.json({ items: [trigger] });
     });
 
-    const response = await controlPlane.fetch(new Request("http://tend.test/triggers"));
+    const response = await controlPlane.fetch(new Request("http://tend.test/triggers", { headers: { authorization: "Bearer test-token" } }));
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ items: [trigger] });
@@ -36,7 +36,7 @@ describe("triggers API", () => {
   it("answers 503 when the trigger gateway cannot be reached", async () => {
     const controlPlane = api(() => Promise.reject(new Error("connect ECONNREFUSED")));
 
-    const response = await controlPlane.fetch(new Request("http://tend.test/triggers"));
+    const response = await controlPlane.fetch(new Request("http://tend.test/triggers", { headers: { authorization: "Bearer test-token" } }));
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ title: "Trigger gateway unavailable", status: 503, detail: "connect ECONNREFUSED" });

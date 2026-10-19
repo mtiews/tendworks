@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createFakeMerges, createInMemoryApprovals, createInMemoryRuns } from "./index.js";
+import { apiTokenProblems, createControlPlaneApi, createFakeMerges, createInMemoryApprovals, createInMemoryRuns } from "./index.js";
 
 const TOKEN = "s3cret-api-token";
+const READ_TOKEN = "s3cret-read-token";
 
-function setup() {
+function setup({ readToken = READ_TOKEN }: { readToken?: string | undefined } = {}) {
   const runs = createInMemoryRuns();
   const merges = createFakeMerges({ refused: { reason: "invalid", title: "Unknown run", detail: "no run 'r-1' exists" } });
   const api = createControlPlaneApi({
@@ -13,16 +14,17 @@ function setup() {
     merges,
     approvals: createInMemoryApprovals(),
     apiToken: TOKEN,
+    ...(readToken === undefined ? {} : { readToken }),
   });
   const request = async (method: string, path: string, authorization?: string, body: unknown = {}) => {
     const response = await api.fetch(
       new Request(`http://tend.test${path}`, {
         method,
         headers: { "content-type": "application/json", ...(authorization === undefined ? {} : { authorization }) },
-        ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
+        ...(method === "GET" || method === "HEAD" ? {} : { body: JSON.stringify(body) }),
       }),
     );
-    return { status: response.status, challenge: response.headers.get("www-authenticate"), body: await response.json() };
+    return { status: response.status, challenge: response.headers.get("www-authenticate"), body: method === "HEAD" ? undefined : await response.json() };
   };
   return { request, runs, merges };
 }
@@ -33,11 +35,15 @@ const mutating: [string, string, unknown][] = [
   ["POST", "/approval-requests/a-1/decision", { decision: "approve" }],
 ];
 
+const reading = ["/runs", "/runs/r-1", "/agents", "/triggers", "/notifications", "/approval-requests"];
+
+const wrong = [undefined, "Bearer wrong-token", `Basic ${TOKEN}`, TOKEN, `Bearer ${TOKEN}x`];
+
 describe("API token", () => {
   it.each(mutating)("refuses %s %s without the API token, before looking at the request", async (method, path, body) => {
     const { request, runs, merges } = setup();
 
-    for (const authorization of [undefined, "Bearer wrong-token", `Basic ${TOKEN}`, TOKEN]) {
+    for (const authorization of wrong) {
       const answer = await request(method, path, authorization, body);
 
       expect(answer).toEqual({ status: 401, challenge: "Bearer", body: { title: "Unauthorized", status: 401, detail: "this operation needs the platform's API token as a bearer token" } });
@@ -54,11 +60,82 @@ describe("API token", () => {
     expect(status).not.toBe(401);
   });
 
-  it.each(["/status", "/runs", "/triggers", "/approval-requests"])("lets GET %s through without a token", async (path) => {
+  it.each(mutating)("refuses %s %s with the read-only token, before looking at the request", async (method, path, body) => {
+    const { request, runs, merges } = setup();
+
+    const answer = await request(method, path, `Bearer ${READ_TOKEN}`, body);
+
+    expect(answer).toEqual({ status: 403, challenge: null, body: { title: "Forbidden", status: 403, detail: "the read-only token cannot change state; this operation needs the platform's API token" } });
+    expect(runs.started).toEqual([]);
+    expect(merges.requests).toEqual([]);
+  });
+});
+
+describe("reading", () => {
+  it.each(reading)("refuses GET %s without a token", async (path) => {
     const { request } = setup();
 
-    const { status } = await request("GET", path);
+    for (const authorization of [...wrong, `Bearer ${READ_TOKEN}x`]) {
+      const answer = await request("GET", path, authorization);
 
-    expect(status).not.toBe(401);
+      expect(answer).toEqual({
+        status: 401,
+        challenge: "Bearer",
+        body: { title: "Unauthorized", status: 401, detail: "reading needs the platform's API token or its read-only token as a bearer token" },
+      });
+    }
+  });
+
+  it.each(reading)("refuses HEAD %s without a token, so it tells nothing either", async (path) => {
+    const { request } = setup();
+
+    const { status } = await request("HEAD", path);
+
+    expect(status).toBe(401);
+  });
+
+  it.each(reading)("serves GET %s with either token", async (path) => {
+    const { request } = setup();
+
+    for (const token of [TOKEN, READ_TOKEN]) {
+      const { status } = await request("GET", path, `Bearer ${token}`);
+
+      expect(status).not.toBe(401);
+    }
+  });
+
+  it("serves GET /status without a token, as the liveness check", async () => {
+    const { request } = setup();
+
+    const { status } = await request("GET", "/status");
+
+    expect(status).toBe(200);
+  });
+});
+
+describe("checking the tokens before the server starts", () => {
+  const long = "0123456789abcdef";
+
+  it("accepts an API token of at least 16 characters, with or without a different read-only token of at least 16", () => {
+    expect(apiTokenProblems({ apiToken: long })).toEqual([]);
+    expect(apiTokenProblems({ apiToken: long, readToken: "fedcba9876543210" })).toEqual([]);
+  });
+
+  it("refuses tokens that are too short, and a read-only token that is the API token", () => {
+    expect(apiTokenProblems({ apiToken: "short" })).toEqual(["TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`"]);
+    expect(apiTokenProblems({ apiToken: long, readToken: "0123456789abcde" })).toEqual([
+      "TEND_API_READ_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`",
+    ]);
+    expect(apiTokenProblems({ apiToken: long, readToken: long })).toEqual(["TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state"]);
+  });
+});
+
+describe("the read-only token", () => {
+  it("is optional: without it, reading needs the API token", async () => {
+    const { request } = setup({ readToken: undefined });
+
+    expect((await request("GET", "/runs", `Bearer ${TOKEN}`)).status).toBe(200);
+    expect((await request("GET", "/runs", "Bearer ")).status).toBe(401);
+    expect((await request("GET", "/runs")).status).toBe(401);
   });
 });

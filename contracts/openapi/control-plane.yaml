@@ -4,14 +4,21 @@ info:
   version: 0.1.0
   description: >-
     Public API of the Tendworks control plane. The web UI, the tend CLI, the
-    meta-agent and any script use only this API. Operations that change state (start a
-    run, merge a pull request, decide an approval request) need the platform's API token
-    as a bearer token; reading does not. This is an interim scheme until identity (OIDC)
+    meta-agent and any script use only this API. Every operation but `GET /status` needs
+    a bearer token: operations that change state (start a run, merge a pull request,
+    decide an approval request) need the platform's API token; reading accepts the API
+    token or the read-only token. This is an interim scheme until identity (OIDC)
     arrives.
+# Reading accepts either token; operations that change state narrow this to `apiToken`.
+security:
+  - apiToken: []
+  - readToken: []
 paths:
   /status:
     get:
       operationId: getPlatformStatus
+      # The liveness check stays open, e.g. for the compose health check.
+      security: []
       summary: Platform health
       description: >-
         Health of the platform and of each component it depends on, and how many
@@ -81,6 +88,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Orchestration, which owns runs, cannot be reached.
           content:
@@ -97,6 +110,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Orchestration, which owns runs, cannot be reached.
           content:
@@ -120,6 +144,17 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No run with this id.
           content:
@@ -159,6 +194,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/TranscriptEntryList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No run with this id, no step of the run with this task, or the task has no transcript.
           content:
@@ -185,6 +231,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /triggers:
     get:
       operationId: listTriggers
@@ -196,6 +253,17 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: The trigger gateway, which owns the schedule, cannot be reached.
           content:
@@ -216,6 +284,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Notifications cannot be read.
           content:
@@ -285,7 +364,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "403":
-          description: The approval request for this merge was rejected.
+          description: >-
+            The approval request for this merge was rejected, or the request carries the
+            read-only token, which cannot change state.
           content:
             application/json:
               schema:
@@ -328,6 +409,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApprovalRequestList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "400":
           description: The status filter is not an approval status.
           content:
@@ -386,6 +478,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No approval request with this id.
           content:
@@ -411,7 +509,16 @@ components:
       scheme: bearer
       description: >-
         The platform's API token (`TEND_API_TOKEN`), shared by the operator's clients and
-        the worker's merge step. Interim until OIDC; never handed to sandboxes.
+        the worker's merge step; accepted by every operation. Interim until OIDC; never
+        handed to sandboxes.
+    readToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The platform's read-only token (`TEND_API_READ_TOKEN`), for clients that only read,
+        e.g. the platform MCP server of chat agents. Accepted by reading operations;
+        operations that change state answer 403 to it. Interim until OIDC; never an agent
+        secret a profile can reference.
   parameters:
     Traceparent:
       name: traceparent
