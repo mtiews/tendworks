@@ -109,8 +109,37 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /notifications:
+    get:
+      operationId: listNotifications
+      summary: List notifications, newest first
+      description: >-
+        Notifications the platform recorded, e.g. when a run completed or failed, with
+        the status of their delivery.
+      responses:
+        "200":
+          description: Notifications with their delivery status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "503":
+          description: Notifications cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
+    NotificationList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/notification.schema.yaml#/$defs/notification"
     StartRunRequest:
       type: object
       required: [workflow]
