@@ -181,6 +181,22 @@ describe("loadConfiguration", () => {
     ]);
   });
 
+  it("lets agent profiles reference only agent secrets and trigger bindings only platform secrets", () => {
+    const github = (secret: string) =>
+      trigger("github", "build").replace("integration: fake", `integration: github\n    github: { token: { secretRef: { name: ${secret} } } }`);
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer", "harness: fake\n  env: { GH_TOKEN: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
+      "triggers/github.yaml": github("TENDWORKS_AGENT_GITHUB_TOKEN"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      `agents/developer.md: /spec/env/GH_TOKEN/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
+      `triggers/github.yaml: /spec/source/github/token/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
+      "workflows/build.sw.yaml: /do/0/implement calls agent://developer, but no agent profile 'developer' is configured",
+    ]);
+  });
+
   it("loads policies and rejects invalid ones and duplicates", () => {
     const policy = (name: string, merge: string) => `apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: ${name} }\nspec: { merge: ${merge} }\n`;
     const valid = folder({ "policies/auto.yaml": policy("merge-gate", "auto"), "policies/ask.yaml": policy("careful", "ask") });

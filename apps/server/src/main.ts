@@ -28,6 +28,7 @@ import {
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
 } from "@tendworks/trigger-gateway";
+import { createSecretResolver } from "@tendworks/platform";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -47,6 +48,10 @@ try {
 }
 console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
 console.log(`configuration: trigger bindings ${configuration.triggerBindings.map((binding) => binding.metadata.name).join(", ") || "none"}`);
+
+// Secret references of the platform's integrations (trigger bindings, merging pull
+// requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
+const platformSecrets = createSecretResolver("platform", process.env);
 
 const databaseUrl = env("TEND_DATABASE_URL");
 const pool = new pg.Pool({ connectionString: databaseUrl });
@@ -76,7 +81,7 @@ const merges = createMergeGate({
     const run = await orchestration.get(runId);
     return run && toGatedRun(run);
   },
-  pullRequests: createPullRequestIntegrations({ githubToken: () => process.env[PLATFORM_GITHUB_TOKEN] }),
+  pullRequests: createPullRequestIntegrations({ githubToken: () => platformSecrets.resolve(PLATFORM_GITHUB_TOKEN) }),
   approvals: approvalStore,
 });
 const approvals = createApprovals({ store: approvalStore });
@@ -91,6 +96,7 @@ const triggerGateway = createTriggerGateway({
   bindings: configuration.triggerBindings,
   // trigger.fired goes onto the event bus in the transaction that records the firing.
   store: createPostgresFiringStore({ pool, publisher: bus }),
+  secrets: platformSecrets,
   runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) }),
 });
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);

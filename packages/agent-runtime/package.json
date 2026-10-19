@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.7.0",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "ajv": "8.20.0",
     "pg": "8.23.1",

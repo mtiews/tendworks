@@ -1,4 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
+import { createSecretResolver } from "@tendworks/platform";
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import { describe, expect, it, vi } from "vitest";
 import { describeAgentTasks } from "../agent-tasks.suite.js";
@@ -560,8 +561,8 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     ...(role === undefined ? {} : { role }),
   });
   const agentToken = "agent-token-secret-value";
-  const secrets = (name: string): string | undefined => ({ AGENT_TOKEN: agentToken })[name as "AGENT_TOKEN"];
-  const withToken = { env: { GH_TOKEN: { secretRef: { name: "AGENT_TOKEN" } } } };
+  const secrets = createSecretResolver("agent", { TENDWORKS_AGENT_TOKEN: agentToken, TENDWORKS_PLATFORM_TOKEN: "platform-token" });
+  const withToken = { env: { GH_TOKEN: { secretRef: { name: "TENDWORKS_AGENT_TOKEN" } } } };
   const workspace = { repository: "https://git.example/acme/app.git", branch: "tendworks/run-1" };
   const withWorkspace = (value: unknown = workspace): A2A.Message => ({ ...message(), metadata: { "dev.tendworks/workspace": value } });
 
@@ -614,18 +615,31 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
 
     const env = sandboxes.attached[0]?.request.env ?? {};
     expect(env.GH_TOKEN).toBe(agentToken);
-    expect(env).not.toHaveProperty("AGENT_TOKEN");
+    expect(env).not.toHaveProperty("TENDWORKS_AGENT_TOKEN");
   });
 
   it("fails the task without a sandbox when a secret the profile lists is missing, naming it but no value", async () => {
     const sandboxes = fakeSandboxes();
 
     const result = await harness(sandboxes.api, { secrets }).run(
-      { ...task(), profile: developer({ env: { GH_TOKEN: { secretRef: { name: "NOT_SET" } } } }) },
+      { ...task(), profile: developer({ env: { GH_TOKEN: { secretRef: { name: "TENDWORKS_AGENT_NOT_SET" } } } }) },
       observe().observer,
     );
 
-    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("NOT_SET") });
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: "agent profile developer: secret TENDWORKS_AGENT_NOT_SET is not set" });
+    expect(sandboxes.created).toEqual([]);
+  });
+
+  it("fails the task without a sandbox when the profile references a secret not meant for agents", async () => {
+    const sandboxes = fakeSandboxes();
+
+    const result = await harness(sandboxes.api, { secrets }).run(
+      { ...task(), profile: developer({ env: { GH_TOKEN: { secretRef: { name: "TENDWORKS_PLATFORM_TOKEN" } } } }) },
+      observe().observer,
+    );
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("TENDWORKS_PLATFORM_TOKEN is not an agent secret") });
+    expect(result.message).not.toContain("platform-token");
     expect(sandboxes.created).toEqual([]);
   });
 

@@ -1,4 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
+import type { SecretResolver } from "@tendworks/platform";
 import type { A2A } from "@tendworks/shared";
 import { runAcpTurn } from "../acp/acp-turn.js";
 import { parseReportedArtifacts, toArtifact } from "../artifacts.js";
@@ -18,8 +19,8 @@ export interface ClaudeCodeHarnessOptions {
   baseUrl?: string;
   /** Skills of the configuration by name, copied into the sandbox for profiles that list them. */
   skills?: ReadonlyMap<string, SkillFile[]>;
-  /** Resolves a secret reference of a profile's `spec.env` (ADR 0008); undefined when it is not set. */
-  secrets?: (name: string) => string | undefined;
+  /** Resolves the secret references of a profile's `spec.env`: only agent secrets (ADR 0008). Without it none resolves. */
+  secrets?: SecretResolver;
   /** How often a quiet session is kept alive; below the socket proxy's 10-minute idle cut. */
   keepAliveMs?: number;
   /** How long one session may run before it is cancelled and the task fails. */
@@ -65,7 +66,7 @@ export function createClaudeCodeHarness({
   credential,
   baseUrl,
   skills = new Map(),
-  secrets = () => undefined,
+  secrets = { resolve: () => undefined, problem: (name) => `secret ${name} is not set` },
   keepAliveMs = 60_000,
   timeoutMs = 60 * 60_000,
 }: ClaudeCodeHarnessOptions): Harness {
@@ -84,11 +85,11 @@ export function createClaudeCodeHarness({
       const env: Record<string, string> = {};
       const unresolved: string[] = [];
       for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
-        const value = secrets(secretRef.name);
+        const value = secrets.resolve(secretRef.name);
         if (value) env[variable] = value;
-        else unresolved.push(secretRef.name);
+        else unresolved.push(secrets.problem(secretRef.name) ?? `secret ${secretRef.name} is not set`);
       }
-      if (unresolved.length > 0) return failed(`agent profile ${profile.metadata.name}: secret not set: ${unresolved.join(", ")}`);
+      if (unresolved.length > 0) return failed(`agent profile ${profile.metadata.name}: ${unresolved.join("; ")}`);
       const requested = workspaceOf(message);
       if ("problem" in requested) return failed(requested.problem);
 

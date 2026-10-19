@@ -1,4 +1,4 @@
-import { newTraceparent } from "@tendworks/platform";
+import { createSecretResolver, newTraceparent, type SecretResolver } from "@tendworks/platform";
 import type { TriggerBinding, TriggerGateway as Contract } from "@tendworks/shared";
 import type { FiringStore } from "./firings/firing-store.js";
 import { mapInput } from "./input.js";
@@ -14,6 +14,8 @@ export interface TriggerGatewayOptions {
   bindings: TriggerBinding.TriggerBinding[];
   store: FiringStore;
   runs: RunStarter;
+  /** Resolves the secret references of bindings: only platform secrets. Without it none resolves. */
+  secrets?: SecretResolver;
   /** Resolves a binding's source to its issue tracker; defaults to the built-in integrations. */
   issueTrackers?: (source: IssueSource) => IssueTracker;
   now?: () => Date;
@@ -47,7 +49,8 @@ export function createTriggerGateway({
   bindings,
   store,
   runs,
-  issueTrackers = issueTrackerFor,
+  secrets = createSecretResolver("platform", {}),
+  issueTrackers = (source) => issueTrackerFor(source, { secrets }),
   now = () => new Date(),
   log = (line) => console.log(line),
 }: TriggerGatewayOptions): TriggerGateway {
