@@ -15,6 +15,11 @@ export interface AgentTasks {
   getTask(taskId: string): Promise<A2A.Task | undefined>;
 }
 
+/** `Task.metadata` key: reference to the transcript of the agent session (string). */
+export const TRANSCRIPT = "dev.tendworks/transcript";
+/** `Task.metadata` key: what the agent session cost, `{ amount, currency }`. */
+export const COST = "dev.tendworks/cost";
+
 export class AgentNotFoundError extends Error {
   constructor(agent: string) {
     super(`no such agent profile: ${agent}`);

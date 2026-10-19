@@ -12,6 +12,8 @@ FROM node:24.21.0-trixie-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /repo /app
+# Mount point of the transcript volume; a new volume takes over this ownership.
+RUN mkdir -p /var/lib/tendworks/transcripts && chown node:node /var/lib/tendworks/transcripts
 USER node
 
 FROM runtime AS server

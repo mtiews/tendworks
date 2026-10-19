@@ -1,0 +1,25 @@
+# Smoke test for the real developer agent: one small task in the sandbox workspace.
+# Needs the sandbox image and a harness credential; see docs/platform-implementation.md.
+# Start it with: POST /runs {"workflow": "hello-developer"}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: hello-developer
+  version: '0.1.0'
+  summary: Asks the developer agent to create a file in its workspace and report its content.
+do:
+  - write-file:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: >-
+                  Create the file hello.txt in the current directory with the single line
+                  "hello from the sandbox". Then read it back and answer with its content only.
+      output:
+        as: '${ { taskId: .id, state: .status.state, reply: .status.message.parts[0].text } }'

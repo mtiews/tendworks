@@ -65,6 +65,13 @@ $defs:
       taskId:
         type: string
         description: Id of the A2A task the step handed to an agent, if any.
+      transcript:
+        type: string
+        description: >-
+          Where the transcript of the step's agent session is kept, outside the sandbox
+          (e.g. a `file://` URL on the worker's transcript volume).
+      cost:
+        $ref: '#/$defs/cost'
       error:
         $ref: '#/$defs/workflowError'
       startedAt:
@@ -73,6 +80,19 @@ $defs:
       finishedAt:
         type: string
         format: date-time
+  cost:
+    title: Cost
+    description: What an agent session cost, as its harness reports it (with a subscription an estimate, not a bill).
+    type: object
+    additionalProperties: false
+    required: [amount, currency]
+    properties:
+      amount:
+        type: number
+        minimum: 0
+      currency:
+        type: string
+        description: ISO 4217 code, e.g. `USD`.
   stepStatus:
     title: StepStatus
     type: string

@@ -9,6 +9,17 @@ export type ExecRequest = Schemas["ExecRequest"];
 export type ExecResult = Schemas["ExecResult"];
 export type SandboxErrorCode = Schemas["Error"]["code"];
 
+/** A process started with {@link SandboxApi.attach}, with its standard streams open. */
+export interface AttachedProcess {
+  id: Schemas["ProcessId"];
+  /** Standard input; closing it closes the process's input. */
+  stdin: WritableStream<Uint8Array>;
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  /** Resolves with the exit code once the process has ended (127: the program could not be started). */
+  exited: Promise<number>;
+}
+
 /**
  * The sandbox API (contracts/openapi/sandbox.yaml) as a port. Every backend
  * (Docker, a fake, later OpenSandbox or agent-sandbox) implements it.
@@ -18,6 +29,11 @@ export interface SandboxApi {
   create(template: SandboxTemplate): Promise<Sandbox>;
   /** Runs a command as the sandbox user and waits for it to finish. */
   exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
+  /**
+   * Starts a command as the sandbox user and hands back its open standard streams,
+   * e.g. for a harness that speaks a protocol over stdio. Resolves once it runs.
+   */
+  attach(sandboxId: string, request: ExecRequest): Promise<AttachedProcess>;
   /** Reads a regular file; `path` is absolute. */
   readFile(sandboxId: string, path: string): Promise<Uint8Array>;
   /** Writes a file owned by the sandbox user, creating missing parent directories. */

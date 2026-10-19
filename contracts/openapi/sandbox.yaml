@@ -4,7 +4,8 @@ info:
   version: 0.1.0
   description: >-
     Internal API of the sandbox domain: create a sandbox from a sandbox
-    template, run commands in it, read and write files, destroy it. Terms
+    template, run commands in it (to completion or attached to their
+    standard streams), read and write files, destroy it. Terms
     follow OpenSandbox so another backend can be placed behind it. Its first
     consumer, the agent runtime, calls it in-process; snapshot, restore,
     pause and ports follow when needed.
@@ -61,6 +62,62 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ExecResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /sandboxes/{sandboxId}/processes:
+    parameters:
+      - $ref: "#/components/parameters/SandboxId"
+    post:
+      operationId: attachProcessInSandbox
+      summary: Start a long-running process attached to its standard streams
+      description: >-
+        Starts a command like `execInSandbox`, but keeps its standard input, output
+        and error open for the caller instead of waiting for it to finish, e.g. for
+        a harness that speaks a protocol over stdio. The client asks to upgrade the
+        connection (`Connection: Upgrade`, `Upgrade: tcp`); after `101` the
+        connection carries the process's streams. Bytes the client sends are the
+        process's standard input; closing the client's write side closes it.
+        Bytes from the sandbox are framed: an 8-byte header (stream `1` = stdout or
+        `2` = stderr, three zero bytes, payload length as 32-bit big-endian
+        unsigned integer) followed by the payload. The connection ends when the
+        process exits; its exit code is then available from `getSandboxProcess`.
+        Implementations may cut connections that carry no data for a while (the
+        Docker backend's socket proxy after 10 minutes), so callers keep long quiet
+        sessions alive with traffic of their own.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecRequest"
+      responses:
+        "101":
+          description: The process runs; the connection now carries its streams.
+          headers:
+            X-Process-Id:
+              description: Id of the process, for `getSandboxProcess`.
+              schema:
+                $ref: "#/components/schemas/ProcessId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /sandboxes/{sandboxId}/processes/{processId}:
+    parameters:
+      - $ref: "#/components/parameters/SandboxId"
+      - name: processId
+        in: path
+        required: true
+        schema:
+          $ref: "#/components/schemas/ProcessId"
+    get:
+      operationId: getSandboxProcess
+      summary: Read whether an attached process still runs and how it ended
+      responses:
+        "200":
+          description: The process.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SandboxProcess"
         "404":
           $ref: "#/components/responses/NotFound"
   /sandboxes/{sandboxId}/files:
@@ -183,6 +240,21 @@ components:
           type: string
         stderr:
           type: string
+    ProcessId:
+      type: string
+      pattern: "^[A-Za-z0-9]{1,128}$"
+    SandboxProcess:
+      type: object
+      required: [id, running]
+      additionalProperties: false
+      properties:
+        id:
+          $ref: "#/components/schemas/ProcessId"
+        running:
+          type: boolean
+        exitCode:
+          type: integer
+          description: Set once the process has exited. A program that cannot be started ends with 127.
     Error:
       type: object
       required: [code, message]

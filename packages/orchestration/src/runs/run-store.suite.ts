@@ -94,6 +94,25 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       ]);
     });
 
+    it("keeps the transcript reference and cost of a step's agent session", async () => {
+      const run = newRun();
+      await context.store.create(run);
+      const step = {
+        name: "implement",
+        reference: "/do/0/implement",
+        status: "completed" as const,
+        taskId: "t-1",
+        transcript: "file:///var/lib/tendworks/transcripts/t-1.jsonl",
+        cost: { amount: 0.4217, currency: "USD" },
+        startedAt: "2026-10-18T10:00:01.000Z",
+        finishedAt: "2026-10-18T10:00:02.000Z",
+      };
+
+      await context.store.saveStep(run.id, step, []);
+
+      expect((await context.store.get(run.id))?.steps).toEqual([step]);
+    });
+
     it("publishes an event only once when a write is repeated", async () => {
       const run = newRun();
       await context.store.create(run);

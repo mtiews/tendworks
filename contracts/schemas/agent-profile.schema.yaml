@@ -27,13 +27,24 @@ properties:
     type: object
     required: [harness]
     additionalProperties: false
+    if:
+      properties:
+        harness:
+          const: claude-code
+    then:
+      properties:
+        sandbox:
+          type: string
+      required: [sandbox]
     properties:
       harness:
         type: string
-        enum: [fake]
+        enum: [fake, claude-code]
         description: >-
-          What answers the tasks. `fake` is the built-in fake agent for tests and demos; real
-          harnesses are added as the agent runtime learns them.
+          What answers the tasks. `fake` is the built-in fake agent for tests and demos.
+          `claude-code` runs Claude Code over ACP inside a sandbox created from `sandbox`;
+          the sandbox template's image must contain the ACP adapter (see
+          images/sandbox-claude-code).
       fake:
         $ref: '#/$defs/fakeAgent'
       sandbox:

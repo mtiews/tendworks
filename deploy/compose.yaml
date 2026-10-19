@@ -44,7 +44,8 @@ services:
   # Remaining risk: the proxy filters paths, not bodies, so whoever reaches it can
   # still create a privileged container. Keep the worker the only client.
   # Idle connections are cut after 10 minutes (haproxy timeout), so keep exec calls
-  # short-lived or send output regularly; long quiet attach streams will break.
+  # short-lived or send output regularly; the Claude Code harness keeps its attached
+  # ACP stream alive with a request every minute.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
     volumes:
@@ -94,8 +95,17 @@ services:
       TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
       TEND_CONFIG_DIR: /config
+      TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
+      # Harness credentials from deploy/.env. Only the one TEND_CLAUDE_CODE_CREDENTIAL
+      # selects (oauth-token or api-key) is passed into sandboxes, never both.
+      TEND_CLAUDE_CODE_CREDENTIAL: ${TEND_CLAUDE_CODE_CREDENTIAL:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      # Transcripts of agent sessions, kept outside the sandboxes.
+      - transcripts:/var/lib/tendworks/transcripts
     networks:
       - default
       - sandbox-backend
@@ -113,6 +123,15 @@ services:
       timeout: 3s
       retries: 30
 
+  # Sandbox image for agent profiles with harness claude-code. Never started by compose;
+  # the platform does not pull images, so build it once on the sandbox host:
+  #   docker compose -f deploy/compose.yaml --profile sandbox-images build
+  sandbox-claude-code:
+    profiles: [sandbox-images]
+    image: tendworks/sandbox-claude-code:0.85.1
+    build:
+      context: ../images/sandbox-claude-code
+
 networks:
   sandbox-backend:
     internal: true
@@ -120,3 +139,4 @@ networks:
 volumes:
   postgres-data:
   temporal-data:
+  transcripts:

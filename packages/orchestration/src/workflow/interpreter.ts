@@ -1,5 +1,5 @@
 import type { A2A, Workflow } from "@tendworks/shared";
-import { RUN_ID, STEP_REFERENCE, type AgentTaskExecutor } from "./agent-task-executor.js";
+import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, type AgentTaskExecutor } from "./agent-task-executor.js";
 import { evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
 
 // Deterministic core: no I/O, no clock, no randomness. All side effects go through
@@ -18,6 +18,10 @@ export interface Step {
   reference: string;
   status: "running" | "completed" | "failed";
   taskId?: string;
+  /** Where the transcript of the agent session is kept, as the agent reported it. */
+  transcript?: string;
+  /** What the agent session cost, as the agent reported it. */
+  cost?: { amount: number; currency: string };
   error?: WorkflowError;
 }
 
@@ -90,6 +94,7 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
       if ("call" in task) {
         const result = await call(task, reference, input);
         step.taskId = result.id;
+        Object.assign(step, sessionRecord(result));
         if (result.status.state !== "TASK_STATE_COMPLETED") {
           throw new TaskFailure({
             type: `${ERROR_TYPES}runtime`,
@@ -165,6 +170,16 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
 function detail(parts: A2A.Part[] | undefined): { detail?: string } {
   const text = (parts ?? []).flatMap((part) => ("text" in part ? [part.text] : [])).join("\n");
   return text ? { detail: text } : {};
+}
+
+/** Transcript reference and cost from the task's metadata; values of the wrong shape are left out. */
+function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost"> {
+  const transcript = task.metadata?.[TRANSCRIPT];
+  const cost = task.metadata?.[COST] as { amount?: unknown; currency?: unknown } | undefined;
+  return {
+    ...(typeof transcript === "string" ? { transcript } : {}),
+    ...(typeof cost?.amount === "number" && typeof cost.currency === "string" ? { cost: { amount: cost.amount, currency: cost.currency } } : {}),
+  };
 }
 
 function toPart(part: Workflow.A2APart): A2A.Part {
