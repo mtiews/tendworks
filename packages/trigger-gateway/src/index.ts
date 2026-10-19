@@ -10,9 +10,10 @@ export type { FiringKey, FiringStore } from "./firings/firing-store.js";
 export { createInMemoryFiringStore, InMemoryEventPublisher } from "./firings/in-memory-firing-store.js";
 export type { EventPublisher, TriggerFiredEvent } from "./trigger-events.js";
 export { InputMappingError } from "./input.js";
+export { createGithubIssueTracker, type GithubIssueTrackerOptions } from "./issues/github/github-issue-tracker.js";
+export { issueTrackerFor, type IssueTrackerForOptions } from "./issues/issue-tracker-for.js";
 export {
   createFakeIssueTracker,
-  issueTrackerFor,
   type Issue,
   type IssueFilter,
   type IssueSource,

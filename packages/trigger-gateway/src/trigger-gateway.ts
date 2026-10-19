@@ -1,7 +1,8 @@
 import type { TriggerBinding, TriggerGateway as Contract } from "@tendworks/shared";
 import type { FiringStore } from "./firings/firing-store.js";
 import { mapInput } from "./input.js";
-import { issueTrackerFor, type Issue, type IssueSource, type IssueTracker } from "./issues/issue-tracker.js";
+import type { Issue, IssueSource, IssueTracker } from "./issues/issue-tracker.js";
+import { issueTrackerFor } from "./issues/issue-tracker-for.js";
 import type { RunStarter } from "./runs.js";
 import { nextExecution } from "./schedule.js";
 import { triggerFired } from "./trigger-events.js";

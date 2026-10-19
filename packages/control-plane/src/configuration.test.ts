@@ -156,6 +156,31 @@ describe("loadConfiguration", () => {
     ]);
   });
 
+  it("accepts a GitHub source only with its token as a secret reference", () => {
+    const github = (settings: string) =>
+      trigger("github", "build").replace("integration: fake", `integration: github${settings}`);
+    const valid = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "triggers/github.yaml": github("\n    github: { token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
+    });
+    expect(loadConfiguration(valid).triggerBindings[0]?.spec.source).toMatchObject({
+      integration: "github",
+      github: { token: { secretRef: { name: "TENDWORKS_PLATFORM_GITHUB_TOKEN" } } },
+    });
+
+    const invalid = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "triggers/a.yaml": github("").replace("name: github", "name: a"),
+      "triggers/b.yaml": github("\n    github: { token: github_pat_plaintext }").replace("name: github", "name: b"),
+    });
+    expect(issuesOf(invalid)).toEqual([
+      "triggers/a.yaml: /spec/source: must have required property 'github'",
+      "triggers/b.yaml: /spec/source/github/token: must be object",
+    ]);
+  });
+
   it("rejects a folder that does not exist", () => {
     expect(() => loadConfiguration(join(tmpdir(), "tend-config-missing"))).toThrow(/cannot read configuration folder/);
   });
