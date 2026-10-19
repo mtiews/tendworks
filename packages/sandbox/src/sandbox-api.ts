@@ -24,6 +24,8 @@ export interface AttachedProcess {
 /**
  * The sandbox API (contracts/openapi/sandbox.yaml) as a port. Every backend
  * (Docker, a fake, later OpenSandbox or agent-sandbox) implements it.
+ *
+ * @port
  */
 export interface SandboxApi {
   /**

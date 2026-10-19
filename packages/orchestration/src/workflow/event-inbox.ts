@@ -8,9 +8,10 @@ export interface ReceivedEvent {
 }
 
 /**
- * Port through which `listen` tasks receive the events delivered to their run. Events
- * delivered before anyone listens wait in the inbox; each event is handed out once, and
- * an event delivered again (same source and id) is ignored.
+ * How `listen` tasks receive the events delivered to their run. Events delivered before
+ * anyone listens wait in the inbox; each event is handed out once, and an event
+ * delivered again (same source and id) is ignored. Not a port: no product sits behind
+ * it, and both run engines use the one {@link EventQueue}.
  */
 export interface EventInbox {
   /** Resolves with the oldest waiting event `accepts` takes, waiting for one if needed, and consumes it. */

@@ -25,6 +25,8 @@ export interface SubscribeOptions {
  *   identified by its name; its position survives restarts, and a new subscription starts
  *   with the oldest event. When a handler throws, the same event is delivered again later,
  *   so handlers must be idempotent.
+ *
+ * @port
  */
 export interface EventBus<Tx> {
   publish(tx: Tx, event: BusEvent): Promise<void>;

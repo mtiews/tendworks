@@ -18,6 +18,8 @@ export interface HttpResponse {
  * Port through which the interpreter makes the requests of `call: http` tasks.
  * Resolves with any response, whatever its status; rejects only when no response
  * came (unreachable endpoint, endpoint not allowed).
+ *
+ * @port
  */
 export interface HttpExecutor {
   request(request: HttpRequest): Promise<HttpResponse>;

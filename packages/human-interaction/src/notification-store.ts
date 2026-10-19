@@ -2,7 +2,11 @@ import type { Notification } from "./notification-channel.js";
 
 export type Delivery = Notification["delivery"];
 
-/** Human interaction's record of notifications. */
+/**
+ * Human interaction's record of notifications.
+ *
+ * @port
+ */
 export interface NotificationStore {
   /**
    * Records a notification caused by the event `cause` (its source and id). When that

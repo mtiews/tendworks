@@ -19,6 +19,8 @@ export interface SandboxProcess {
  * What the agent runtime needs from the sandbox API (contracts/openapi/sandbox.yaml).
  * The worker wires the sandbox domain's implementation in; errors carry the contract's
  * error `code`, e.g. `file-not-found`.
+ *
+ * @port
  */
 export interface Sandboxes {
   /** Volumes outlive the sandbox, so a later sandbox mounting them carries on with their files. */

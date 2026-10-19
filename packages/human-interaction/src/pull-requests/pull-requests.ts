@@ -1,6 +1,8 @@
 /**
  * Integration port to the repository host's pull requests. The platform merges through
  * it with its own credentials, never an agent's.
+ *
+ * @port
  */
 export interface PullRequests {
   /**

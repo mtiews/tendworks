@@ -1,7 +1,7 @@
 /*
  * The one list of product names that must not appear in contracts or event types, and
  * the few places where configuration may name one because it selects that adapter
- * (ADR XXXX (product-names-only-select-adapters-in-configuration)).
+ * (ADR XXXX (contract-and-port-fitness-functions)).
  */
 
 /** Products the platform runs on or integrates, lower case. Add a product when an adapter for it arrives. */

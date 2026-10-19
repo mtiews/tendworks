@@ -11,6 +11,8 @@ export interface Transcript {
 /**
  * Keeps transcripts of agent sessions outside the sandbox, so they outlive it.
  * Every task has one transcript; opening it again continues it.
+ *
+ * @port
  */
 export interface TranscriptStore {
   open(taskId: string): Transcript;

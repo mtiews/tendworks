@@ -4,7 +4,7 @@ import { ADAPTER_SELECTORS, findProductNames, PRODUCTS } from "./product-names.j
 
 // Fitness function: product names appear in no contract and no event type
 // (docs/platform-architecture.md), except where configuration selects an adapter
-// (ADR XXXX (product-names-only-select-adapters-in-configuration)).
+// (ADR XXXX (contract-and-port-fitness-functions)).
 
 describe("finding product names", () => {
   it("finds them in keys, enum and const values, titles and paths, whatever the casing", () => {

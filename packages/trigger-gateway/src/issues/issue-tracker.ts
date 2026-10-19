@@ -7,6 +7,8 @@ export type IssueSource = TriggerBinding.IssueSource;
 /**
  * Integration port to an issue tracker. The trigger gateway asks it on every scheduled
  * check for the issues matching a binding's filter.
+ *
+ * @port
  */
 export interface IssueTracker {
   /**

@@ -5,7 +5,11 @@ export type HealthState = Health.components["schemas"]["HealthState"];
 export type ComponentStatus = Health.components["schemas"]["ComponentStatus"];
 export type HealthReport = Health.components["schemas"]["HealthReport"];
 
-/** A component a runtime bundle depends on, checked on every health request. */
+/**
+ * A component a runtime bundle depends on, checked on every health request.
+ *
+ * @port
+ */
 export interface HealthProbe {
   name: string;
   check(): Promise<Omit<ComponentStatus, "name">>;

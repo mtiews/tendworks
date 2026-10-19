@@ -10,6 +10,8 @@ export interface StartRun {
 /**
  * Port through which the trigger gateway starts runs. Its adapter uses the public
  * control plane API, like every other client; the gateway never reaches orchestration.
+ *
+ * @port
  */
 export interface RunStarter {
   /** Starts a run and resolves to its id. */

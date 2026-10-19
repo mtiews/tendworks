@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, type ApprovalRequest, type ApprovalsPort, type HealthProbe } from "./index.js";
+import { createControlPlaneApi, createInMemoryApprovals, createInMemoryRuns, type ApprovalRequest, type ApprovalsPort, type HealthProbe } from "./index.js";
 
 const pending: ApprovalRequest = {
   id: "approval-1",
@@ -81,7 +81,7 @@ describe("approval requests API", () => {
   });
 
   it("answers 404 for an unknown approval request", async () => {
-    const { status, body } = await call(recording(async () => undefined).port, "/approval-requests/nope/decision", { method: "POST", body: { decision: "reject" } });
+    const { status, body } = await call(createInMemoryApprovals(), "/approval-requests/nope/decision", { method: "POST", body: { decision: "reject" } });
 
     expect(status).toBe(404);
     expect(body).toMatchObject({ title: "Approval request not found" });
@@ -89,7 +89,7 @@ describe("approval requests API", () => {
 
   it("answers 409 when the request was decided the other way", async () => {
     const { status, body } = await call(
-      recording(async () => ({ conflict: { ...pending, status: "rejected" } })).port,
+      createInMemoryApprovals([{ ...pending, status: "rejected" }]),
       "/approval-requests/approval-1/decision",
       { method: "POST", body: { decision: "approve" } },
     );
@@ -103,7 +103,7 @@ describe("approval requests API", () => {
   });
 
   it("reports the number of pending approval requests in the platform status", async () => {
-    const response = await api(recording().port).fetch(new Request("http://tend.test/status"));
+    const response = await api(createInMemoryApprovals([pending])).fetch(new Request("http://tend.test/status"));
 
     expect(await response.json()).toMatchObject({ status: "healthy", pendingApprovals: 1 });
   });

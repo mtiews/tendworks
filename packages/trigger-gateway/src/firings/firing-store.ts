@@ -13,6 +13,8 @@ export interface FiringKey {
  *
  * A firing is claimed before its run is started and recorded with the run id after;
  * the record and its `trigger.fired` event commit together (outbox).
+ *
+ * @port
  */
 export interface FiringStore {
   /** Reserves the key before its run is started; false if it was already reserved or fired. */

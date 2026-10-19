@@ -1,7 +1,11 @@
 import { EventQueue, type ReceivedEvent } from "../workflow/event-inbox.js";
 import { executeRun, type RunActivities, type RunExecution } from "./execute-run.js";
 
-/** Port to the durable execution engine that executes runs. */
+/**
+ * Port to the durable execution engine that executes runs.
+ *
+ * @port
+ */
 export interface RunEngine {
   /**
    * Hands a run to the engine and returns once the engine accepted it; the run then

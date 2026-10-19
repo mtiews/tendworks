@@ -5,6 +5,7 @@ export { loadSkills, type SkillFile, type Skills } from "./skills.js";
 export { AGENT_SECRET_PREFIX, agentSecretsFromEnv } from "./agent-secrets.js";
 export { createClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude-code/claude-code-harness.js";
 export { claudeCodeCredentialFromEnv, type ClaudeCodeCredential } from "./claude-code/credentials.js";
+export { createFakeHarness } from "./fake-agent.js";
 export type { Cost, Harness, HarnessObserver, HarnessResult, HarnessSession, HarnessTask } from "./harness.js";
 export type { Sandboxes, SandboxProcess, SandboxTemplate } from "./sandboxes.js";
 export { createInMemoryTaskStore, type StoredTask, type TaskStore } from "./task-store.js";

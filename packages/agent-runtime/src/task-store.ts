@@ -16,6 +16,8 @@ export interface StoredTask {
 /**
  * The agent runtime's durable record of its tasks. It outlives the process, so a message
  * that is sent again after a restart finds its task instead of starting a new one.
+ *
+ * @port
  */
 export interface TaskStore {
   /**
