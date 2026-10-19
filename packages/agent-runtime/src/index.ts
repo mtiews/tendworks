@@ -1,5 +1,6 @@
-export { createAgentRuntime, RESUMED, type AgentRuntimeOptions, type HarnessName } from "./agent-runtime.js";
-export { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks } from "./agent-tasks.js";
+export { createAgentRuntime, RESUMED, type AgentRuntime, type AgentRuntimeOptions, type HarnessName } from "./agent-runtime.js";
+export { createAgentRuntimeApi, type AgentRuntimeApiOptions } from "./api.js";
+export { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
 export { AgentProfileError, loadAgentProfiles, type LoadedAgentProfile } from "./agent-profiles.js";
 export { loadSkills, type SkillFile, type Skills } from "./skills.js";
 export { createClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude-code/claude-code-harness.js";
@@ -14,5 +15,6 @@ export {
   createInMemoryTranscriptStore,
   type Transcript,
   type TranscriptEntry,
+  type TranscriptRecord,
   type TranscriptStore,
 } from "./transcripts/transcript-store.js";

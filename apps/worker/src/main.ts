@@ -3,6 +3,7 @@ import {
   AgentProfileError,
   claudeCodeCredentialFromEnv,
   createAgentRuntime,
+  createAgentRuntimeApi,
   createClaudeCodeHarness,
   createFileTranscriptStore,
   createPostgresTaskStore,
@@ -104,13 +105,19 @@ const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl, apiToken:
 const runtime = { name: "tendworks", metadata: { controlPlaneUrl: controlPlaneUrl.replace(/\/+$/, "") } };
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents, http }) });
 
-// Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml)
-// and orchestration (contracts/openapi/orchestration.yaml).
+// Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml),
+// the agent runtime (contracts/openapi/agent-runtime.yaml) and orchestration (contracts/openapi/orchestration.yaml).
 const health = createHealthApi({
   probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
 });
 const orchestration = createOrchestrationApi({ store, engine, runtime });
-const fetch = (request: Request) => (new URL(request.url).pathname === "/health" ? health.fetch(request) : orchestration.fetch(request));
+const agentRuntime = createAgentRuntimeApi({ runtime: agents });
+const fetch = (request: Request) => {
+  const { pathname } = new URL(request.url);
+  if (pathname === "/health") return health.fetch(request);
+  if (pathname.startsWith("/tasks/")) return agentRuntime.fetch(request);
+  return orchestration.fetch(request);
+};
 
 const port = Number(env("PORT", "8081"));
 const server = serve({ fetch, port }, () => console.log(`worker internal API listening on :${port}`));

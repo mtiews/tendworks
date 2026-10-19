@@ -14,9 +14,11 @@ export interface AgentTasksSuiteContext {
   transcripts: TranscriptStore;
 }
 
-const schema = parse(readFileSync(new URL("../../../contracts/schemas/a2a.schema.yaml", import.meta.url), "utf8"));
-const ajv = new Ajv2020({ strict: false }).addSchema(schema);
+const contract = (file: string) => parse(readFileSync(new URL(`../../../contracts/schemas/${file}`, import.meta.url), "utf8")) as { $id: string };
+const schema = contract("a2a.schema.yaml");
+const ajv = new Ajv2020({ strict: false, validateFormats: false }).addSchema([schema, contract("run.schema.yaml"), contract("transcript-entry.schema.yaml")]);
 const isTask = ajv.getSchema(`${schema.$id}#/$defs/task`)!;
+const isTranscriptEntry = ajv.getSchema("https://tendworks.dev/schemas/v1/schemas/transcript-entry.schema.yaml")!;
 
 /**
  * The A2A boundary every agent runtime must keep, the fake and the real one alike,
@@ -47,8 +49,43 @@ export function describeAgentTasks(name: string, setup: () => Promise<AgentTasks
       expect(ref).toEqual(expect.any(String));
       expect(task.metadata?.[COST]).toEqual({ amount: expect.any(Number), currency: "USD" });
       const entries = await transcripts.read(ref as string);
-      expect(entries?.[0]).toMatchObject({ type: "task", message: { parts: [{ text: "Say hello" }] } });
-      expect(entries?.at(-1)).toMatchObject({ type: "result", state: "TASK_STATE_COMPLETED", cost: task.metadata?.[COST] });
+      expect(entries?.[0]).toMatchObject({ position: 0, type: "task-started", agent, message: { parts: [{ text: "Say hello" }] } });
+      expect(entries?.at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED", cost: task.metadata?.[COST] });
+    });
+
+    it("records the transcript in the product-neutral entry schema, numbered by position", async () => {
+      const { agents, agent, transcripts } = await setup();
+
+      const task = await agents.sendMessage(agent, request());
+
+      const entries = (await transcripts.read(task.metadata?.[TRANSCRIPT] as string)) ?? [];
+      for (const entry of entries) expect(isTranscriptEntry(entry), `${JSON.stringify(entry)}: ${JSON.stringify(isTranscriptEntry.errors)}`).toBe(true);
+      expect(entries.map((entry) => entry.position)).toEqual(entries.map((_, index) => index));
+      expect(entries.map((entry) => entry.type)).toContain("message-chunk");
+    });
+
+    it("names the task and its transcript to the sender as soon as it exists, while the agent works", async () => {
+      const { agents, agent, transcripts } = await setup();
+      const created: { state: string; transcript: string | undefined; entries: number }[] = [];
+
+      const task = await agents.sendMessage(agent, request(), {
+        onTask: async (working) => {
+          const transcript = working.metadata?.[TRANSCRIPT] as string | undefined;
+          const entries = transcript === undefined ? [] : ((await transcripts.read(transcript)) ?? []);
+          created.push({ state: working.status.state, transcript, entries: entries.length });
+          expect(working.id).toEqual(expect.any(String));
+        },
+      });
+
+      expect(created).toEqual([{ state: "TASK_STATE_WORKING", transcript: task.metadata?.[TRANSCRIPT], entries: expect.any(Number) }]);
+    });
+
+    it("delivers the task even when the sender fails to take note of it", async () => {
+      const { agents, agent } = await setup();
+
+      const task = await agents.sendMessage(agent, request(), { onTask: () => Promise.reject(new Error("store unavailable")) });
+
+      expect(task.status.state).toBe("TASK_STATE_COMPLETED");
     });
 
     it("returns the existing task when the same message is sent again", async () => {

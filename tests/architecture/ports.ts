@@ -12,6 +12,8 @@ import {
   type TranscriptStore,
 } from "@tendworks/agent-runtime";
 import {
+  createAgentRuntimeClient,
+  createInMemoryAgentRuntime,
   createInMemoryApprovals,
   createInMemoryRuns,
   createInMemoryTriggers,
@@ -19,6 +21,7 @@ import {
   createOrchestrationClient,
   createStoreProbe,
   createTriggerGatewayClient,
+  type AgentRuntimePort,
   type ApprovalsPort,
   type MergesPort,
   type NotificationsPort,
@@ -117,6 +120,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
 
   "event-bus/EventBus": port<EventBus<never>>({ postgres: createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 
+  "control-plane/AgentRuntimePort": port<AgentRuntimePort>({ "agent-runtime": createAgentRuntimeClient, "in-memory": createInMemoryAgentRuntime }),
   "control-plane/RunsPort": port<RunsPort>({ orchestration: createOrchestrationClient, "in-memory": createInMemoryRuns }),
   "control-plane/TriggersPort": port<TriggersPort>({ "trigger-gateway": createTriggerGatewayClient, "in-memory": createInMemoryTriggers }),
   "control-plane/ApprovalsPort": port<ApprovalsPort>({ "human-interaction": createApprovals, "in-memory": createInMemoryApprovals }),

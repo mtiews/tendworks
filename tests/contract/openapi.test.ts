@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { createAgentRuntime } from "@tendworks/agent-runtime";
-import { createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
+import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
+import { createAgentRuntimeClient, createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
 import {
   createApprovals,
@@ -22,7 +22,7 @@ import { openApiContract } from "./support/openapi-contract.js";
 
 /*
  * Each HTTP API against its OpenAPI contract, in process: the control plane (public),
- * orchestration, the trigger gateway and the runtime health API (internal). Every
+ * orchestration, the agent runtime, the trigger gateway and the runtime health API (internal). Every
  * exchange goes through a guard that validates request and response against the
  * contract, on both sides of each internal API. Together the tests must produce every
  * response the contracts document; a documented response no test produces fails the
@@ -34,6 +34,7 @@ import { openApiContract } from "./support/openapi-contract.js";
 const contracts = {
   controlPlane: openApiContract("control-plane"),
   orchestration: openApiContract("orchestration"),
+  agentRuntime: openApiContract("agent-runtime"),
   triggerGateway: openApiContract("trigger-gateway"),
   health: openApiContract("health"),
 };
@@ -55,19 +56,28 @@ const unreachable = async (): Promise<Response> => {
   throw new TypeError("fetch failed");
 };
 
-function orchestration(engine?: (real: RunEngine) => RunEngine) {
+/** The worker's internal APIs: orchestration and the agent runtime it hands tasks to. */
+function worker(engine?: (real: RunEngine) => RunEngine) {
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
   const real = createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() }));
-  const api = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
-  return contracts.orchestration.guard((request) => api.fetch(request));
+  const orchestration = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
+  const agentRuntime = createAgentRuntimeApi({ runtime: agents });
+  return {
+    orchestration: contracts.orchestration.guard((request) => orchestration.fetch(request)),
+    agentRuntime: contracts.agentRuntime.guard((request) => agentRuntime.fetch(request)),
+  };
 }
 
+const orchestration = (engine?: (real: RunEngine) => RunEngine) => worker(engine).orchestration;
+
 function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string } = {}) {
+  const internal = worker();
   const api = createControlPlaneApi({
     probes: [healthy],
     configuration,
-    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: orchestration() }),
+    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: internal.orchestration }),
+    agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: internal.agentRuntime }),
     apiToken: API_TOKEN,
     ...options,
   });
@@ -127,6 +137,53 @@ describe("control plane: runs, through orchestration", () => {
     expect((await client.POST("/runs", { body: { workflow: "hello-agent" } })).response.status).toBe(503);
     expect((await client.GET("/runs")).response.status).toBe(503);
     expect((await client.GET("/runs/{runId}", { params: { path: { runId: "r-1" } } })).response.status).toBe(503);
+  });
+});
+
+describe("control plane: transcripts of run steps, through orchestration and the agent runtime", () => {
+  async function finishedRun(client: ReturnType<typeof controlPlane>) {
+    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
+      if (run?.status === "completed" || run?.status === "failed") return run;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("the run did not finish");
+  }
+  const transcript = (client: ReturnType<typeof controlPlane>, runId: string, taskId: string) =>
+    client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } });
+
+  it("reads the transcript of a step's agent session", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    const { data, response } = await transcript(client, run.id, run.steps[0]!.taskId!);
+
+    expect(response.status).toBe(200);
+    expect(data?.items.map((entry) => entry.type)).toEqual(["task-started", "message-chunk", "turn-ended", "task-ended"]);
+  });
+
+  it("refuses an unknown run and a task that is no step of the run", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    expect((await transcript(client, "missing", "task-1")).response.status).toBe(404);
+    expect((await transcript(client, run.id, "not-a-step-task")).response.status).toBe(404);
+  });
+
+  it("answers 503 when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const run = await finishedRun(client);
+
+    expect((await transcript(client, run.id, run.steps[0]!.taskId!)).response.status).toBe(503);
+  });
+});
+
+describe("agent runtime, called directly", () => {
+  it("refuses a task it does not know", async () => {
+    const response = await worker().agentRuntime(new Request("http://worker.test/tasks/unknown/transcript"));
+
+    expect(response.status).toBe(404);
   });
 });
 

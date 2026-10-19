@@ -62,7 +62,7 @@ do:
         http = new InMemoryHttpExecutor(),
         runtime,
         ...options
-      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor; runId?: string; whileRunning?: (engine: RunEngine) => Promise<void> } = {},
+      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor; runId?: string; whileRunning?: (engine: RunEngine, run: () => Promise<Run | undefined>) => Promise<void> } = {},
     ): Promise<Run> {
       const store = createInMemoryRunStore();
       const { engine, stop } = await setup(createRunActivities({ store, agents, http }));
@@ -77,7 +77,7 @@ do:
         input: { goal: "ship" },
         ...(runtime ? { runtime } : {}),
       });
-      await options.whileRunning?.(engine);
+      await options.whileRunning?.(engine, () => store.get(runId));
       for (let attempt = 0; attempt < 300; attempt++) {
         const run = (await store.get(runId))!;
         if (run.status === "completed" || run.status === "failed") return run;
@@ -114,6 +114,30 @@ do:
         steps: [{ name: "plan", status: "completed" }, { name: "build", status: "failed" }],
       });
       expect(run.error?.detail).toContain("no such agent profile: developer");
+    });
+
+    it("names the task and transcript of an agent step while the agent still works on it", async () => {
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      const agents = new InMemoryAgentTaskExecutor().agent("planner", async (_request, { onTask } = {}) => {
+        await onTask?.({ id: "task-plan", status: { state: "TASK_STATE_WORKING" }, metadata: { "dev.tendworks/transcript": "memory:task-plan" } });
+        await released;
+        return { id: "task-plan", status: { state: "TASK_STATE_COMPLETED" }, metadata: { "dev.tendworks/transcript": "memory:task-plan" } };
+      });
+      let running: Run | undefined;
+
+      const run = await execute(agents, {
+        whileRunning: async (_engine, get) => {
+          for (let attempt = 0; attempt < 300 && !running?.steps[0]?.taskId; attempt++) {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+            running = await get();
+          }
+          release();
+        },
+      });
+
+      expect(running?.steps).toEqual([expect.objectContaining({ name: "plan", status: "running", taskId: "task-plan", transcript: "memory:task-plan" })]);
+      expect(run.steps[0]).toMatchObject({ name: "plan", status: "completed", taskId: "task-plan", transcript: "memory:task-plan" });
     });
 
     it("makes the http calls of a run, with the runtime the run was started with", async () => {

@@ -1,5 +1,5 @@
 import type { EventPublisher, RunEvent } from "./run-events.js";
-import type { Run, RunPatch, RunStore, StepRecord } from "./run-store.js";
+import type { Run, RunPatch, RunStore, StepRecord, StepTask } from "./run-store.js";
 
 /** Event publisher that keeps events in memory; the fake's transaction is a list of pending events. */
 export class InMemoryEventPublisher implements EventPublisher<RunEvent[]> {
@@ -54,6 +54,10 @@ export function createInMemoryRunStore(publisher = new InMemoryEventPublisher())
         if (index === -1) run.steps.push(clone(step));
         else run.steps[index] = { ...clone(step), startedAt: run.steps[index]!.startedAt };
       }, events);
+    },
+    async nameTask(runId: string, reference: string, task: StepTask) {
+      const step = runs.get(runId)?.steps.find((known) => known.reference === reference);
+      if (step?.status === "running") Object.assign(step, clone(task));
     },
     async get(runId) {
       const run = runs.get(runId);

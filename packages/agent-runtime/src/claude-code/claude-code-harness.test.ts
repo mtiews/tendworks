@@ -14,7 +14,7 @@ import {
   type LoadedAgentProfile,
 } from "../index.js";
 import type { Sandboxes } from "../sandboxes.js";
-import type { TranscriptEntry } from "../transcripts/transcript-store.js";
+import type { TranscriptRecord } from "../transcripts/transcript-store.js";
 import { dyingWorker, encode, scriptedSandboxes, scriptedTemplate as template, type AgentScript } from "./scripted-acp-agent.stub.js";
 
 const profile = (sandbox: string | undefined = "claude-code"): AgentProfile.AgentProfile => ({
@@ -36,7 +36,7 @@ function harness(sandboxes: Sandboxes, options: Partial<ClaudeCodeHarnessOptions
 }
 
 function observe() {
-  const entries: TranscriptEntry[] = [];
+  const entries: TranscriptRecord[] = [];
   const progress: string[] = [];
   /** Every session the harness kept, with what had been prompted by then. */
   const sessions: HarnessSession[] = [];
@@ -80,6 +80,24 @@ describeAgentTasks("agent runtime with the Claude Code harness (scripted agent)"
     transcripts,
   });
   return { agents, agent: "developer", transcripts };
+});
+
+describe("agent runtime with the Claude Code harness (scripted agent): a running task", () => {
+  it("serves what the agent did so far while it still works", async () => {
+    const runtime = createAgentRuntime({ profiles: [profile()], harnesses: { "claude-code": harness(scriptedSandboxes({ delayMs: 200 }).api) } });
+    let taskId!: string;
+
+    const done = runtime.sendMessage("developer", { message: message() }, { onTask: (task) => void (taskId = task.id) });
+    let types: string[] = [];
+    await vi.waitFor(async () => {
+      types = ((await runtime.transcript(taskId)) ?? []).map((entry) => entry.type);
+      expect(types).toContain("tool-call");
+    });
+    await done;
+
+    expect(types).toEqual(["task-started", "session-started", "tool-call"]);
+    expect(((await runtime.transcript(taskId)) ?? []).at(-1)?.type).toBe("task-ended");
+  });
 });
 
 describe("Claude Code harness", () => {
@@ -154,7 +172,7 @@ describe("Claude Code harness", () => {
       prompt: [{ type: "text", text: expect.stringMatching(/continue/i) }],
     });
     expect(after.sessions.at(-1)).toEqual({ sessionId: "session-1", sandboxId: "sandbox2" });
-    expect(after.entries).toContainEqual(expect.objectContaining({ type: "acp-session-resumed", sessionId: "session-1" }));
+    expect(after.entries).toContainEqual(expect.objectContaining({ type: "session-resumed", sessionId: "session-1" }));
     expect(sandboxes.deletedVolumes.sort()).toEqual(["task-1-session", "task-1-workspace"]);
   });
 
@@ -169,7 +187,7 @@ describe("Claude Code harness", () => {
 
     expect(result.state).toBe("TASK_STATE_COMPLETED");
     expect(sandboxes.observed.prompts).toEqual([expect.objectContaining({ sessionId: "session-1", prompt: [{ type: "text", text: "Create hello.txt" }] })]);
-    expect(entries).toContainEqual(expect.objectContaining({ type: "acp-resume-failed", sessionId: "lost-session" }));
+    expect(entries).toContainEqual(expect.objectContaining({ type: "session-resume-failed", sessionId: "lost-session" }));
     expect(sessions.at(-1)).toEqual({ sessionId: "session-1", sandboxId: "sandbox1" });
   });
 
@@ -264,19 +282,101 @@ describe("Claude Code harness", () => {
     expect(sandboxes.destroyed).toEqual(["sandbox1"]);
   });
 
-  it("answers with the text the agent wrote after its last tool call and records every update", async () => {
+  it("answers with the text the agent wrote after its last tool call and records the session as transcript entries", async () => {
     const sandboxes = scriptedSandboxes({ reply: ["Created ", "hello.txt."] });
     const { observer, entries } = observe();
 
     const result = await harness(sandboxes.api).run(task(), observer);
 
     expect(result).toMatchObject({ state: "TASK_STATE_COMPLETED", message: "Created hello.txt.", cost: { amount: 0.42, currency: "USD" } });
-    expect(entries.filter((entry) => entry.type === "acp-update").map((entry) => (entry.update as acp.SessionUpdate).sessionUpdate)).toEqual([
-      "tool_call",
-      "agent_message_chunk",
-      "agent_message_chunk",
-      "usage_update",
+    expect(entries).toEqual([
+      { type: "session-started", sessionId: "session-1", harness: { name: "scripted-agent", version: "1.0.0" } },
+      { type: "tool-call", toolCallId: "tool-1", title: "Write hello.txt" },
+      { type: "message-chunk", text: "Created " },
+      { type: "message-chunk", text: "hello.txt." },
+      { type: "usage", cost: { amount: 0.42, currency: "USD" } },
+      { type: "turn-ended", reason: "completed" },
     ]);
+  });
+
+  it("records the agent's thoughts, tool results and plan without protocol details", async () => {
+    const updates: acp.SessionUpdate[] = [
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Let me check." } },
+      { sessionUpdate: "tool_call", toolCallId: "tool-2", title: "ls", kind: "execute", status: "pending" },
+      { sessionUpdate: "tool_call_update", toolCallId: "tool-2", status: "in_progress" },
+      { sessionUpdate: "tool_call_update", toolCallId: "tool-2", status: "completed", content: [{ type: "content", content: { type: "text", text: "hello.txt" } }] },
+      { sessionUpdate: "tool_call", toolCallId: "tool-3", title: "Edit hello.txt", kind: "switch_mode" },
+      {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "tool-3",
+        status: "failed",
+        content: [{ type: "diff", path: "/workspace/hello.txt", newText: "hi" }, { type: "terminal", terminalId: "t-1" }],
+      },
+      { sessionUpdate: "tool_call_update", toolCallId: "tool-4", status: "completed" },
+      {
+        sessionUpdate: "plan",
+        entries: [
+          { content: "Look around", priority: "high", status: "completed" },
+          { content: "Write the file", priority: "medium", status: "in_progress" },
+        ],
+      },
+      { sessionUpdate: "agent_message_chunk", content: { type: "image", data: "", mimeType: "image/png" } },
+      { sessionUpdate: "usage_update", used: 10, size: 100 },
+      { sessionUpdate: "current_mode_update", currentModeId: "default" },
+    ];
+    const { observer, entries } = observe();
+
+    await harness(scriptedSandboxes({ updates, reply: [] }).api).run(task(), observer);
+
+    expect(entries.slice(2, -2)).toEqual([
+      { type: "thought-chunk", text: "Let me check." },
+      { type: "tool-call", toolCallId: "tool-2", title: "ls", kind: "execute" },
+      { type: "tool-result", toolCallId: "tool-2", status: "completed", output: "hello.txt" },
+      { type: "tool-call", toolCallId: "tool-3", title: "Edit hello.txt", kind: "other" },
+      { type: "tool-result", toolCallId: "tool-3", status: "failed", output: "changed /workspace/hello.txt" },
+      { type: "tool-result", toolCallId: "tool-4", status: "completed" },
+      {
+        type: "plan",
+        steps: [
+          { content: "Look around", status: "completed" },
+          { content: "Write the file", status: "in-progress" },
+        ],
+      },
+    ]);
+  });
+
+  it.each<[acp.StopReason, string]>([
+    ["cancelled", "cancelled"],
+    ["refusal", "refused"],
+    ["max_tokens", "token-limit"],
+    ["max_turn_requests", "request-limit"],
+  ])("records a turn the agent stopped with %s as ended %s", async (stopReason, reason) => {
+    const { observer, entries } = observe();
+
+    await harness(scriptedSandboxes({ stopReason }).api).run(task(), observer);
+
+    expect(entries.at(-1)).toEqual({ type: "turn-ended", reason });
+  });
+
+  it("records why the session failed", async () => {
+    const { observer, entries } = observe();
+
+    const result = await harness(scriptedSandboxes({ hang: true }).api, { timeoutMs: 50 }).run(task(), observer);
+
+    expect(entries.at(-1)).toEqual({ type: "error", message: result.message });
+  });
+
+  it("never reveals the credential in what the agent wrote or the tools returned", async () => {
+    const updates: acp.SessionUpdate[] = [
+      { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "completed", content: [{ type: "content", content: { type: "text", text: `env: ${oauth.value}` } }] },
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: `token ${oauth.value}` } },
+    ];
+    const { observer, entries } = observe();
+
+    await harness(scriptedSandboxes({ updates, reply: [`the token is ${oauth.value}`] }).api).run(task(), observer);
+
+    expect(JSON.stringify(entries)).not.toContain(oauth.value);
+    expect(entries).toContainEqual({ type: "message-chunk", text: "the token is ***" });
   });
 
   it("allows what the agent asks permission for, once", async () => {

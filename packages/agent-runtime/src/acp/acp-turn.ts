@@ -1,6 +1,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import type { Cost, HarnessObserver } from "../harness.js";
 import type { SandboxProcess } from "../sandboxes.js";
+import { transcriptEntries, turnEnded } from "./transcript-entries.js";
 
 export interface AcpTurnOptions {
   /** The harness process speaking ACP over its stdin and stdout. */
@@ -41,23 +42,27 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 
 /**
  * Drives one prompt turn over ACP: initialize, `session/new` (or `session/resume` of an
- * earlier session), `session/prompt`, recording
- * every `session/update` and allowing tool permissions once (the sandbox is the
- * boundary). The text the agent wrote after its last tool call is the reply; the last
+ * earlier session), `session/prompt`, recording the session as product-neutral
+ * transcript entries (secrets redacted) and allowing tool permissions once (the sandbox
+ * is the boundary). The text the agent wrote after its last tool call is the reply; the last
  * `usage_update` cost is the session's cost. While the turn runs, keep-alive requests
  * make sure a quiet session still carries traffic, so idle connections are not cut.
  */
 export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
   const { process, cwd, observer, keepAliveMs, timeoutMs, sessionMeta, cancelGraceMs = 10_000, redact = (text) => text, onSession, resume } = options;
   const meta = sessionMeta ? { _meta: sessionMeta } : {};
-  const stderr = collect(process.stderr, (line) => observer.record({ type: "harness-stderr", text: redact(line) }));
+  const failed = (error: string): AcpTurn => {
+    observer.record({ type: "error", message: error });
+    return { outcome: "error", error };
+  };
+  const stderr = collect(process.stderr, (line) => observer.record({ type: "harness-output", text: redact(line) }));
 
   let reply = "";
   let cost: Cost | undefined;
   const connection = acp
     .client({ name: "tendworks-agent-runtime" })
     .onNotification(acp.methods.client.session.update, ({ params: { update } }) => {
-      observer.record({ type: "acp-update", update });
+      for (const entry of transcriptEntries(update, redact)) observer.record(entry);
       switch (update.sessionUpdate) {
         case "agent_message_chunk":
           if (update.content.type === "text") {
@@ -72,7 +77,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
         case "usage_update":
           if (update.cost) cost = { amount: update.cost.amount, currency: update.cost.currency };
           break;
-        // Recorded above, but they neither add to the reply nor change the cost: the agent's
+        // Recorded above as far as they concern the agent's work, but they neither add to the reply nor change the cost: the agent's
         // thoughts, echoed user input, tool call progress, plans, modes, commands, session
         // metadata, compaction and subagent updates, and notices.
         case "agent_thought_chunk":
@@ -96,7 +101,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
     })
     .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
       const option = params.options.find((o) => o.kind === "allow_once") ?? params.options.find((o) => o.kind === "allow_always");
-      observer.record({ type: "permission", toolCall: params.toolCall.title ?? params.toolCall.toolCallId, optionId: option?.optionId ?? null });
+      observer.record({ type: "permission", tool: redact(params.toolCall.title ?? params.toolCall.toolCallId), granted: option !== undefined });
       return { outcome: option ? { outcome: "selected", optionId: option.optionId } : { outcome: "cancelled" } };
     })
     .connect(acp.ndJsonStream(process.stdin, process.stdout));
@@ -116,7 +121,7 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
       }),
       closed,
     ]);
-    observer.record({ type: "acp-initialize", protocolVersion: init.protocolVersion, agentInfo: init.agentInfo ?? null });
+    const harness = init.agentInfo ? { harness: { name: init.agentInfo.name, ...(init.agentInfo.version ? { version: init.agentInfo.version } : {}) } } : {};
     let sessionId: string | undefined;
     let prompt = options.prompt;
     if (resume) {
@@ -125,19 +130,19 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
           await Promise.race([agent.request(acp.methods.agent.session.resume, { sessionId: resume.sessionId, cwd, mcpServers: [], ...meta }), closed]);
           sessionId = resume.sessionId;
           prompt = resume.prompt;
-          observer.record({ type: "acp-session-resumed", sessionId });
+          observer.record({ type: "session-resumed", sessionId, ...harness });
         } catch (error) {
           if (error instanceof HarnessClosed) throw error;
           const reason = redact(error instanceof Error ? error.message : String(error));
-          observer.record({ type: "acp-resume-failed", sessionId: resume.sessionId, reason });
+          observer.record({ type: "session-resume-failed", sessionId: resume.sessionId, reason });
         }
       } else {
-        observer.record({ type: "acp-resume-failed", sessionId: resume.sessionId, reason: "the agent cannot resume sessions" });
+        observer.record({ type: "session-resume-failed", sessionId: resume.sessionId, reason: "the agent cannot resume sessions" });
       }
     }
     if (sessionId === undefined) {
       sessionId = (await Promise.race([agent.request(acp.methods.agent.session.new, { cwd, mcpServers: [], ...meta }), closed])).sessionId;
-      observer.record({ type: "acp-session", sessionId });
+      observer.record({ type: "session-started", sessionId, ...harness });
     }
     await onSession?.(sessionId);
 
@@ -149,21 +154,21 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
     if (ended === "timed-out") {
       await agent.notify(acp.methods.agent.session.cancel, { sessionId }).catch(() => {});
       await Promise.race([turn.catch(() => {}), closed.catch(() => {}), sleep(cancelGraceMs)]);
-      return { outcome: "error", error: `the agent session timed out after ${Math.round(timeoutMs / 1000)} s and was cancelled` };
+      return failed(`the agent session timed out after ${Math.round(timeoutMs / 1000)} s and was cancelled`);
     }
-    observer.record({ type: "acp-stop", stopReason: ended.stopReason });
+    observer.record(turnEnded(ended.stopReason));
     return { outcome: "stopped", sessionId, stopReason: ended.stopReason, reply: reply.trim(), ...(cost ? { cost } : {}) };
   } catch (error) {
     if (!(error instanceof HarnessClosed) && !connection.signal.aborted) {
       // The harness answered with an error, e.g. missing authentication.
-      return { outcome: "error", error: redact(`the harness failed: ${error instanceof Error ? error.message : String(error)}`) };
+      return failed(redact(`the harness failed: ${error instanceof Error ? error.message : String(error)}`));
     }
     // The harness ended; its exit code and error output say why.
     const exitCode = await Promise.race([process.exited.catch(() => undefined), sleep(1_000).then(() => undefined)]);
     await Promise.race([stderr.done, sleep(1_000)]);
     const code = exitCode === undefined ? "" : ` (exit code ${exitCode})`;
     const output = stderr.tail();
-    return { outcome: "error", error: redact(`the harness ended unexpectedly${code}${output ? `: ${output}` : ""}`) };
+    return failed(redact(`the harness ended unexpectedly${code}${output ? `: ${output}` : ""}`));
   } finally {
     clearInterval(keepAlive);
     clearTimeout(timeout);

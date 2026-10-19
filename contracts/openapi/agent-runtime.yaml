@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: Tendworks Agent Runtime API
+  version: 0.1.0
+  description: >-
+    Internal API of the agent runtime, served by the worker bundle. The control plane
+    reads agent sessions through it; it is never published. Every agent session belongs
+    to one A2A task (a run's step or, later, a chat), so sessions are addressed by their
+    task id.
+paths:
+  /tasks/{taskId}/transcript:
+    get:
+      operationId: getTaskTranscript
+      summary: Read the transcript of a task's agent session
+      description: >-
+        All entries of the transcript in order of their position, also while the agent
+        still works. Secrets the session was given are redacted.
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The transcript so far.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptEntryList"
+        "404":
+          description: No task with this id, or it has no transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    TranscriptEntryList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/transcript-entry.schema.yaml#/$defs/transcriptEntry"
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [title, status]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
