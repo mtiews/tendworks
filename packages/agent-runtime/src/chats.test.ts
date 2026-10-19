@@ -141,7 +141,8 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     const { id } = await runtime.startChat("assistant", say("Hello"));
     await waiting(runtime, id);
 
-    await vi.waitFor(() => expect(idle.waiting.map(({ ms }) => ms)).toContain(5 * 60_000));
+    // The wait is the idle time left since the turn ended, so a few milliseconds may already be gone.
+    await vi.waitFor(() => expect(idle.waiting.some(({ ms }) => ms > 5 * 60_000 - 1_000 && ms <= 5 * 60_000)).toBe(true));
     idle.pass();
 
     await vi.waitFor(() => expect(sandboxes.sandboxes.size).toBe(0));
