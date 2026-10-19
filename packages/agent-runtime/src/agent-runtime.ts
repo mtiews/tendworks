@@ -3,7 +3,20 @@ import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
 import { chatEnded, chatStarted } from "./chat-events.js";
-import { addCost, CHAT, ChatBusyError, ChatEndedError, chatFacts, ChatNotAllowedError, toChat, type Chat, type ChatFacts } from "./chats.js";
+import {
+  addCost,
+  CHAT,
+  ChatBusyError,
+  ChatEndedError,
+  chatFacts,
+  ChatNotAllowedError,
+  InvalidRepositoryError,
+  toChat,
+  workspaceProblem,
+  type Chat,
+  type ChatFacts,
+} from "./chats.js";
+import { workspaceOf } from "./workspace.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Cost, Harness, HarnessResult, HarnessSession, HarnessTurn, OpenSession } from "./harness.js";
 import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
@@ -140,6 +153,10 @@ export function createAgentRuntime({
     const harness = available[profile.spec.harness];
     if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
     const { record, written } = recorder(task.id, transcripts.open(task.id));
+    // The workspace the first message asked for; checked when the chat started.
+    const first = task.history?.[0];
+    const requested = first ? workspaceOf(first) : {};
+    const workspace = "workspace" in requested ? requested.workspace : undefined;
     const chat: OpenChat = {
       profile,
       facts,
@@ -147,7 +164,7 @@ export function createAgentRuntime({
       record,
       written,
       session: harness.open(
-        { taskId: task.id, profile, ...(session ? { session } : {}) },
+        { taskId: task.id, profile, ...(session ? { session } : {}), ...(workspace ? { workspace } : {}) },
         { record, progress: () => {}, saveSession: (kept) => store.saveSession(task.id, kept) },
       ),
     };
@@ -334,6 +351,8 @@ export function createAgentRuntime({
       if (!profile) throw new AgentNotFoundError(agent);
       if (!profile.spec.chat) throw new ChatNotAllowedError(agent);
       if (!available[profile.spec.harness]?.open) throw new ChatNotAllowedError(agent, `harness ${profile.spec.harness} cannot hold a session across turns`);
+      const problem = workspaceProblem(message);
+      if (problem) throw new InvalidRepositoryError(problem);
 
       const id = crypto.randomUUID();
       const startedAt = now().toISOString();

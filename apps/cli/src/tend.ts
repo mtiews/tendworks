@@ -227,9 +227,10 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .command("chat")
     .description("chat with an agent profile that allows chats; /end ends the chat, an empty input (Ctrl+D) leaves it open")
     .argument("<profile>", "agent profile")
-    .action(async (agent: string, _options: unknown, command: Command) => {
+    .option("--repo <url>", "public Git repository (https clone URL) checked out as the chat's workspace")
+    .action(async (agent: string, options: { repo?: string }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
-      await chat({ agent, client, baseUrl, io });
+      await chat({ agent, ...(options.repo === undefined ? {} : { repository: options.repo }), client, baseUrl, io });
     });
 
   try {
@@ -500,7 +501,7 @@ const END_CHAT = "/end";
  * input) keeps the chat open, `/end` ends it. A broken stream is resumed with
  * `Last-Event-ID`.
  */
-async function chat({ agent, client, baseUrl, io }: { agent: string; client: ControlPlaneClient; baseUrl: string; io: TendIo }) {
+async function chat({ agent, repository, client, baseUrl, io }: { agent: string; repository?: string; client: ControlPlaneClient; baseUrl: string; io: TendIo }) {
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const unreachable = (cause: unknown): never => {
     throw new UnreachableError(baseUrl, cause);
@@ -523,14 +524,15 @@ async function chat({ agent, client, baseUrl, io }: { agent: string; client: Con
   try {
     const first = await ask();
     if (first === undefined) return;
-    const started = await client.POST("/chats", { body: { agent, text: first } }).catch(unreachable);
+    const started = await client.POST("/chats", { body: { agent, text: first, ...(repository === undefined ? {} : { repository }) } }).catch(unreachable);
     if (!started.data) {
       if (started.response.status === 400 && started.error?.detail) throw new Error(started.error.detail);
       throw new AnswerError(started.response, started.error);
     }
     const chatId = started.data.id;
     const of = { params: { path: { chatId } } };
-    io.stdout(`chat ${chatId} with ${agent}; type /end to end it, Ctrl+D to leave it open\n`);
+    const checkout = started.data.repository === undefined ? "" : ` in a checkout of ${started.data.repository}`;
+    io.stdout(`chat ${chatId} with ${agent}${checkout}; type /end to end it, Ctrl+D to leave it open\n`);
 
     /** The operator's next message, sent; "left" or "ended" when there is none. */
     const answerTurn = async (): Promise<"sent" | "left" | "ended"> => {
@@ -710,7 +712,7 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
         line(entry.time, "turn", entry.reason);
         break;
       case "workspace-checkout":
-        line(entry.time, "checkout", `${entry.workspace.repository} ${entry.workspace.branch} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
+        line(entry.time, "checkout", `${[entry.workspace.repository, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
         break;
       case "artifacts":
         for (const artifact of entry.artifacts) line(entry.time, "artifact", `${artifact.name} ${artifact.url}`);

@@ -148,11 +148,12 @@ export function createClaudeCodeHarness({
     observer: HarnessObserver,
     redact: (text: string) => string,
   ): Promise<HarnessResult | undefined> {
-    observer.progress(`checking out ${workspace.branch}`);
+    observer.progress(`checking out ${workspace.branch ?? workspace.repository}`);
     const checkout = await sandboxes.exec(sandboxId, { ...checkoutCommand(workspace), workingDirectory: WORKSPACE, env });
     observer.record({ type: "workspace-checkout", workspace, exitCode: checkout.exitCode, output: redact(checkout.stderr.trim()) });
     if (checkout.exitCode === 0) return undefined;
-    return failed(redact(`cannot check out ${workspace.repository} on ${workspace.branch}: ${checkout.stderr.trim().slice(-1_000)}`));
+    const on = workspace.branch === undefined ? "" : ` on ${workspace.branch}`;
+    return failed(redact(`cannot check out ${workspace.repository}${on}: ${checkout.stderr.trim().slice(-1_000)}`));
   }
 
   /** Adapter: the harness's ACP adapter started over stdio in the sandbox, with the profile's secrets and the one credential. */
@@ -272,7 +273,7 @@ export function createClaudeCodeHarness({
      * adapter is gone (e.g. after a restart) resumes on the kept volumes with the next
      * turn. The volumes go only when the session ends.
      */
-    open({ taskId, profile, session }, observer) {
+    open({ taskId, profile, session, workspace }, observer) {
       let kept = session;
       let current: { sandboxId: string; acp: AcpSession } | undefined;
       const keep = async (next: HarnessSession) => {
@@ -294,12 +295,21 @@ export function createClaudeCodeHarness({
         await keep({ ...kept, sandboxId });
         await completeOnboarding(sandboxes, sandboxId, profile);
         await copySkills(sandboxId, profile);
+        if (workspace) {
+          // A workspace kept on its volume (e.g. after idle time) stays as it is.
+          const checkoutFailure = await checkOut(sandboxId, workspace, prepared.env, observer, prepared.redact);
+          if (checkoutFailure) {
+            await sandboxes.destroy(sandboxId).catch(() => {});
+            return { failure: checkoutFailure };
+          }
+        }
         const process = await attachAdapter(sandboxId, prepared.env, prepared.credential);
         observer.progress("harness started");
+        const checkedOut = workspace ? `Your workspace is a checkout of ${workspace.repository}.` : "";
         const acp = await openAcpSession({
           process,
           cwd: WORKSPACE,
-          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS].filter(Boolean).join("\n\n") } },
+          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS, checkedOut].filter(Boolean).join("\n\n") } },
           observer,
           redact: prepared.redact,
           keepAliveMs,
