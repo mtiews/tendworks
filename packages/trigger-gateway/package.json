@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@gabrielbryk/jq-ts": "1.7.0",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "hono": "4.13.13",
     "openapi-fetch": "0.17.0",

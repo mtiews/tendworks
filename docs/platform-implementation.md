@@ -48,6 +48,7 @@ tendworks/
     mcp-platform/            # read-only MCP server on the control plane API
     shared/                  # only types generated from contracts/
     health/                  # platform library, not a domain: health probes and the runtime health API
+    platform/                # platform library, not a domain: CloudEvent envelope and trace context, secret references
   apps/
     server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction
     worker/                  # walking skeleton: bundles orchestration, agent-runtime (mcp-platform from milestone 1b)

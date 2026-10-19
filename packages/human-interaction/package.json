@@ -11,6 +11,7 @@
     }
   },
   "dependencies": {
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "pg": "8.23.1"
   },

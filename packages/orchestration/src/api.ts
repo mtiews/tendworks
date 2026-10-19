@@ -1,6 +1,6 @@
+import { newTraceparent } from "@tendworks/platform";
 import type { Orchestration } from "@tendworks/shared";
 import { Hono } from "hono";
-import { newTraceparent } from "./runs/run-events.js";
 import type { RunEngine } from "./runs/run-engine.js";
 import type { Run, RunStore } from "./runs/run-store.js";
 import type { RuntimeDescriptor } from "./workflow/interpreter.js";

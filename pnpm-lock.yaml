@@ -334,6 +334,9 @@ importers:
 
   packages/human-interaction:
     dependencies:
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -370,6 +373,9 @@ importers:
       '@tendworks/health':
         specifier: workspace:*
         version: link:../health
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -389,6 +395,8 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+
+  packages/platform: {}
 
   packages/sandbox:
     dependencies:
@@ -419,6 +427,9 @@ importers:
       '@gabrielbryk/jq-ts':
         specifier: 1.7.0
         version: 1.7.0(typescript@6.0.3)
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared

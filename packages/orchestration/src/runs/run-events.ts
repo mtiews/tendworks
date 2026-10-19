@@ -1,3 +1,4 @@
+import { eventEnvelope } from "@tendworks/platform";
 import type { RunEvents } from "@tendworks/shared";
 import type { Step } from "../workflow/interpreter.js";
 
@@ -31,19 +32,9 @@ export interface RunContext {
 /** The CloudEvent source of run and step events. */
 export const RUN_EVENT_SOURCE = "/tendworks/orchestration";
 
-function envelope(run: RunContext, id: string, time: string) {
-  return {
-    specversion: "1.0" as const,
-    // Deterministic ids make a repeated write (retried activity) recognisable.
-    id,
-    source: RUN_EVENT_SOURCE,
-    subject: `runs/${run.runId}`,
-    time,
-    datacontenttype: "application/json" as const,
-    runid: run.runId,
-    traceparent: run.traceparent,
-  };
-}
+// Deterministic ids make a repeated write (retried activity) recognisable.
+const envelope = (run: RunContext, id: string, time: string, stepId?: string) =>
+  eventEnvelope({ id, source: RUN_EVENT_SOURCE, subject: `runs/${run.runId}`, time, runId: run.runId, traceparent: run.traceparent, ...(stepId === undefined ? {} : { stepId }) });
 
 export function runStarted(run: RunContext, time: string): RunEvents.RunStartedEvent {
   return { ...envelope(run, `${run.runId}:run.started`, time), type: "dev.tendworks.run.started", data: { workflow: run.workflow } };
@@ -69,7 +60,7 @@ export function stepChanged(
   step: Step,
   time: string,
 ): RunEvents.StepStartedEvent | RunEvents.StepCompletedEvent | RunEvents.StepFailedEvent {
-  const base = { ...envelope(run, `${run.runId}${step.reference}:step.${step.status === "running" ? "started" : step.status}`, time), stepid: step.reference };
+  const base = envelope(run, `${run.runId}${step.reference}:step.${step.status === "running" ? "started" : step.status}`, time, step.reference);
   const data = { name: step.name, reference: step.reference, ...(step.taskId === undefined ? {} : { taskId: step.taskId }) };
   switch (step.status) {
     case "running":
@@ -79,10 +70,4 @@ export function stepChanged(
     case "failed":
       return { ...base, type: "dev.tendworks.step.failed", data: { ...data, error: step.error! } };
   }
-}
-
-/** A W3C traceparent with a fresh trace id, for a new run. */
-export function newTraceparent(): string {
-  const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
-  return `00-${hex(16)}-${hex(8)}-01`;
 }

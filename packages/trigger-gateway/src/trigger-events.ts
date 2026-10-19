@@ -1,3 +1,4 @@
+import { eventEnvelope, newTraceparent } from "@tendworks/platform";
 import type { TriggerEvents } from "@tendworks/shared";
 
 export type TriggerFiredEvent = TriggerEvents.TriggerFiredEvent;
@@ -25,22 +26,16 @@ export function triggerFired(firing: {
   time: string;
 }): TriggerFiredEvent {
   return {
-    specversion: "1.0",
-    // Deterministic: one binding fires once per issue.
-    id: `${firing.binding}/${firing.item}:trigger.fired`,
-    source: SOURCE,
+    ...eventEnvelope({
+      // Deterministic: one binding fires once per issue.
+      id: `${firing.binding}/${firing.item}:trigger.fired`,
+      source: SOURCE,
+      subject: `triggers/${firing.binding}`,
+      time: firing.time,
+      runId: firing.runId,
+      traceparent: newTraceparent(),
+    }),
     type: "dev.tendworks.trigger.fired",
-    subject: `triggers/${firing.binding}`,
-    time: firing.time,
-    datacontenttype: "application/json",
-    runid: firing.runId,
-    traceparent: newTraceparent(),
     data: { binding: firing.binding, workflow: firing.workflow, issue: firing.issue },
   };
-}
-
-/** A W3C traceparent with a fresh trace id. */
-function newTraceparent(): string {
-  const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
-  return `00-${hex(16)}-${hex(8)}-01`;
 }
