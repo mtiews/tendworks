@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { runWorkflow, validateWorkflow } from "../index.js";
+import { EventQueue, runWorkflow, validateWorkflow } from "../index.js";
 import { InMemoryAgentTaskExecutor } from "./in-memory-agent-task-executor.js";
 import { InMemoryHttpExecutor } from "./in-memory-http-executor.js";
 
@@ -24,16 +24,34 @@ const issue = {
 const runId = "0b6c4c1e-5f1a-4c3e-9d2b-1a2b3c4d5e6f";
 const runtime = { name: "tendworks", metadata: { controlPlaneUrl: "http://server:8080" } };
 
-/** The control plane's merge endpoint as the gate answers with merge: auto. */
-function controlPlane() {
-  return new InMemoryHttpExecutor().respond(({ body }) => {
-    const { pullRequest, policy } = body as { pullRequest: string | null; policy: string };
+/**
+ * The control plane's merge endpoint as the gate answers: with merge: auto it merges; with
+ * merge: ask it answers 202 with the pending approval request until `approved` is set.
+ */
+function controlPlane(policy: "auto" | "ask" = "auto") {
+  const gate = { approved: false };
+  const http = new InMemoryHttpExecutor().respond(({ body }) => {
+    const { pullRequest } = body as { run: string; pullRequest: string | null };
     if (pullRequest === null) {
       return { status: 400, content: { title: "No pull request to merge", status: 400, detail: "`pullRequest` is null" } };
     }
-    return { status: 200, content: { pullRequest, policy, decision: "allow", merged: true, commit: "c0ffee" } };
+    if (policy === "auto") return { status: 200, content: { pullRequest, policy: "merge-gate", decision: "allow", merged: true, commit: "c0ffee" } };
+    const approvalRequest = { id: "approval-1", status: gate.approved ? "approved" : "pending" };
+    if (!gate.approved) return { status: 202, content: { pullRequest, policy: "careful", decision: "ask", merged: false, approvalRequest } };
+    return { status: 200, content: { pullRequest, policy: "careful", decision: "ask", merged: true, commit: "c0ffee", approvalRequest } };
   });
+  return Object.assign(http, { gate });
 }
+
+const decided = (decision: "approve" | "reject") => ({
+  specversion: "1.0",
+  id: "approval-1:approval.decided",
+  source: "/tendworks/human-interaction",
+  type: "dev.tendworks.approval.decided",
+  runid: runId,
+  data: { approvalRequest: "approval-1", decision, action: "merge" },
+});
+const PR = "https://github.com/acme/playground/pull/13";
 
 function developer(pullRequest?: string) {
   return new InMemoryAgentTaskExecutor().agent("developer", () => ({
@@ -76,30 +94,56 @@ describe("example workflow develop-issue", () => {
     expect(workspace(other)).not.toEqual(workspace(first));
   });
 
-  it("asks the control plane to merge the reported pull request behind the merge-gate policy", async () => {
+  it("asks the control plane to merge the run's reported pull request, naming only the run and the pull request", async () => {
     const http = controlPlane();
 
-    const run = await runWorkflow(definition, { runId, input: { issue }, http, runtime, executor: developer("https://github.com/acme/playground/pull/13") });
+    const run = await runWorkflow(definition, { runId, input: { issue }, http, runtime, executor: developer(PR), events: new EventQueue() });
 
     expect(http.requests).toEqual([
-      {
-        method: "POST",
-        endpoint: "http://server:8080/pull-requests/merge",
-        headers: {},
-        body: { pullRequest: "https://github.com/acme/playground/pull/13", policy: "merge-gate" },
-      },
+      { method: "POST", endpoint: "http://server:8080/pull-requests/merge", headers: {}, body: { run: runId, pullRequest: PR } },
     ]);
     expect(run).toMatchObject({
       status: "completed",
-      steps: [{ name: "implement", status: "completed" }, { name: "merge", reference: "/do/1/merge", status: "completed" }],
-      output: {
-        issue: 12,
-        branch: "tendworks/issue-12-0b6c4c1e",
-        pullRequest: "https://github.com/acme/playground/pull/13",
-        merged: true,
-        commit: "c0ffee",
-      },
+      steps: [
+        { name: "implement", status: "completed" },
+        { name: "merge", reference: "/do/1/merge", status: "completed" },
+        { name: "merged", reference: "/do/2/merged", status: "completed" },
+      ],
+      output: { issue: 12, branch: "tendworks/issue-12-0b6c4c1e", pullRequest: PR, merged: true, commit: "c0ffee", decision: "allow" },
     });
+  });
+
+  it("waits for the decision on the approval request when the policy asks, and merges once approved", async () => {
+    const http = controlPlane("ask");
+    const events = new EventQueue();
+
+    const running = runWorkflow(definition, { runId, input: { issue }, http, runtime, executor: developer(PR), events });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(http.requests).toHaveLength(1);
+    http.gate.approved = true;
+    events.deliver(decided("approve"));
+    const run = await running;
+
+    expect(http.requests.map((request) => request.body)).toEqual([
+      { run: runId, pullRequest: PR },
+      { run: runId, pullRequest: PR },
+    ]);
+    expect(run).toMatchObject({
+      status: "completed",
+      output: { pullRequest: PR, merged: true, commit: "c0ffee", decision: "ask", approvalRequest: "approval-1", approval: "approve" },
+    });
+    expect(run.steps.map((step) => step.name)).toEqual(["implement", "merge", "merged", "awaitDecision", "decided", "mergeApproved"]);
+  });
+
+  it("ends without merging when the approval request is rejected", async () => {
+    const http = controlPlane("ask");
+    const events = new EventQueue();
+    events.deliver(decided("reject"));
+
+    const run = await runWorkflow(definition, { runId, input: { issue }, http, runtime, executor: developer(PR), events });
+
+    expect(http.requests).toHaveLength(1);
+    expect(run).toMatchObject({ status: "completed", output: { pullRequest: PR, merged: false, decision: "ask", approval: "reject" } });
   });
 
   it("fails the merge step, with the gate's reason, when the agent reported no pull request", async () => {
@@ -107,7 +151,7 @@ describe("example workflow develop-issue", () => {
 
     const run = await runWorkflow(definition, { runId, input: { issue }, http, runtime, executor: developer() });
 
-    expect(http.requests[0]?.body).toEqual({ pullRequest: null, policy: "merge-gate" });
+    expect(http.requests[0]?.body).toEqual({ run: runId, pullRequest: null });
     expect(run).toMatchObject({
       status: "failed",
       error: { instance: "/do/1/merge", status: 400, title: "No pull request to merge", detail: "`pullRequest` is null" },

@@ -19,3 +19,20 @@ export function decide(policy: Policy, { action }: GatedAction): PolicyDecision 
       return policy.spec.merge === "auto" ? "allow" : "ask";
   }
 }
+
+const STRICTNESS: Record<PolicyDecision, number> = { allow: 0, ask: 1 };
+
+/**
+ * Decides a gated action of a run by every policy that applies to the run's workflow
+ * (a policy without `workflows` applies to all); the strictest decision wins, so adding
+ * a policy can only make a gate stricter. `undefined` when no policy applies.
+ */
+export function decideFor(policies: Policy[], { workflow, ...action }: GatedAction & { workflow: string }): { decision: PolicyDecision; policy: string } | undefined {
+  let strictest: { decision: PolicyDecision; policy: string } | undefined;
+  for (const policy of policies) {
+    if (policy.spec.workflows && !policy.spec.workflows.includes(workflow)) continue;
+    const decision = decide(policy, action);
+    if (!strictest || STRICTNESS[decision] > STRICTNESS[strictest.decision]) strictest = { decision, policy: policy.metadata.name };
+  }
+  return strictest;
+}

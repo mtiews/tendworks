@@ -200,6 +200,16 @@ describe("loadConfiguration", () => {
     ]);
   });
 
+  it("rejects a policy for a workflow that is not configured, so a typo cannot loosen a gate", () => {
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "policies/careful.yaml": "apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: careful }\nspec: { merge: ask, workflows: [build, biuld] }\n",
+    });
+
+    expect(issuesOf(dir)).toEqual(["policies/careful.yaml: policy 'careful' names workflow 'biuld', which is not configured (configured: build)"]);
+  });
+
   it("accepts http calls in workflows without asking for agent profiles", () => {
     const dir = folder({
       "workflows/merge.sw.yaml": `

@@ -1,0 +1,48 @@
+$id: https://tendworks.dev/schemas/v1/events/approval-events.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ApprovalEvents
+description: >-
+  Events human interaction emits about approval requests. Each `$defs` entry is the
+  complete schema of one event type: the envelope from cloudevent.schema.yaml narrowed to
+  its `type` and `data`. Both carry `runid`, the run that waits; orchestration hands them
+  to that run, whose `listen` task receives `approval.decided`.
+$defs:
+  approvalRequested:
+    title: ApprovalRequestedEvent
+    description: An approval request was created; the run waits for its decision.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, runid, data]
+    properties:
+      type:
+        const: dev.tendworks.approval.requested
+      data:
+        $ref: '../schemas/approval-request.schema.yaml#/$defs/approvalRequest'
+  approvalDecided:
+    title: ApprovalDecidedEvent
+    description: An approval request was approved or rejected.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, runid, data]
+    properties:
+      type:
+        const: dev.tendworks.approval.decided
+      data:
+        $ref: '#/$defs/approvalDecidedData'
+  approvalDecidedData:
+    title: ApprovalDecidedEventData
+    type: object
+    additionalProperties: false
+    required: [approvalRequest, decision, action]
+    properties:
+      approvalRequest:
+        type: string
+        description: Id of the decided approval request.
+      decision:
+        $ref: '../schemas/approval-request.schema.yaml#/$defs/approvalDecision'
+      action:
+        $ref: '../schemas/approval-request.schema.yaml#/$defs/gatedAction'
+      pullRequest:
+        type: string

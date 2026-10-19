@@ -3,7 +3,9 @@
 # binding with the default input mapping passes it. The agent works on a checkout of the
 # issue's repository on a branch fixed by the run, so a retry updates the same branch and
 # pull request. The platform then merges the pull request the agent reported, behind the
-# gate of the policy `merge-gate`; the run's output holds the pull request and the merge.
+# gate of the policies that apply to this workflow (examples/config/policies/); when they
+# ask, the run waits for the decision on the approval request. The run's output holds the
+# pull request and the merge.
 document:
   dsl: '1.0.3'
   namespace: examples
@@ -40,16 +42,44 @@ do:
             taskId: .id,
             pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])
           } }
-  # The platform, not the agent, merges: the control plane's merge gate decides by the
-  # policy `merge-gate` and merges with the platform's token. A run whose agent reported
-  # no pull request fails here with the reason.
+  # The platform, not the agent, merges: the control plane's merge gate checks that this
+  # run reported the pull request, decides by the policies of this workflow and merges
+  # with the platform's token. A run whose agent reported no pull request fails here with
+  # the reason. When a policy asks, nothing is merged yet and the gate opens an approval
+  # request (merged: false).
   - merge:
       call: http
       with:
         method: post
         endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
         body:
+          run: '${ $workflow.id }'
           pullRequest: '${ .pullRequest }'
-          policy: merge-gate
+      output:
+        as: '${ $input + { merged: .merged, commit: .commit, decision: .decision, approvalRequest: .approvalRequest.id } }'
+  - merged:
+      switch:
+        - done: { when: '${ .merged }', then: end }
+  # Waits, also across platform restarts, until the approval request is decided.
+  - awaitDecision:
+      listen:
+        to:
+          one:
+            with: { type: dev.tendworks.approval.decided }
+      output:
+        as: '${ $input + { approval: .[0].decision } }'
+  - decided:
+      switch:
+        - approved: { when: '${ .approval == "approve" }', then: mergeApproved }
+        - rejected: { then: end }
+  # The gate now finds the approved request and merges.
+  - mergeApproved:
+      call: http
+      with:
+        method: post
+        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          run: '${ $workflow.id }'
+          pullRequest: '${ .pullRequest }'
       output:
         as: '${ $input + { merged: .merged, commit: .commit } }'

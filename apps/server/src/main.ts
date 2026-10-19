@@ -10,12 +10,15 @@ import {
 } from "@tendworks/control-plane";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import {
+  createApprovals,
   createLoggingNotificationChannel,
   createMergeGate,
+  createPostgresApprovalStore,
+  toGatedRun,
   createPullRequestIntegrations,
   PLATFORM_GITHUB_TOKEN,
   createPostgresNotificationStore,
-  createRunOutcomeNotifier,
+  createNotifier,
   migrateHumanInteractionStore,
 } from "@tendworks/human-interaction";
 import {
@@ -51,19 +54,32 @@ await migrateEventBus(pool);
 await migrateHumanInteractionStore(pool);
 await migrateTriggerGatewayStore(pool);
 
-// Human interaction: run outcomes from the event bus become notifications, recorded
-// before the notification channel (a log for now) delivers them.
+// Human interaction: run outcomes and approval requests from the event bus become
+// notifications, recorded before the notification channel (a log for now) delivers them.
 const notifications = createPostgresNotificationStore(pool);
-const notifier = createRunOutcomeNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
+const notifier = createNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
 const bus = createPostgresEventBus({ pool });
-bus.subscribe("human-interaction.run-outcomes", notifier.handle, { types: notifier.types });
+bus.subscribe("human-interaction.notifications", notifier.handle, { types: notifier.types });
 
-// Human interaction: the merge gate. Policies decide; merges go through the pull request
-// integration with the platform token, which only this bundle holds (ADR 0008).
+const workerUrl = env("TEND_WORKER_URL");
+const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
+
+// Human interaction: the merge gate. It decides by orchestration's record of the run and
+// the policies of its workflow, never by what the caller claims; with `ask` it opens an
+// approval request (approval.requested goes onto the bus with it) and merges only once
+// that is approved. Merges go through the pull request integration with the platform
+// token, which only this bundle holds (ADR 0008).
+const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
 const merges = createMergeGate({
   policies: configuration.policies,
+  runs: async (runId) => {
+    const run = await orchestration.get(runId);
+    return run && toGatedRun(run);
+  },
   pullRequests: createPullRequestIntegrations({ githubToken: () => process.env[PLATFORM_GITHUB_TOKEN] }),
+  approvals: approvalStore,
 });
+const approvals = createApprovals({ store: approvalStore });
 console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
@@ -71,7 +87,6 @@ console.log(`configuration: policies ${configuration.policies.map((policy) => po
 // plane reads triggers through the trigger gateway's internal API.
 const inProcess = (target: () => { fetch(request: Request): Promise<Response> }) => (request: Request) => target().fetch(request);
 
-const workerUrl = env("TEND_WORKER_URL");
 const triggerGateway = createTriggerGateway({
   bindings: configuration.triggerBindings,
   // trigger.fired goes onto the event bus in the transaction that records the firing.
@@ -83,9 +98,10 @@ const api = createControlPlaneApi({
   probes: [createStoreProbe(databaseUrl)],
   bundles: [{ name: "worker", baseUrl: workerUrl }],
   configuration,
-  runs: createOrchestrationClient({ baseUrl: workerUrl }),
+  runs: orchestration,
   notifications,
   merges,
+  approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
 });
 

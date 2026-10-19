@@ -46,12 +46,15 @@ describe("merge step on the compose stack", () => {
     expect(run.error?.detail).toContain("reported no pull request");
   });
 
-  it("refuses a merge request for a policy that is not configured", async () => {
-    const { response, error } = await client.POST("/pull-requests/merge", {
-      body: { pullRequest: "https://git.example/example/playground/pull/2", policy: "no-such-policy" },
+  it("refuses a merge request for a run that does not exist, and one that picks its own policy", async () => {
+    const unknown = await client.POST("/pull-requests/merge", { body: { run: "no-such-run", pullRequest: "https://git.example/example/playground/pull/2" } });
+    const chosen = await client.POST("/pull-requests/merge", {
+      body: { run: "no-such-run", pullRequest: "https://git.example/example/playground/pull/2", policy: "merge-gate" } as never,
     });
 
-    expect(response.status).toBe(400);
-    expect(error).toMatchObject({ title: "Unknown policy", detail: expect.stringContaining("merge-gate") });
+    expect(unknown.response.status).toBe(400);
+    expect(unknown.error).toMatchObject({ title: "Unknown run" });
+    expect(chosen.response.status).toBe(400);
+    expect(chosen.error).toMatchObject({ title: "Invalid request" });
   });
 });

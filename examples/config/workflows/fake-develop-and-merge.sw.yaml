@@ -1,6 +1,7 @@
 # The shape of develop-issue with fakes: the fake agent reports a pull request on a
 # reserved .example host, and the platform merges it in its fake pull request
-# integration behind the policy `merge-gate`. Runs without a model or a repository.
+# integration behind the policies of this workflow (merge-gate: merge: auto). Runs
+# without a model or a repository.
 # Start it with: POST /runs {"workflow": "fake-develop-and-merge", "input": {"issue": {"number": 1, "title": "Say hello"}}}
 document:
   dsl: '1.0.3'
@@ -22,13 +23,38 @@ do:
                 text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
       output:
         as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
+  # From here on as in develop-issue: merge behind the gate, or wait for the approval.
   - merge:
       call: http
       with:
         method: post
         endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
         body:
+          run: '${ $workflow.id }'
           pullRequest: '${ .pullRequest }'
-          policy: merge-gate
       output:
-        as: '${ $input + { merged: .merged, decision: .decision } }'
+        as: '${ $input + { merged: .merged, decision: .decision, approvalRequest: .approvalRequest.id } }'
+  - merged:
+      switch:
+        - done: { when: '${ .merged }', then: end }
+  - awaitDecision:
+      listen:
+        to:
+          one:
+            with: { type: dev.tendworks.approval.decided }
+      output:
+        as: '${ $input + { approval: .[0].decision } }'
+  - decided:
+      switch:
+        - approved: { when: '${ .approval == "approve" }', then: mergeApproved }
+        - rejected: { then: end }
+  - mergeApproved:
+      call: http
+      with:
+        method: post
+        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          run: '${ $workflow.id }'
+          pullRequest: '${ .pullRequest }'
+      output:
+        as: '${ $input + { merged: .merged } }'

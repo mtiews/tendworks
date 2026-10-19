@@ -1,6 +1,8 @@
-# The gate in front of merging the pull requests of the example workflows.
-# `auto`: the platform merges as soon as the workflow asks. `ask`: an approval request
-# decides first (not supported yet; a merge step under `ask` fails, nothing is merged).
+# The gate in front of merging the pull requests of the example workflows. Without
+# `workflows` it applies to every workflow. `auto`: the platform merges as soon as the
+# run asks. `ask`: the run opens an approval request and merges once it is approved
+# (`tend approval list`, `tend approval approve|reject <id>`).
+# When several policies apply to a workflow, the strictest wins (see ask-before-merge.yaml).
 apiVersion: tendworks.dev/v1
 kind: Policy
 metadata:

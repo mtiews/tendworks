@@ -1,8 +1,9 @@
 import type { RunEvents } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
+import { approvalRequested } from "./approvals/approval-events.js";
 import { createInMemoryNotificationChannel, type Notification } from "./notification-channel.js";
 import { createInMemoryNotificationStore } from "./notification-store.js";
-import { createRunOutcomeNotifier } from "./run-outcome-notifier.js";
+import { createNotifier } from "./notifier.js";
 
 const envelope = {
   specversion: "1.0" as const,
@@ -40,13 +41,13 @@ const failed: RunEvents.RunFailedEvent = {
 function setup(options: { failDelivery?: boolean } = {}) {
   const store = createInMemoryNotificationStore();
   const channel = createInMemoryNotificationChannel(options);
-  const notifier = createRunOutcomeNotifier({ store, channel, now: () => new Date("2026-10-18T10:00:03.000Z") });
+  const notifier = createNotifier({ store, channel, now: () => new Date("2026-10-18T10:00:03.000Z") });
   return { store, channel, notifier };
 }
 
-describe("run outcome notifier", () => {
-  it("subscribes to run.completed and run.failed", () => {
-    expect(setup().notifier.types).toEqual(["dev.tendworks.run.completed", "dev.tendworks.run.failed"]);
+describe("notifier", () => {
+  it("subscribes to run.completed, run.failed and approval.requested", () => {
+    expect(setup().notifier.types).toEqual(["dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"]);
   });
 
   it("records and delivers a notification when a run completed", async () => {
@@ -81,12 +82,40 @@ describe("run outcome notifier", () => {
     ]);
   });
 
+  it("tells the human that an approval request waits for a decision", async () => {
+    const { store, channel, notifier } = setup();
+    const request = {
+      id: "approval-1",
+      runId: "run-1",
+      workflow: "develop-issue",
+      action: "merge" as const,
+      pullRequest: "https://git.example/acme/app/pull/7",
+      policy: "careful",
+      question: "Merge https://git.example/acme/app/pull/7 for run run-1 of develop-issue?",
+      status: "pending" as const,
+      createdAt: "2026-10-18T10:00:02.000Z",
+    };
+
+    await notifier.handle(approvalRequested(request, request.createdAt));
+
+    expect(await store.list()).toEqual([
+      expect.objectContaining({
+        kind: "approval.requested",
+        runId: "run-1",
+        title: "Approval needed: Merge https://git.example/acme/app/pull/7 for run run-1 of develop-issue?",
+        detail: "Answer with: tend approval approve approval-1 (or reject approval-1)",
+        delivery: expect.objectContaining({ status: "delivered" }),
+      }),
+    ]);
+    expect(channel.delivered).toHaveLength(1);
+  });
+
   it("records the notification before it attempts delivery", async () => {
     const { store } = setup();
     let storedAtDelivery: Notification[] = [];
     const channel = { deliver: async () => void (storedAtDelivery = await store.list()) };
 
-    await createRunOutcomeNotifier({ store, channel }).handle(completed);
+    await createNotifier({ store, channel }).handle(completed);
 
     expect(storedAtDelivery).toEqual([expect.objectContaining({ runId: "run-1", delivery: { status: "pending" } })]);
   });
