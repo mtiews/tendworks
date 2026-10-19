@@ -9,6 +9,11 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",
-    "@tendworks/control-plane": "workspace:*"
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*",
+    "pg": "8.23.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }

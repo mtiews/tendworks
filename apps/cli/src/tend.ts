@@ -7,6 +7,8 @@ type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
 type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
+type TriggerList = ControlPlane.components["schemas"]["triggerList"];
+type Duration = ControlPlane.components["schemas"]["duration"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -80,6 +82,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatRun));
     });
 
+  program
+    .command("trigger")
+    .description("inspect triggers")
+    .command("list")
+    .description("list trigger bindings with their next scheduled execution")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/triggers").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatTriggerList));
+    });
+
   try {
     await program.parseAsync(args, { from: "user" });
     return exitCode;
@@ -128,6 +145,20 @@ function formatRunList(list: RunList): string {
     ...list.items.map((run) => [run.id, run.workflow, run.status, run.createdAt, run.finishedAt ?? ""]),
   ];
   return table(rows);
+}
+
+function formatTriggerList(list: TriggerList): string {
+  const rows = [
+    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION"],
+    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt]),
+  ];
+  return table(rows);
+}
+
+/** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
+function formatDuration(duration: Duration): string {
+  const units = [["days", "d"], ["hours", "h"], ["minutes", "m"], ["seconds", "s"]] as const;
+  return units.map(([unit, suffix]) => (duration[unit] ? `${duration[unit]}${suffix}` : "")).join("") || "0s";
 }
 
 function formatRun(run: Run): string {

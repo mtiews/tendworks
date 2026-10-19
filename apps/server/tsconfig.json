@@ -13,6 +13,9 @@
   "references": [
     {
       "path": "../../packages/control-plane"
+    },
+    {
+      "path": "../../packages/trigger-gateway"
     }
   ]
 }

@@ -209,6 +209,16 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   apps/worker:
     dependencies:
@@ -387,6 +397,9 @@ importers:
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0
