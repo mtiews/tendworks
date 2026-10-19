@@ -1,0 +1,22 @@
+# Hands one task to an agent that works for a while; used to restart the platform mid-run.
+# Start it with: POST /runs {"workflow": "slow-agent", "input": {"issue": {"number": 7, "title": "Survive a restart"}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: slow-agent
+  version: '0.1.0'
+  summary: Hands an issue to the slow fake developer agent.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-slow-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+      output:
+        as: '${ { taskId: .id, state: .status.state, messages: (.history | length), resumed: (.metadata["dev.tendworks/resumed"] // 0) } }'
