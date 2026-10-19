@@ -11,7 +11,7 @@ const triggers: Trigger[] = [
     nextExecutionAt: "2026-10-18T10:01:00.000Z",
     lastEvaluation: { at: "2026-10-18T10:00:00.000Z", status: "failed", startedRuns: 0, message: "secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set" },
   },
-  { name: "nightly", workflow: "triage", schedule: { every: { days: 1 } }, nextExecutionAt: "2026-10-19T00:00:00.000Z" },
+  { name: "nightly", workflow: "triage", schedule: { every: { days: 1 } }, nextExecutionAt: "2026-10-19T00:00:00.000Z", suspended: true },
   {
     name: "ready-issues",
     workflow: "implement-issue",
@@ -49,7 +49,7 @@ describe("tend trigger list", () => {
       expect.stringMatching(
         /^github-issues\s+develop-issue\s+1m\s+2026-10-18T10:01:00.000Z\s+failed 2026-10-18T10:00:00.000Z: secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set$/,
       ),
-      expect.stringMatching(/^nightly\s+triage\s+1d\s+2026-10-19T00:00:00.000Z$/),
+      expect.stringMatching(/^nightly\s+triage\s+1d\s+suspended$/),
       expect.stringMatching(/^ready-issues\s+implement-issue\s+5m30s\s+2026-10-18T10:05:30.000Z\s+succeeded 2026-10-18T10:00:00.000Z, 2 runs started$/),
     ]);
   });

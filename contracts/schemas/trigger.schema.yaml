@@ -23,6 +23,9 @@ $defs:
         type: string
         format: date-time
         description: When the trigger next checks its source.
+      suspended:
+        type: boolean
+        description: Present and true when the binding is suspended and never checked on its schedule.
       lastEvaluation:
         $ref: '#/$defs/evaluation'
   evaluation:

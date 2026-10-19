@@ -198,6 +198,24 @@ describe("trigger gateway", () => {
     expect(await store.publisher.events()).toEqual([]);
   });
 
+  it("never checks a suspended binding on its schedule, and lists it as suspended", async () => {
+    const runs = createInMemoryRunStarter();
+    const suspended = binding([issue(1)], { suspend: true });
+    const gateway = createTriggerGateway({ bindings: [suspended], store: createInMemoryFiringStore(), runs, log: () => {} });
+
+    vi.useFakeTimers({ now: new Date("2026-10-18T10:02:30.000Z") });
+    try {
+      gateway.start();
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      await gateway.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(runs.started).toEqual([]);
+    expect((await gateway.triggers())[0]).toMatchObject({ name: "ready-issues", suspended: true });
+  });
+
   it("lists its bindings by name with their next scheduled execution", async () => {
     const hourly: Binding = { ...binding([]), metadata: { name: "hourly" }, spec: { ...binding([]).spec, schedule: { every: { hours: 1 } } } };
     const { gateway } = setup([binding([]), hourly]);

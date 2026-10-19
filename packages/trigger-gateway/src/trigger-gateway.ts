@@ -143,6 +143,7 @@ export function createTriggerGateway({
             workflow: spec.workflow,
             schedule: structuredClone(spec.schedule),
             nextExecutionAt: nextExecution(spec.schedule, now()).toISOString(),
+            ...(spec.suspend ? { suspended: true } : {}),
             ...(lastEvaluation ? { lastEvaluation } : {}),
           };
         })
@@ -151,7 +152,9 @@ export function createTriggerGateway({
     start() {
       if (started) return;
       started = true;
-      for (const [name, binding] of byName) schedule(name, nextExecution(binding.spec.schedule, now()));
+      for (const [name, binding] of byName) {
+        if (!binding.spec.suspend) schedule(name, nextExecution(binding.spec.schedule, now()));
+      }
     },
     async stop() {
       started = false;

@@ -251,7 +251,7 @@ function formatAgentList(list: AgentList): string {
 function formatTriggerList(list: TriggerList): string {
   const rows = [
     ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION", "LAST CHECK"],
-    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
+    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.suspended ? "suspended" : trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
   ];
   return table(rows);
 }

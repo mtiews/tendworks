@@ -167,7 +167,8 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["issue-ready-for-agent"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-ready-to-merge", "issue-ready-for-agent", "playground-ready-for-agent"]);
+    expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 
   it("answers 503 when the trigger gateway cannot be reached", async () => {

@@ -35,6 +35,11 @@ properties:
       workflow:
         type: string
         description: Name (`document.name`) of the configured workflow each match starts.
+      suspend:
+        type: boolean
+        description: >-
+          When true, the binding is never checked on its schedule, e.g. because it needs a
+          secret that is not set yet. Defaults to false.
       input:
         type: object
         additionalProperties: true

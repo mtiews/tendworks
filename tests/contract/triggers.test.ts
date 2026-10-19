@@ -51,8 +51,11 @@ describe("triggers through the control plane and the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data).toEqual({
-      items: [{ name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-18T10:00:10.000Z" }],
+    expect(data?.items.find((trigger) => trigger.name === "issue-ready-for-agent")).toEqual({
+      name: "issue-ready-for-agent",
+      workflow: "hello-agent",
+      schedule: { every: { seconds: 10 } },
+      nextExecutionAt: "2026-10-18T10:00:10.000Z",
     });
   });
 
