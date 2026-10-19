@@ -1,6 +1,7 @@
 export { createStoreProbe } from "./adapters/postgres-store-probe.js";
 export { createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
 export { ConfigurationError, loadConfiguration, type Configuration } from "./configuration.js";
+export type { MergeOutcome, MergeRefusal, MergeRequest, MergesPort, PullRequestMerge } from "./merges.js";
 export type { Notification, NotificationsPort } from "./notifications.js";
 export {
   createInMemoryRuns,

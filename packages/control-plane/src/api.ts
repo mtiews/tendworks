@@ -1,6 +1,7 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { Configuration } from "./configuration.js";
+import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
@@ -24,6 +25,8 @@ export interface ControlPlaneApiOptions {
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
   notifications?: NotificationsPort;
+  /** Human interaction's merge gate; `POST /pull-requests/merge` answers 503 without it. */
+  merges?: MergesPort;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -35,9 +38,10 @@ export function createControlPlaneApi({
   runs,
   triggers = { list: async () => [] },
   notifications,
+  merges,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   const app = new Hono();
-  const problem = (status: 400 | 404 | 503, title: string, detail?: string): Response =>
+  const problem = (status: 400 | 403 | 404 | 409 | 502 | 503, title: string, detail?: string): Response =>
     Response.json({ title, status, ...(detail === undefined ? {} : { detail }) } satisfies Schemas["Problem"], { status });
 
   app.get("/status", async (c) => {
@@ -86,6 +90,18 @@ export function createControlPlaneApi({
     } catch (error) {
       return problem(503, "Notifications unavailable", error instanceof Error ? error.message : String(error));
     }
+  });
+
+  app.post("/pull-requests/merge", async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["MergePullRequestRequest"]> | undefined;
+    if ((typeof body?.pullRequest !== "string" && body?.pullRequest !== null) || typeof body.policy !== "string") {
+      return problem(400, "Invalid request", "`pullRequest` must be a URL or null and `policy` the name of a configured policy");
+    }
+    if (!merges) return problem(503, "Merging unavailable", "no merge gate is configured");
+    const outcome = await merges.merge({ pullRequest: body.pullRequest, policy: body.policy });
+    if ("merged" in outcome) return c.json(outcome.merged satisfies Schemas["PullRequestMerge"], 200);
+    const { reason, title, detail } = outcome.refused;
+    return problem(REFUSAL_STATUS[reason], title, detail);
   });
 
   app.onError((error) => {

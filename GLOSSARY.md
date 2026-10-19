@@ -28,6 +28,10 @@ _Avoid_: security level, sandbox type, runtime
 A message to the human that needs no decision, e.g. that a run finished. It is recorded before it is delivered, so it is never lost when delivery fails.
 _Avoid_: alert, task, message (that is an agent's output)
 
+**Policy**:
+A declarative rule (`kind: Policy`) that decides whether a gated action, such as merging a pull request, is performed right away (`allow`) or only after an approval request (`ask`).
+_Avoid_: rule, gate setting, permission
+
 **Approval request**:
 A question to the human with options, created when a policy decides a gate applies; the run waits for its decision.
 _Avoid_: approval task, confirmation, ticket

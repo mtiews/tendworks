@@ -6,6 +6,7 @@ import {
   createInProcessRunEngine,
   createOrchestrationApi,
   createRunActivities,
+  InMemoryHttpExecutor,
 } from "@tendworks/orchestration";
 import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
@@ -23,7 +24,7 @@ function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
-  const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents })) });
+  const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() })) });
   const controlPlane = createControlPlaneApi({
     probes: [],
     configuration,

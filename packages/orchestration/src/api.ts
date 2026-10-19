@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { newTraceparent } from "./runs/run-events.js";
 import type { RunEngine } from "./runs/run-engine.js";
 import type { Run, RunStore } from "./runs/run-store.js";
+import type { RuntimeDescriptor } from "./workflow/interpreter.js";
 import { validateWorkflow, WorkflowValidationError } from "./workflow/validate.js";
 
 type Schemas = Orchestration.components["schemas"];
@@ -10,6 +11,8 @@ type Schemas = Orchestration.components["schemas"];
 export interface OrchestrationApiOptions {
   store: RunStore;
   engine: RunEngine;
+  /** `$runtime` of every run started here (snapshot at start), e.g. the control plane URL. */
+  runtime?: RuntimeDescriptor;
   newRunId?: () => string;
   now?: () => Date;
 }
@@ -18,6 +21,7 @@ export interface OrchestrationApiOptions {
 export function createOrchestrationApi({
   store,
   engine,
+  runtime,
   newRunId = () => crypto.randomUUID(),
   now = () => new Date(),
 }: OrchestrationApiOptions): { fetch(request: Request): Promise<Response> } {
@@ -48,7 +52,7 @@ export function createOrchestrationApi({
     };
     await store.create(run);
     try {
-      await engine.start({ runId: run.id, workflow: run.workflow, traceparent: newTraceparent(), definition, input: run.input });
+      await engine.start({ runId: run.id, workflow: run.workflow, traceparent: newTraceparent(), definition, input: run.input, ...(runtime ? { runtime } : {}) });
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
       await store.updateRun(run.id, {

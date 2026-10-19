@@ -1,0 +1,47 @@
+$id: https://tendworks.dev/schemas/v1/policy.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Policy
+description: >-
+  Decides when a gate applies. Workflows name a policy when they ask the platform to
+  perform a gated action; human interaction evaluates it to `allow` (perform the action)
+  or `ask` (an approval request decides first). For now the only gated action is merging
+  a pull request.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: Policy
+  metadata:
+    type: object
+    title: PolicyMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name workflows refer to the policy by.
+  spec:
+    title: PolicySpec
+    type: object
+    required: [merge]
+    additionalProperties: false
+    properties:
+      merge:
+        type: string
+        enum: [auto, ask]
+        description: >-
+          How a pull request is merged. `auto`: the platform merges it as soon as the
+          workflow asks. `ask`: an approval request is created first and the merge waits
+          for its decision.
+$defs:
+  decision:
+    title: PolicyDecision
+    description: >-
+      What a policy decides for a gated action. `allow`: perform it. `ask`: an approval
+      request decides first.
+    type: string
+    enum: [allow, ask]

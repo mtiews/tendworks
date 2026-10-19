@@ -1,7 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createAgentRuntime } from "@tendworks/agent-runtime";
 import { createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration } from "@tendworks/control-plane";
-import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities } from "@tendworks/orchestration";
+import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
 import type { ControlPlane } from "@tendworks/shared";
 import {
   createControlPlaneRunStarter,
@@ -22,7 +22,7 @@ function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
-  const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents })) });
+  const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() })) });
   const gateway = createTriggerGateway({
     bindings: configuration.triggerBindings,
     store: createInMemoryFiringStore(),

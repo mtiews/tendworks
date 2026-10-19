@@ -13,7 +13,7 @@ const delivered: Notification = {
 async function list(notifications?: NotificationsPort) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
     runs: createInMemoryRuns(),
     ...(notifications ? { notifications } : {}),
   });

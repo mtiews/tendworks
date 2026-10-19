@@ -146,6 +146,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /pull-requests/merge:
+    post:
+      operationId: mergePullRequest
+      summary: Merge a pull request behind the gate of a policy
+      description: >-
+        Merges the pull request with the platform's credentials, never an agent's. The
+        named policy decides first: with `merge: auto` the pull request is merged right
+        away; `merge: ask` (an approval request first) is refused for now. Merging a pull
+        request that is already merged succeeds, so a repeated request is harmless.
+        Workflows call this as a step after the agent opened the pull request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MergePullRequestRequest"
+      responses:
+        "200":
+          description: The pull request is merged.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PullRequestMerge"
+        "400":
+          description: >-
+            The request is invalid: no pull request given (e.g. the agent reported none),
+            no policy with this name, or no integration for the pull request's host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The policy does not allow merging without an approval.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The repository refused the merge, e.g. the pull request is closed or has conflicts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "502":
+          description: The repository could not be reached or refused the platform's credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
     NotificationList:
@@ -157,6 +206,36 @@ components:
           type: array
           items:
             $ref: "../schemas/notification.schema.yaml#/$defs/notification"
+    MergePullRequestRequest:
+      type: object
+      required: [pullRequest, policy]
+      additionalProperties: false
+      properties:
+        pullRequest:
+          type: [string, "null"]
+          description: >-
+            Web URL of the pull request, as the agent reported it. `null` (no pull request
+            reported) is answered with 400 and a message saying so.
+        policy:
+          type: string
+          description: Name of the configured policy whose gate applies.
+    PullRequestMerge:
+      type: object
+      required: [pullRequest, policy, decision, merged]
+      additionalProperties: false
+      properties:
+        pullRequest:
+          type: string
+        policy:
+          type: string
+        decision:
+          $ref: "../schemas/policy.schema.yaml#/$defs/decision"
+        merged:
+          type: boolean
+          const: true
+        commit:
+          type: string
+          description: The merge commit, when the repository reports one.
     StartRunRequest:
       type: object
       required: [workflow]

@@ -11,7 +11,7 @@ const trigger: Trigger = {
 function api(gateway: (request: Request) => Promise<Response>) {
   return createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
     runs: createInMemoryRuns(),
     triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: gateway }),
   });

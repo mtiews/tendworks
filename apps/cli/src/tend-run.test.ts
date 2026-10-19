@@ -48,7 +48,7 @@ async function tend(args: string[], extra: Run[] = []) {
   for (const run of [completed, failed, ...extra]) runs.runs.set(run.id, run);
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
     runs,
   });
   let stdout = "";

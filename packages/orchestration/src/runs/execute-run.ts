@@ -1,5 +1,6 @@
 import type { A2A, Workflow } from "@tendworks/shared";
-import { runWorkflow, type RunResult, type Step } from "../workflow/interpreter.js";
+import type { HttpRequest, HttpResponse } from "../workflow/http-executor.js";
+import { runWorkflow, type RunResult, type RuntimeDescriptor, type Step } from "../workflow/interpreter.js";
 import type { RunContext } from "./run-events.js";
 
 // Deterministic like the interpreter: this module runs inside the durable execution
@@ -9,6 +10,8 @@ import type { RunContext } from "./run-events.js";
 export interface RunExecution extends RunContext {
   definition: Workflow.Workflow;
   input: unknown;
+  /** `$runtime` of the run's expressions, e.g. the control plane URL. */
+  runtime?: RuntimeDescriptor;
 }
 
 export type RunOutcome = Omit<RunResult, "steps">;
@@ -18,6 +21,7 @@ export interface RunActivities {
   runStarted(run: RunContext): Promise<void>;
   recordStep(run: RunContext, step: Step): Promise<void>;
   sendMessage(agent: string, request: A2A.SendMessageRequest): Promise<A2A.Task>;
+  httpRequest(request: HttpRequest): Promise<HttpResponse>;
   runFinished(run: RunContext, outcome: RunOutcome): Promise<void>;
 }
 
@@ -29,6 +33,8 @@ export async function executeRun(execution: RunExecution, activities: RunActivit
     runId: execution.runId,
     input: execution.input,
     executor: { sendMessage: (agent, request) => activities.sendMessage(agent, request) },
+    http: { request: (request) => activities.httpRequest(request) },
+    ...(execution.runtime ? { runtime: execution.runtime } : {}),
     recordStep: (step) => activities.recordStep(run, step),
   });
   await activities.runFinished(run, outcome);

@@ -16,6 +16,7 @@ import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi } from "@tendworks/health";
 import {
   createExecutionEngineProbe,
+  createFetchHttpExecutor,
   createOrchestrationApi,
   createPostgresRunStore,
   createRunActivities,
@@ -88,14 +89,20 @@ const agents = createAgentRuntime({
 // Run and step events go onto the event bus in the transaction of the run state they describe.
 const store = createPostgresRunStore({ pool, publisher: createPostgresEventBus({ pool }) });
 const engine = await createTemporalRunEngine({ address: engineAddress });
-const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents }) });
+// `call: http` tasks may only reach the control plane API; workflows find it as
+// `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
+// repository token lives in the server bundle, never in this one.
+const controlPlaneUrl = env("TEND_CONTROL_PLANE_URL");
+const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl });
+const runtime = { name: "tendworks", metadata: { controlPlaneUrl: controlPlaneUrl.replace(/\/+$/, "") } };
+const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents, http }) });
 
 // Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml)
 // and orchestration (contracts/openapi/orchestration.yaml).
 const health = createHealthApi({
   probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
 });
-const orchestration = createOrchestrationApi({ store, engine });
+const orchestration = createOrchestrationApi({ store, engine, runtime });
 const fetch = (request: Request) => (new URL(request.url).pathname === "/health" ? health.fetch(request) : orchestration.fetch(request));
 
 const port = Number(env("PORT", "8081"));

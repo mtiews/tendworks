@@ -56,7 +56,9 @@ function checkout(workspace: string, repository: string, branch: string) {
   return run(request.command, workspace);
 }
 
-describe("workspace checkout", () => {
+// Each test runs git several times synchronously; on Windows, inside the parallel unit
+// suite, that can take longer than the default timeout.
+describe("workspace checkout", { timeout: 20_000 }, () => {
   it("clones the repository and starts a new branch from the default branch", () => {
     const { origin, workspace } = remote();
 
