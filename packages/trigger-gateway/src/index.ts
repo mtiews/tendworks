@@ -6,7 +6,7 @@ export {
   type SqlTransaction,
 } from "./adapters/postgres-firing-store.js";
 export { createTriggerGatewayApi } from "./api.js";
-export type { FiringKey, FiringStore } from "./firings/firing-store.js";
+export type { Evaluation, FiringKey, FiringStore } from "./firings/firing-store.js";
 export { createInMemoryFiringStore, InMemoryEventPublisher } from "./firings/in-memory-firing-store.js";
 export type { EventPublisher, TriggerFiredEvent } from "./trigger-events.js";
 export { InputMappingError } from "./input.js";

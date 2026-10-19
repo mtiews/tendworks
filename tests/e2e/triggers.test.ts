@@ -36,6 +36,8 @@ describe("time trigger on the compose stack", () => {
     const trigger = data?.items.find((item) => item.name === BINDING);
     expect(trigger).toMatchObject({ workflow: "hello-agent", schedule: { every: { seconds: 10 } } });
     const next = new Date(trigger!.nextExecutionAt).getTime();
+    // The fake integration answers every check.
+    expect(trigger?.lastEvaluation === undefined || trigger.lastEvaluation.status === "succeeded").toBe(true);
     expect(next).toBeGreaterThan(Date.now() - 1_000);
     expect(next).toBeLessThanOrEqual(Date.now() + 11_000);
   });

@@ -63,7 +63,7 @@ describe("trigger gateway schedule", () => {
     expect(runs.started).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(30_000); // 10:05:00
     expect(runs.started).toHaveLength(1);
-    expect(gateway.triggers()[0]?.nextExecutionAt).toBe("2026-10-18T10:10:00.000Z");
+    expect((await gateway.triggers())[0]?.nextExecutionAt).toBe("2026-10-18T10:10:00.000Z");
 
     issues.push(issue(2));
     await vi.advanceTimersByTimeAsync(5 * 60_000); // 10:10:00
@@ -198,14 +198,60 @@ describe("trigger gateway", () => {
     expect(await store.publisher.events()).toEqual([]);
   });
 
-  it("lists its bindings by name with their next scheduled execution", () => {
+  it("lists its bindings by name with their next scheduled execution", async () => {
     const hourly: Binding = { ...binding([]), metadata: { name: "hourly" }, spec: { ...binding([]).spec, schedule: { every: { hours: 1 } } } };
     const { gateway } = setup([binding([]), hourly]);
 
-    expect(gateway.triggers()).toEqual([
+    expect(await gateway.triggers()).toEqual([
       { name: "hourly", workflow: "implement-issue", schedule: { every: { hours: 1 } }, nextExecutionAt: "2026-10-18T11:00:00.000Z" },
       { name: "ready-issues", workflow: "implement-issue", schedule: { every: { minutes: 5 } }, nextExecutionAt: "2026-10-18T10:05:00.000Z" },
     ]);
+  });
+
+  it("lists how each binding's last check went: started runs, or why it failed", async () => {
+    const runs = createInMemoryRunStarter();
+    const store = createInMemoryFiringStore();
+    let failure: Error | undefined;
+    const gateway = createTriggerGateway({
+      bindings: [binding([])],
+      store,
+      runs,
+      issueTrackers: () => ({
+        findIssues: async () => {
+          if (failure) throw failure;
+          return [issue(1)];
+        },
+      }),
+      now: () => new Date("2026-10-18T10:02:30.000Z"),
+    });
+    const lastEvaluation = async () => (await gateway.triggers())[0]!.lastEvaluation;
+
+    expect(await lastEvaluation()).toBeUndefined();
+    await gateway.check("ready-issues");
+    expect(await lastEvaluation()).toEqual({ at: "2026-10-18T10:02:30.000Z", status: "succeeded", startedRuns: 1 });
+
+    failure = new Error("GitHub answered 403: API rate limit exceeded");
+    await expect(gateway.check("ready-issues")).rejects.toThrow("rate limit");
+    expect(await lastEvaluation()).toEqual({
+      at: "2026-10-18T10:02:30.000Z",
+      status: "failed",
+      startedRuns: 0,
+      message: "GitHub answered 403: API rate limit exceeded",
+    });
+  });
+
+  it("records a check as failed when a matching issue's run could not be started", async () => {
+    const { runs, gateway } = setup([binding([issue(1)])]);
+    runs.fail(new Error("control plane answered HTTP 503"));
+
+    await gateway.check("ready-issues");
+
+    expect((await gateway.triggers())[0]!.lastEvaluation).toEqual({
+      at: "2026-10-18T10:02:30.000Z",
+      status: "failed",
+      startedRuns: 0,
+      message: "acme/playground#1 could not start a run: control plane answered HTTP 503",
+    });
   });
 
   it("retries an issue on the next check when its run could not be started", async () => {

@@ -250,10 +250,17 @@ function formatAgentList(list: AgentList): string {
 
 function formatTriggerList(list: TriggerList): string {
   const rows = [
-    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION"],
-    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt]),
+    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION", "LAST CHECK"],
+    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
   ];
   return table(rows);
+}
+
+/** `succeeded <at>, <n> runs started` or `failed <at>: <why>`; empty before the first check. */
+function formatEvaluation(evaluation: TriggerList["items"][number]["lastEvaluation"]): string {
+  if (!evaluation) return "";
+  if (evaluation.status === "failed") return `failed ${evaluation.at}${evaluation.message ? `: ${evaluation.message}` : ""}`;
+  return `succeeded ${evaluation.at}, ${evaluation.startedRuns} ${evaluation.startedRuns === 1 ? "run" : "runs"} started`;
 }
 
 /** `{ minutes: 5, seconds: 30 }` as `5m30s`. */

@@ -31,10 +31,13 @@ export interface CheckResult {
 }
 
 export interface TriggerGateway {
-  /** Asks the binding's source once and starts a run for every new match. */
+  /**
+   * Asks the binding's source once and starts a run for every new match. Records how
+   * the check went, also when it fails (and then rejects).
+   */
   check(binding: string): Promise<CheckResult>;
-  /** The bindings, ordered by name, with their next scheduled execution. */
-  triggers(): Trigger[];
+  /** The bindings, ordered by name, with their next scheduled execution and how their last check went. */
+  triggers(): Promise<Trigger[]>;
   /** Checks every binding at its scheduled executions until {@link stop}. */
   start(): void;
   /** Stops scheduling and waits for running checks. */
@@ -62,6 +65,22 @@ export function createTriggerGateway({
   async function check(name: string): Promise<CheckResult> {
     const binding = byName.get(name);
     if (!binding) throw new Error(`unknown trigger binding '${name}'`);
+    const at = now().toISOString();
+    let result: CheckResult;
+    try {
+      result = await evaluate(name, binding);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await store.recordEvaluation(name, { at, status: "failed", startedRuns: 0, message });
+      throw error;
+    }
+    const { fired, failed } = result;
+    const message = failed.map(({ issue, error }) => `${issue} could not start a run: ${error}`).join("; ");
+    await store.recordEvaluation(name, { at, status: failed.length > 0 ? "failed" : "succeeded", startedRuns: fired.length, ...(message ? { message } : {}) });
+    return result;
+  }
+
+  async function evaluate(name: string, binding: TriggerBinding.TriggerBinding): Promise<CheckResult> {
     const { source, workflow, input = DEFAULT_INPUT } = binding.spec;
     const issues = await issueTrackers(source).findIssues(source.issues);
     const result: CheckResult = { fired: [], failed: [] };
@@ -114,14 +133,19 @@ export function createTriggerGateway({
 
   return {
     check,
-    triggers() {
+    async triggers() {
+      const evaluations = await store.lastEvaluations();
       return [...byName.values()]
-        .map(({ metadata, spec }) => ({
-          name: metadata.name,
-          workflow: spec.workflow,
-          schedule: structuredClone(spec.schedule),
-          nextExecutionAt: nextExecution(spec.schedule, now()).toISOString(),
-        }))
+        .map(({ metadata, spec }) => {
+          const lastEvaluation = evaluations.get(metadata.name);
+          return {
+            name: metadata.name,
+            workflow: spec.workflow,
+            schedule: structuredClone(spec.schedule),
+            nextExecutionAt: nextExecution(spec.schedule, now()).toISOString(),
+            ...(lastEvaluation ? { lastEvaluation } : {}),
+          };
+        })
         .sort((a, b) => a.name.localeCompare(b.name));
     },
     start() {

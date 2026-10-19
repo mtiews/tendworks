@@ -1,4 +1,8 @@
+import type { TriggerGateway as Contract } from "@tendworks/shared";
 import type { TriggerFiredEvent } from "../trigger-events.js";
+
+/** How a binding's last check went (contracts/schemas/trigger.schema.yaml#/$defs/evaluation). */
+export type Evaluation = Contract.components["schemas"]["evaluation"];
 
 /** One issue matched by one binding; the unit of deduplication. */
 export interface FiringKey {
@@ -23,4 +27,8 @@ export interface FiringStore {
   release(key: FiringKey): Promise<void>;
   /** Records the run a claimed key started, together with its event. Idempotent. */
   fired(key: FiringKey, runId: string, event: TriggerFiredEvent): Promise<void>;
+  /** Keeps how the binding's last check went, replacing the one before. */
+  recordEvaluation(binding: string, evaluation: Evaluation): Promise<void>;
+  /** The last evaluation of every binding that was checked, by binding name. */
+  lastEvaluations(): Promise<Map<string, Evaluation>>;
 }

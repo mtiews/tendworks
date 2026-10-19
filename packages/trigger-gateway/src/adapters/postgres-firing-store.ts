@@ -1,5 +1,5 @@
 import pg from "pg";
-import type { FiringStore } from "../firings/firing-store.js";
+import type { Evaluation, FiringStore } from "../firings/firing-store.js";
 import type { EventPublisher, TriggerFiredEvent } from "../trigger-events.js";
 
 /** The part of a database connection a publisher needs to write inside the store's transaction. */
@@ -17,6 +17,13 @@ create table if not exists trigger_gateway.firings (
   claimed_at timestamptz not null default now(),
   fired_at   timestamptz,
   primary key (binding, item)
+);
+create table if not exists trigger_gateway.evaluations (
+  binding       text primary key,
+  at            timestamptz not null,
+  status        text not null,
+  started_runs  integer not null,
+  message       text
 );
 create table if not exists trigger_gateway.outbox (
   position   bigserial primary key,
@@ -97,6 +104,24 @@ export function createPostgresFiringStore({ pool, publisher = createPostgresOutb
       } finally {
         client.release();
       }
+    },
+    async recordEvaluation(binding, { at, status, startedRuns, message }) {
+      await pool.query(
+        `insert into trigger_gateway.evaluations (binding, at, status, started_runs, message) values ($1, $2, $3, $4, $5)
+         on conflict (binding) do update set at = excluded.at, status = excluded.status, started_runs = excluded.started_runs, message = excluded.message`,
+        [binding, at, status, startedRuns, message ?? null],
+      );
+    },
+    async lastEvaluations() {
+      const { rows } = await pool.query<{ binding: string; at: Date; status: Evaluation["status"]; started_runs: number; message: string | null }>(
+        "select * from trigger_gateway.evaluations",
+      );
+      return new Map(
+        rows.map((row) => [
+          row.binding,
+          { at: row.at.toISOString(), status: row.status, startedRuns: row.started_runs, ...(row.message === null ? {} : { message: row.message }) },
+        ]),
+      );
     },
   };
 }

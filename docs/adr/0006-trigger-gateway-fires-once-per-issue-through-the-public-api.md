@@ -6,6 +6,8 @@ Runs are started through the public control plane API (`POST /runs`), the same w
 
 Executions fall on multiples of the binding's interval since the Unix epoch, so the next execution needs no stored state and every instance agrees on it.
 
+Every check records how it went per binding (`trigger_gateway.evaluations`, the last one only): `succeeded` with the number of runs it started, or `failed` with the reason when the source could not be asked (rate limit, API error, a secret that is not set) or a matching issue's run could not be started. `GET /triggers` and `tend trigger list` show it as `lastEvaluation`, so a binding that silently never fires is visible without reading the server log.
+
 ## Considered Options
 
 - **Re-fire when the previous run failed**: closer to "an active or completed run blocks a second one", but with a real agent a persistently failing issue would start a paid run at every execution. Rejected for now; an operator re-triggers by hand once `tend trigger fire` exists.
