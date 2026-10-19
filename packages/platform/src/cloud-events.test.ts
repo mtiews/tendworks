@@ -24,6 +24,20 @@ describe("event envelope", () => {
 
     expect(envelope.stepid).toBe("/do/0/a");
   });
+
+  it("carries no run for an event that belongs to none, e.g. of a chat", () => {
+    const envelope = eventEnvelope({ id: "c1:chat.started", source: "/tendworks/agent-runtime", subject: "chats/c1", time: "2026-10-19T08:00:00.000Z", traceparent: PARENT });
+
+    expect(envelope).toStrictEqual({
+      specversion: "1.0",
+      id: "c1:chat.started",
+      source: "/tendworks/agent-runtime",
+      subject: "chats/c1",
+      time: "2026-10-19T08:00:00.000Z",
+      datacontenttype: "application/json",
+      traceparent: PARENT,
+    });
+  });
 });
 
 describe("trace context", () => {

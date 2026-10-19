@@ -1,11 +1,20 @@
+import { newTraceparent } from "@tendworks/platform";
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
+import { chatEnded, chatStarted } from "./chat-events.js";
+import { addCost, CHAT, ChatBusyError, ChatEndedError, chatFacts, ChatNotAllowedError, toChat, type Chat, type ChatFacts } from "./chats.js";
 import { createFakeHarness } from "./fake-agent.js";
-import type { Harness, HarnessResult } from "./harness.js";
+import type { Cost, Harness, HarnessResult, HarnessSession, HarnessTurn, OpenSession } from "./harness.js";
 import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
 import { createLiveTranscripts } from "./transcripts/live-transcripts.js";
-import { createInMemoryTranscriptStore, type TranscriptEntry, type TranscriptRecord, type TranscriptStore } from "./transcripts/transcript-store.js";
+import {
+  createInMemoryTranscriptStore,
+  type Transcript,
+  type TranscriptEntry,
+  type TranscriptRecord,
+  type TranscriptStore,
+} from "./transcripts/transcript-store.js";
 
 /** Task metadata key: how often the runtime resumed the task after an interruption. */
 export const RESUMED = "dev.tendworks/resumed";
@@ -44,6 +53,44 @@ export interface AgentRuntime extends AgentTasks {
    * iteration early (`return()`) stops following at once.
    */
   follow(taskId: string, options?: { after?: number }): Promise<AsyncIterableIterator<TranscriptEntry> | undefined>;
+  /**
+   * Starts a chat (ADR 0015) with the agent profile `agent`: a task without a run whose
+   * agent session stays open across turns. Answers at once with the chat working on
+   * `message`; after each turn the task waits in `input-required`. Rejects for an
+   * unknown profile and with {@link ChatNotAllowedError} for one without `spec.chat`.
+   * The same message sent again returns the same chat.
+   */
+  startChat(agent: string, message: A2A.Message): Promise<Chat>;
+  /**
+   * The next message of a chat (A2A `SendMessage` to its task): starts the next turn in
+   * the same agent session and answers at once. Rejects with {@link ChatBusyError}
+   * while a turn runs and with {@link ChatEndedError} once the chat ended; undefined for
+   * an unknown chat.
+   */
+  sendChatMessage(chatId: string, message: A2A.Message): Promise<Chat | undefined>;
+  /**
+   * Ends a chat for good, also during a turn: its sandbox and volumes go, its
+   * transcript stays. An ended chat is returned as it is; undefined for an unknown chat.
+   */
+  endChat(chatId: string): Promise<Chat | undefined>;
+  getChat(chatId: string): Promise<Chat | undefined>;
+  /** All chats, the most recently started first. */
+  listChats(): Promise<Chat[]>;
+}
+
+/** A chat this process works on: its open agent session and what it records. */
+interface OpenChat {
+  profile: LoadedAgentProfile;
+  facts: ChatFacts;
+  session: OpenSession;
+  task: A2A.Task;
+  record: (entry: TranscriptRecord) => void;
+  /** Resolves once everything recorded so far is kept. */
+  written: () => Promise<void>;
+  /** The running turn, if any. */
+  turn?: Promise<void>;
+  /** Set once the chat is being ended; a turn that ends then leaves the outcome to the end. */
+  ending?: Promise<Chat>;
 }
 
 /**
@@ -67,6 +114,104 @@ export function createAgentRuntime({
   // Progress of running tasks; only the start and the end are written to the store.
   const working = new Map<string, A2A.Task>();
   const live = createLiveTranscripts();
+  // Chats with an open agent session in this process, and those working on a turn.
+  const chats = new Map<string, OpenChat>();
+  const busy = new Set<string>();
+
+  /** Records entries of a task's transcript in order: stamps the time, keeps them and tells live followers. */
+  function recorder(taskId: string, transcript: Transcript) {
+    let writes = Promise.resolve();
+    const record = (entry: TranscriptRecord) => {
+      const stamped = { time: now().toISOString(), ...entry };
+      writes = writes.then(async () => live.recorded(taskId, await transcript.append(stamped)));
+    };
+    return { record, written: () => writes };
+  }
+
+  const agentMessage = (taskId: string, text: string, suffix = "status"): A2A.Message => ({
+    messageId: `${taskId}/${suffix}`,
+    taskId,
+    role: "ROLE_AGENT",
+    parts: [{ text }],
+  });
+
+  /** Opens the agent session of a chat this process has not held yet, e.g. after a restart. */
+  function openChat(profile: LoadedAgentProfile, task: A2A.Task, facts: ChatFacts, session?: HarnessSession): OpenChat {
+    const harness = available[profile.spec.harness];
+    if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
+    const { record, written } = recorder(task.id, transcripts.open(task.id));
+    const chat: OpenChat = {
+      profile,
+      facts,
+      task,
+      record,
+      written,
+      session: harness.open(
+        { taskId: task.id, profile, ...(session ? { session } : {}) },
+        { record, progress: () => {}, saveSession: (kept) => store.saveSession(task.id, kept) },
+      ),
+    };
+    chats.set(task.id, chat);
+    return chat;
+  }
+
+  /** Runs one turn of a chat in the background; afterwards the chat waits for the next message, or failed. */
+  function startTurn(chat: OpenChat, message: A2A.Message): void {
+    const id = chat.task.id;
+    chat.turn = (async () => {
+      let result: HarnessTurn;
+      try {
+        result = await chat.session.turn(message);
+      } catch (error) {
+        result = { state: "TASK_STATE_FAILED", message: `the agent session failed: ${error instanceof Error ? error.message : String(error)}` };
+      }
+      if (chat.ending) return;
+      if (result.state === "TASK_STATE_FAILED") {
+        await finishChat(chat, "TASK_STATE_FAILED", result.message);
+        return;
+      }
+      const cost = addCost(chat.task.metadata?.[COST] as Cost | undefined, result.cost);
+      const reply = agentMessage(id, result.message, `turn-${chat.task.history?.length ?? 0}`);
+      chat.task = {
+        ...chat.task,
+        status: { state: "TASK_STATE_INPUT_REQUIRED", message: reply, timestamp: now().toISOString() },
+        history: [...(chat.task.history ?? []), reply],
+        metadata: { ...chat.task.metadata, ...(cost ? { [COST]: cost } : {}) },
+      };
+      await store.update(chat.task);
+      // Accepting the next message before the entry is visible, so a client that saw it is not refused.
+      busy.delete(id);
+      chat.record({ type: "input-required", message: result.message, ...(cost ? { cost } : {}) });
+    })().catch(() => {
+      // The store failed; the chat stays working until a restart takes it up (ADR 0004).
+    });
+  }
+
+  /** Ends a chat for good: its agent session goes with sandbox and volumes, the task ends, the transcript stays. */
+  async function finishChat(chat: OpenChat, state: "TASK_STATE_COMPLETED" | "TASK_STATE_FAILED", text: string): Promise<Chat> {
+    const id = chat.task.id;
+    try {
+      await chat.session.end();
+    } catch (error) {
+      chat.record({ type: "error", message: `cannot remove the chat's sandbox or volumes: ${error instanceof Error ? error.message : String(error)}` });
+    }
+    const cost = chat.task.metadata?.[COST] as Cost | undefined;
+    chat.record({ type: "task-ended", state, message: text, ...(cost ? { cost } : {}) });
+    await chat.written();
+    chat.task = { ...chat.task, status: { state, message: agentMessage(id, text), timestamp: now().toISOString() } };
+    await store.update(chat.task, chatEnded({ chatId: id, time: chat.task.status.timestamp!, ...chat.facts }, state === "TASK_STATE_COMPLETED" ? "ended" : "failed"));
+    chats.delete(id);
+    busy.delete(id);
+    live.ended(id);
+    return toChat(chat.task, chat.facts);
+  }
+
+  /** A chat's task with its profile, or undefined when the task is no chat. */
+  async function findChat(chatId: string): Promise<{ task: A2A.Task; facts: ChatFacts } | undefined> {
+    const task = chats.get(chatId)?.task ?? (await store.get(chatId));
+    const facts = task && chatFacts(task);
+    return task && facts ? { task, facts } : undefined;
+  }
 
   async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest, { onTask }: SendMessageOptions = {}): Promise<A2A.Task> {
     const startedAt = now();
@@ -98,11 +243,7 @@ export function createAgentRuntime({
       // Taking note of the task is the sender's concern; the task goes on regardless.
     }
 
-    let writes = Promise.resolve();
-    const record = (entry: TranscriptRecord) => {
-      const stamped = { time: now().toISOString(), ...entry };
-      writes = writes.then(async () => live.recorded(id, await transcript.append(stamped)));
-    };
+    const { record, written } = recorder(id, transcript);
     const withStatus = (state: A2A.TaskState, text: string): A2A.Task => ({
       ...claimed.task,
       history: claimed.task.history ?? [request.message],
@@ -141,7 +282,7 @@ export function createAgentRuntime({
     }
 
     record({ type: "task-ended", state: result.state, message: result.message, ...(result.cost ? { cost: result.cost } : {}) });
-    await writes;
+    await written();
     if (result.cost) metadata = { ...metadata, [COST]: { ...result.cost } };
     const done: A2A.Task = { ...withStatus(result.state, result.message), ...(result.artifacts ? { artifacts: result.artifacts } : {}) };
     await store.update(done);
@@ -187,6 +328,99 @@ export function createAgentRuntime({
         following.close();
         throw error;
       }
+    },
+    async startChat(agent, message) {
+      const profile = byName.get(agent);
+      if (!profile) throw new AgentNotFoundError(agent);
+      if (!profile.spec.chat) throw new ChatNotAllowedError(agent);
+      if (!available[profile.spec.harness]?.open) throw new ChatNotAllowedError(agent, `harness ${profile.spec.harness} cannot hold a session across turns`);
+
+      const id = crypto.randomUUID();
+      const startedAt = now().toISOString();
+      const facts: ChatFacts = { agent, startedAt, traceparent: newTraceparent() };
+      const claimed = await store.claim(
+        {
+          messageId: message.messageId,
+          agent,
+          startedAt,
+          kind: "chat",
+          task: {
+            id,
+            ...(message.contextId === undefined ? {} : { contextId: message.contextId }),
+            status: { state: "TASK_STATE_WORKING", timestamp: startedAt },
+            history: [{ ...message, taskId: id }],
+            metadata: { [TRANSCRIPT]: transcripts.open(id).ref, [CHAT]: facts },
+          },
+        },
+        chatStarted({ chatId: id, time: startedAt, ...facts }),
+      );
+      const known = chatFacts(claimed.task);
+      // The same message sent again: the chat it started.
+      if (claimed.task.id !== id) {
+        if (!known) throw new Error(`message ${message.messageId} started a task that is no chat`);
+        return toChat(claimed.task, known);
+      }
+      busy.add(id);
+      const chat = openChat(profile, claimed.task, facts);
+      chat.record({ type: "task-started", agent, message });
+      startTurn(chat, message);
+      return toChat(chat.task, facts);
+    },
+    async sendChatMessage(chatId, message) {
+      const found = await findChat(chatId);
+      if (!found) return undefined;
+      if (TERMINAL.has(found.task.status.state) || chats.get(chatId)?.ending) throw new ChatEndedError(chatId);
+      if (busy.has(chatId) || found.task.status.state === "TASK_STATE_WORKING") throw new ChatBusyError(chatId);
+      // Taken before anything else is awaited, so of two messages at once only one gets through.
+      busy.add(chatId);
+      try {
+        let chat = chats.get(chatId);
+        if (!chat) {
+          // A chat this process does not hold yet, e.g. after a restart: its session resumes with the turn.
+          const profile = byName.get(found.facts.agent);
+          if (!profile) throw new AgentNotFoundError(found.facts.agent);
+          chat = openChat(profile, found.task, found.facts, (await store.find(chatId))?.session);
+        }
+        const received = { ...message, taskId: chatId };
+        chat.task = {
+          ...chat.task,
+          status: { state: "TASK_STATE_WORKING", timestamp: now().toISOString() },
+          history: [...(chat.task.history ?? []), received],
+        };
+        await store.update(chat.task);
+        chat.record({ type: "message-received", message });
+        startTurn(chat, message);
+        return toChat(chat.task, chat.facts);
+      } catch (error) {
+        busy.delete(chatId);
+        throw error;
+      }
+    },
+    async endChat(chatId) {
+      const found = await findChat(chatId);
+      if (!found) return undefined;
+      if (TERMINAL.has(found.task.status.state)) return toChat(found.task, found.facts);
+      let chat = chats.get(chatId);
+      if (chat?.ending) return chat.ending;
+      if (!chat) {
+        const profile = byName.get(found.facts.agent);
+        if (!profile) throw new AgentNotFoundError(found.facts.agent);
+        chat = openChat(profile, found.task, found.facts, (await store.find(chatId))?.session);
+      }
+      const ending = finishChat(chat, "TASK_STATE_COMPLETED", "the chat was ended");
+      chat.ending = ending;
+      return ending;
+    },
+    async getChat(chatId) {
+      const found = await findChat(chatId);
+      return found && toChat(found.task, found.facts);
+    },
+    async listChats() {
+      return (await store.list({ kind: "chat" })).flatMap((task) => {
+        const current = chats.get(task.id)?.task ?? task;
+        const facts = chatFacts(current);
+        return facts ? [toChat(current, facts)] : [];
+      });
     },
   };
 }

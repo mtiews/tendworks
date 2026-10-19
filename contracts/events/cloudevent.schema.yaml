@@ -4,9 +4,26 @@ title: TendworksCloudEvent
 description: >-
   Envelope of every Tendworks event: a CloudEvent 1.0.2 in structured JSON mode with the
   extension attributes `runid`, `stepid` and `traceparent` (W3C Trace Context, CloudEvents
-  distributed tracing extension). Each event type narrows `type` and `data`.
+  distributed tracing extension). Each event type narrows `type` and `data`. Events of a
+  run carry `runid` (and `stepid` for a step); chat events (`dev.tendworks.chat.*`)
+  belong to no run, so they carry neither and name the chat in `subject` (`chats/<id>`).
 type: object
-required: [specversion, id, source, type, time, datacontenttype, runid, traceparent, data]
+required: [specversion, id, source, type, time, datacontenttype, traceparent, data]
+if:
+  properties:
+    type:
+      pattern: ^dev\.tendworks\.chat\.
+then:
+  required: [subject]
+  properties:
+    subject:
+      pattern: ^chats/
+  not:
+    anyOf:
+      - required: [runid]
+      - required: [stepid]
+else:
+  required: [runid]
 properties:
   specversion:
     const: '1.0'
@@ -39,3 +56,15 @@ properties:
     pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
   data:
     type: object
+$defs:
+  runScoped:
+    title: RunScopedEvent
+    description: >-
+      What every event of a run adds to the envelope: the run it belongs to. Event types
+      of runs, steps, triggers and approval requests include it.
+    type: object
+    required: [runid]
+    properties:
+      runid:
+        type: string
+        description: Run the event belongs to.

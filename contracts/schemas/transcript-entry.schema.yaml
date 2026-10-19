@@ -16,6 +16,8 @@ $defs:
       - $ref: '#/$defs/taskStarted'
       - $ref: '#/$defs/taskResumed'
       - $ref: '#/$defs/taskEnded'
+      - $ref: '#/$defs/messageReceived'
+      - $ref: '#/$defs/inputRequired'
       - $ref: '#/$defs/sessionStarted'
       - $ref: '#/$defs/sessionResumed'
       - $ref: '#/$defs/sessionResumeFailed'
@@ -99,6 +101,38 @@ $defs:
         description: The agent's final answer, or why the task failed.
       cost:
         $ref: './run.schema.yaml#/$defs/cost'
+  messageReceived:
+    title: MessageReceivedEntry
+    description: >-
+      A further message of the human to a task that waited for input (the next message of
+      a chat); the agent's next turn works on it.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: message-received }
+      message:
+        $ref: './a2a.schema.yaml#/$defs/message'
+  inputRequired:
+    title: InputRequiredEntry
+    description: >-
+      The agent ended its turn and the task waits for the human's next message (a chat
+      between turns); a further message is accepted from now on.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: input-required }
+      message:
+        type: string
+        description: The agent's answer in the turn that ended.
+      cost:
+        $ref: './run.schema.yaml#/$defs/cost'
+        description: What the task's turns cost so far.
   sessionStarted:
     title: SessionStartedEntry
     description: The harness started a new agent session.

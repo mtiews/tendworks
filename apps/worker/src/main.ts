@@ -78,16 +78,16 @@ await migrateOrchestrationStore(pool);
 await migrateAgentRuntimeStore(pool);
 await migrateEventBus(pool);
 
+// Run, step and chat events go onto the event bus in the transaction of the state they describe.
+const bus = createPostgresEventBus({ pool });
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
 // Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
 const agents = createAgentRuntime({
   profiles,
   harnesses: { "claude-code": claudeCode },
-  store: createPostgresTaskStore({ pool }),
+  store: createPostgresTaskStore({ pool, publisher: bus }),
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
-// Run and step events go onto the event bus in the transaction of the run state they describe.
-const bus = createPostgresEventBus({ pool });
 const store = createPostgresRunStore({ pool, publisher: bus });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 // Other domains' events that name a run (e.g. approval.decided) go to that run, whose
@@ -115,7 +115,7 @@ const agentRuntime = createAgentRuntimeApi({ runtime: agents });
 const fetch = (request: Request) => {
   const { pathname } = new URL(request.url);
   if (pathname === "/health") return health.fetch(request);
-  if (pathname.startsWith("/tasks/")) return agentRuntime.fetch(request);
+  if (pathname.startsWith("/tasks/") || pathname === "/chats" || pathname.startsWith("/chats/")) return agentRuntime.fetch(request);
   return orchestration.fetch(request);
 };
 

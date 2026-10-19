@@ -33,9 +33,12 @@ const mutating: [string, string, unknown][] = [
   ["POST", "/runs", { workflow: "build" }],
   ["POST", "/pull-requests/merge", { run: "r-1", pullRequest: null }],
   ["POST", "/approval-requests/a-1/decision", { decision: "approve" }],
+  ["POST", "/chats", { agent: "assistant", text: "Hello" }],
+  ["POST", "/chats/c-1/messages", { text: "Hello" }],
+  ["POST", "/chats/c-1/end", {}],
 ];
 
-const reading = ["/runs", "/runs/r-1", "/agents", "/triggers", "/notifications", "/approval-requests"];
+const reading = ["/runs", "/runs/r-1", "/agents", "/triggers", "/notifications", "/approval-requests", "/chats", "/chats/c-1", "/chats/c-1/transcript"];
 
 const wrong = [undefined, "Bearer wrong-token", `Basic ${TOKEN}`, TOKEN, `Bearer ${TOKEN}x`];
 

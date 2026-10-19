@@ -60,8 +60,8 @@ const unreachable = async (): Promise<Response> => {
 };
 
 /** The worker's internal APIs: orchestration and the agent runtime it hands tasks to. */
-function worker(engine?: (real: RunEngine) => RunEngine) {
-  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
+function worker(engine?: (real: RunEngine) => RunEngine, sleep: (ms: number) => Promise<void> = async () => {}) {
+  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep });
   const store = createInMemoryRunStore();
   const real = createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() }));
   const orchestration = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
@@ -74,8 +74,11 @@ function worker(engine?: (real: RunEngine) => RunEngine) {
 
 const orchestration = (engine?: (real: RunEngine) => RunEngine) => worker(engine).orchestration;
 
-function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string | null } = {}) {
-  const internal = worker();
+function controlPlane(
+  options: Partial<ControlPlaneApiOptions> = {},
+  { token = API_TOKEN, sleep }: { token?: string | null; sleep?: (ms: number) => Promise<void> } = {},
+) {
+  const internal = worker(undefined, sleep);
   const api = createControlPlaneApi({
     probes: [healthy],
     configuration,
@@ -231,7 +234,108 @@ describe("control plane: transcripts of run steps, through orchestration and the
   });
 });
 
+describe("control plane: chats, through the agent runtime", () => {
+  /** A control plane whose fake agents work on a turn until the test lets them answer. */
+  function chatting() {
+    const turns: (() => void)[] = [];
+    const client = controlPlane({}, { sleep: () => new Promise<void>((resolve) => turns.push(resolve)) });
+    const of = (id: string) => ({ params: { path: { chatId: id } } });
+    /** Lets the running turn end and waits until the chat waits for the next message. */
+    async function answer(id: string) {
+      for (let attempt = 0; attempt < 100 && turns.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+      turns.shift()?.();
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if ((await client.GET("/chats/{chatId}", of(id))).data?.status === "input-required") return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      throw new Error("the turn did not end");
+    }
+    return { client, of, answer };
+  }
+  async function events(body: ReadableStream<Uint8Array> | null | undefined) {
+    const all: { id?: string; event?: string; data: string }[] = [];
+    for await (const event of readServerSentEvents(body!)) all.push(event);
+    return all;
+  }
+
+  it("starts a chat, refuses a message during a turn, takes the next one, ends it and keeps the transcript", async () => {
+    const { client, of, answer } = chatting();
+
+    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const id = started.data!.id;
+    const during = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Still there?" } });
+    await answer(id);
+    const next = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Again" } });
+    await answer(id);
+    const listed = await client.GET("/chats");
+    const ended = await client.POST("/chats/{chatId}/end", of(id));
+    const after = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Hello?" } });
+    const transcript = await client.GET("/chats/{chatId}/transcript", of(id));
+    const stream = await client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId: id }, header: { "Last-Event-ID": "1" } }, parseAs: "stream" });
+
+    expect(started.response.status).toBe(201);
+    expect([during.response.status, next.response.status, ended.response.status, after.response.status]).toEqual([409, 200, 200, 409]);
+    expect(listed.data?.items.map((chat) => chat.id)).toEqual([id]);
+    expect(ended.data).toMatchObject({ status: "ended", cost: { amount: 0, currency: "USD" } });
+    expect(transcript.data?.items.map((entry) => entry.type)).toEqual([
+      "task-started",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "message-received",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "task-ended",
+    ]);
+    expect((await events(stream.data)).map((event) => event.id ?? event.event)).toEqual(["2", "3", "4", "5", "6", "7", "8", "end"]);
+  });
+
+  it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
+    const { client, of } = chatting();
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+
+    expect((await client.POST("/chats", { body: { agent: "fake-assistant", text: "" } })).response.status).toBe(400);
+    expect((await client.POST("/chats", { body: { agent: "fake-developer", text: "Push it" } })).response.status).toBe(400);
+    expect((await client.POST("/chats/{chatId}/messages", { ...of(chat!.id), body: { text: "" } })).response.status).toBe(400);
+    const refusedId = await client.GET("/chats/{chatId}/transcript/stream", { ...of(chat!.id), headers: { "last-event-id": "latest" } });
+    expect(refusedId.response.status).toBe(400);
+    expect((await client.GET("/chats/{chatId}", of("missing"))).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/messages", { ...of("missing"), body: { text: "Hi" } })).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/end", of("missing"))).response.status).toBe(404);
+    expect((await client.GET("/chats/{chatId}/transcript", of("missing"))).response.status).toBe(404);
+    expect((await client.GET("/chats/{chatId}/transcript/stream", { ...of("missing"), parseAs: "stream" })).response.status).toBe(404);
+  });
+
+  it("answers 503 when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const of = { params: { path: { chatId: "c-1" } } };
+
+    const answers = await Promise.all([
+      client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } }),
+      client.GET("/chats"),
+      client.GET("/chats/{chatId}", of),
+      client.POST("/chats/{chatId}/messages", { ...of, body: { text: "Hi" } }),
+      client.POST("/chats/{chatId}/end", of),
+      client.GET("/chats/{chatId}/transcript", of),
+      client.GET("/chats/{chatId}/transcript/stream", { ...of, parseAs: "stream" }),
+    ]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([503, 503, 503, 503, 503, 503, 503]);
+  });
+});
+
 describe("agent runtime, called directly", () => {
+  it("refuses a chat message without text", async () => {
+    const { agentRuntime } = worker();
+    const started = await agentRuntime(new Request("http://worker.test/chats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "fake-assistant", text: "Hello" }) }));
+    const { id } = (await started.json()) as { id: string };
+
+    const refused = await agentRuntime(new Request(`http://worker.test/chats/${id}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "" }) }));
+
+    expect(refused.status).toBe(400);
+  });
+
   it("refuses a task it does not know", async () => {
     const response = await worker().agentRuntime(new Request("http://worker.test/tasks/unknown/transcript"));
 
@@ -265,8 +369,11 @@ describe("control plane: the API token", () => {
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
     const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided].map(({ response }) => response.status)).toEqual([401, 401, 401]);
+    expect([started, merged, decided, chatted, sent, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
@@ -275,8 +382,11 @@ describe("control plane: the API token", () => {
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
     const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided].map(({ response }) => response.status)).toEqual([403, 403, 403]);
+    expect([started, merged, decided, chatted, sent, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {
@@ -291,10 +401,14 @@ describe("control plane: the API token", () => {
       client.GET("/triggers"),
       client.GET("/notifications"),
       client.GET("/approval-requests"),
+      client.GET("/chats"),
+      client.GET("/chats/{chatId}", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId: "c-1" } } }),
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {

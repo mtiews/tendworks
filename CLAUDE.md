@@ -66,7 +66,7 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 ## Conventions
 
 - **Language: always English** for code, comments, commit messages, docs, ADRs, issues and PRs — even when the conversation with the user is in German.
-- Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`
+- Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`; chat events carry no `runid`/`stepid` and name the chat in `subject` (`chats/<id>`)
 - TDD where it pays off: interpreter, policies, adapters, action journal — not dogmatically everywhere
 - Pin external versions (harnesses, skills); updates via PR
 - Dev skills: Matt Pocock's skills (`grill-me`, `tdd`); setup info lives in `docs/agents/`

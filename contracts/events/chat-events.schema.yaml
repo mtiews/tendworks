@@ -1,0 +1,57 @@
+$id: https://tendworks.dev/schemas/v1/events/chat-events.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: ChatEvents
+description: >-
+  Lifecycle events of chats (ADR 0015), emitted by the agent runtime. Each `$defs` entry
+  is the complete schema of one event type: the envelope from cloudevent.schema.yaml
+  narrowed to its `type` and `data`. A chat belongs to no run: its events carry no
+  `runid` and `stepid` and name the chat in `subject` (`chats/<chatId>`). They carry no
+  output of the agent; that is in the chat's transcript (ADR 0017).
+$defs:
+  chatStarted:
+    title: ChatStartedEvent
+    description: A human started a chat with an agent profile.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, subject, data]
+    properties:
+      type:
+        const: dev.tendworks.chat.started
+      data:
+        $ref: '#/$defs/chatStartedData'
+  chatEnded:
+    title: ChatEndedEvent
+    description: >-
+      A chat ended: the human ended it (`ended`) or its agent session failed for good
+      (`failed`). Its sandbox and volumes are gone; its transcript stays.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, subject, data]
+    properties:
+      type:
+        const: dev.tendworks.chat.ended
+      data:
+        $ref: '#/$defs/chatEndedData'
+  chatStartedData:
+    title: ChatStartedEventData
+    type: object
+    additionalProperties: false
+    required: [agent]
+    properties:
+      agent:
+        type: string
+        description: Name of the agent profile the chat is held with.
+  chatEndedData:
+    title: ChatEndedEventData
+    type: object
+    additionalProperties: false
+    required: [agent, status]
+    properties:
+      agent:
+        type: string
+        description: Name of the agent profile the chat was held with.
+      status:
+        type: string
+        enum: [ended, failed]
