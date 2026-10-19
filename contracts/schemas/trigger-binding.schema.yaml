@@ -1,0 +1,149 @@
+$id: https://tendworks.dev/schemas/v1/trigger-binding.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: TriggerBinding
+description: >-
+  Binds a trigger to a workflow. A time trigger asks an issue tracker on a schedule for
+  the issues matching a filter and starts one run of `spec.workflow` per matching issue,
+  with the input built by `spec.input`. An issue starts at most one run per binding.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: TriggerBinding
+  metadata:
+    type: object
+    title: TriggerBindingMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+  spec:
+    title: TriggerBindingSpec
+    type: object
+    required: [schedule, source, workflow]
+    additionalProperties: false
+    properties:
+      schedule:
+        $ref: '#/$defs/schedule'
+      source:
+        $ref: '#/$defs/issueSource'
+      workflow:
+        type: string
+        description: Name (`document.name`) of the configured workflow each match starts.
+      input:
+        type: object
+        additionalProperties: true
+        description: >-
+          Workflow input. String leaves of the form `${ <jq> }` are evaluated against
+          `{ issue }`, the matched issue; everything else is copied. Defaults to
+          `{ issue: ${ .issue } }`.
+$defs:
+  schedule:
+    title: TriggerSchedule
+    description: When the trigger checks its source.
+    type: object
+    required: [every]
+    additionalProperties: false
+    properties:
+      every:
+        $ref: '#/$defs/duration'
+  duration:
+    title: Duration
+    description: >-
+      Serverless Workflow inline duration. Executions are aligned to multiples of it since
+      the Unix epoch, so every instance agrees on the next execution. At least one second.
+    type: object
+    minProperties: 1
+    additionalProperties: false
+    properties:
+      days:
+        type: integer
+        minimum: 0
+      hours:
+        type: integer
+        minimum: 0
+      minutes:
+        type: integer
+        minimum: 0
+      seconds:
+        type: integer
+        minimum: 0
+  issueSource:
+    title: IssueSource
+    description: The issue tracker to ask and which issues match.
+    type: object
+    required: [integration, issues]
+    additionalProperties: false
+    properties:
+      integration:
+        type: string
+        enum: [fake]
+        description: >-
+          Which issue tracker answers. `fake` serves the issues listed under `fake`, for
+          tests and demos; real trackers are added behind the same port.
+      issues:
+        $ref: '#/$defs/issueFilter'
+      fake:
+        $ref: '#/$defs/fakeIssueTracker'
+  issueFilter:
+    title: IssueFilter
+    description: Which issues match. All conditions must hold.
+    type: object
+    required: [repository]
+    additionalProperties: false
+    properties:
+      repository:
+        type: string
+        pattern: ^[^/\s]+/[^/\s]+$
+        description: Repository as `<owner>/<name>`.
+      labels:
+        type: array
+        items:
+          type: string
+          minLength: 1
+        description: The issue carries every one of these labels. Defaults to none.
+      state:
+        type: string
+        enum: [open, closed, all]
+        description: Defaults to `open`.
+  fakeIssueTracker:
+    title: FakeIssueTracker
+    description: Issues the fake issue tracker serves.
+    type: object
+    additionalProperties: false
+    properties:
+      issues:
+        type: array
+        items:
+          $ref: '#/$defs/issue'
+  issue:
+    title: Issue
+    description: An issue as an issue tracker reports it.
+    type: object
+    required: [repository, number, title, state, labels, url]
+    additionalProperties: false
+    properties:
+      repository:
+        type: string
+        description: Repository as `<owner>/<name>`.
+      number:
+        type: integer
+        minimum: 1
+      title:
+        type: string
+      body:
+        type: string
+      state:
+        type: string
+        enum: [open, closed]
+      labels:
+        type: array
+        items:
+          type: string
+      url:
+        type: string

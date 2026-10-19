@@ -1,0 +1,49 @@
+$id: https://tendworks.dev/schemas/v1/events/trigger-events.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: TriggerEvents
+description: >-
+  Events the trigger gateway emits. Each `$defs` entry is the complete schema of one
+  event type: the envelope from cloudevent.schema.yaml narrowed to its `type` and `data`.
+$defs:
+  triggerFired:
+    title: TriggerFiredEvent
+    description: A trigger binding matched an issue and started a run; `runid` is that run.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, data]
+    properties:
+      type:
+        const: dev.tendworks.trigger.fired
+      data:
+        $ref: '#/$defs/triggerFiredData'
+  triggerFiredData:
+    title: TriggerFiredEventData
+    type: object
+    additionalProperties: false
+    required: [binding, workflow, issue]
+    properties:
+      binding:
+        type: string
+        description: Name of the trigger binding that fired.
+      workflow:
+        type: string
+        description: Workflow the run executes.
+      issue:
+        $ref: '#/$defs/issueReference'
+  issueReference:
+    title: IssueReference
+    description: The issue that matched.
+    type: object
+    additionalProperties: false
+    required: [repository, number, url]
+    properties:
+      repository:
+        type: string
+        description: Repository as `<owner>/<name>`.
+      number:
+        type: integer
+      title:
+        type: string
+      url:
+        type: string

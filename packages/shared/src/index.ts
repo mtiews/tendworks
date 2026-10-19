@@ -5,4 +5,7 @@ export type * as Health from "./generated/health.js";
 export type * as Orchestration from "./generated/orchestration.js";
 export type * as RunEvents from "./generated/run-events.js";
 export type * as Sandbox from "./generated/sandbox.js";
+export type * as TriggerBinding from "./generated/trigger-binding.js";
+export type * as TriggerEvents from "./generated/trigger-events.js";
+export type * as TriggerGateway from "./generated/trigger-gateway.js";
 export type * as Workflow from "./generated/serverless-workflow.js";

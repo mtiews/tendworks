@@ -109,6 +109,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /triggers:
+    get:
+      operationId: listTriggers
+      summary: List trigger bindings with their next scheduled execution
+      responses:
+        "200":
+          description: Triggers, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"
+        "503":
+          description: The trigger gateway, which owns the schedule, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
   schemas:
     StartRunRequest:
