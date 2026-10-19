@@ -1,5 +1,5 @@
 import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns } from "@tendworks/control-plane";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { runTend } from "./tend.js";
 
 /** Lines the operator types, one after another; the iterator waits for each until it is typed. */
@@ -36,8 +36,9 @@ function keyboard() {
 }
 
 /**
- * The control plane with a fake agent runtime whose agent answers each message in turn a
- * moment later, or never (`"never"`), so a turn runs until it is cancelled. `tend` runs
+ * The control plane with a fake agent runtime whose agent answers each message in turn once
+ * a client follows the chat's transcript, so the answer arrives live, or never (`"never"`),
+ * so a turn runs until it is cancelled. `tend` runs
  * one client against it, with its own keyboard and Ctrl+C.
  */
 function platform(answers: string[] | "never" = []) {
@@ -49,13 +50,26 @@ function platform(answers: string[] | "never" = []) {
     apiToken: "test-token",
     runs: createInMemoryRuns(),
   });
+  // Chats whose transcript a client follows, and the answers waiting for one to.
+  const followed = new Set<string>();
+  const unanswered = new Set<string>();
+  const answer = (id: string) => {
+    unanswered.delete(id);
+    agentRuntime.finishTurn(id, (answers as string[]).shift() ?? "…", { amount: 0.01, currency: "USD" });
+  };
   const fetch = async (request: Request) => {
     const { pathname } = new URL(request.url);
     const response = await api.fetch(request);
-    if (answers !== "never" && request.method === "POST" && response.status < 300 && (pathname === "/chats" || pathname.endsWith("/messages"))) {
+    if (answers === "never" || response.status >= 300) return response;
+    const stream = /^\/chats\/([^/]+)\/transcript\/stream$/.exec(pathname);
+    if (request.method === "GET" && stream) {
+      // The client follows the transcript from here on: an answer waiting for it arrives live.
+      followed.add(stream[1]!);
+      if (unanswered.has(stream[1]!)) answer(stream[1]!);
+    } else if (request.method === "POST" && (pathname === "/chats" || pathname.endsWith("/messages"))) {
       const { id } = (await response.clone().json()) as { id: string };
-      // The agent answers a moment later, while the client follows the transcript.
-      setTimeout(() => agentRuntime.finishTurn(id, answers.shift() ?? "…", { amount: 0.01, currency: "USD" }), 5);
+      if (followed.has(id)) answer(id);
+      else unanswered.add(id);
     }
     return response;
   };
@@ -98,10 +112,7 @@ async function existingChat(agentRuntime: ReturnType<typeof platform>["agentRunt
   return chat.id;
 }
 
-const until = async (condition: () => boolean) => {
-  for (let attempt = 0; attempt < 500 && !condition(); attempt++) await new Promise((resolve) => setTimeout(resolve, 2));
-  expect(condition()).toBe(true);
-};
+const until = (condition: () => boolean) => vi.waitFor(() => expect(condition()).toBe(true));
 
 describe("tend chat", () => {
   it("starts a chat with the first line, streams the agent's answers and sends each further line", async () => {

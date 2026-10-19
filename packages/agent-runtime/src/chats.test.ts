@@ -196,12 +196,14 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     await waiting(runtime, id);
     await vi.waitFor(() => expect(idle.waiting).toHaveLength(2));
 
-    // The idle time of the first wait passes, the second has just begun.
+    // The idle time of the first wait passes, the second has just begun; the next message
+    // finds the sandbox still there.
     idle.waiting.shift()!.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.sendChatMessage(id, say("Three"));
 
-    expect(sandboxes.sandboxes.size).toBe(1);
+    expect(await waiting(runtime, id)).toMatchObject({ message: "I remember: One | Two | Three" });
     expect(sandboxes.created).toHaveLength(1);
+    expect(sandboxes.destroyed).toEqual([]);
   });
 
   it("continues a turn a restart interrupted in the same agent session in a new sandbox; a follower misses no entry", async () => {
