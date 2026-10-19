@@ -75,7 +75,7 @@ services:
       # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
       # merge gate merges pull requests on github.com with it. Never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
-      # API token for operations that change state (ADR XXXX (interim-bearer-token-on-the-control-plane-api)).
+      # API token for operations that change state (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
       # The default is for the laptop profile only: set your own in deploy/.env.
       TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
     volumes:

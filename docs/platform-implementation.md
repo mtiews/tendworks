@@ -76,7 +76,7 @@ Packages under `packages/` map to the domains; apps under `apps/` are only bundl
 | `server` | control plane API, web UI, time trigger | yes |
 | `worker` | workflow interpreter, agent runtime with ACP, MCP server for the chat | yes |
 | `sandbox-claude-code` | sandbox image, started via Docker (isolation class `container`, `gvisor` opt-in) | yes |
-| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR XXXX (interim-bearer-token-on-the-control-plane-api)) |
+| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR 0014 (interim-bearer-token-on-the-control-plane-api)) |
 | tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend agent list, tend trigger list, tend notification list, tend approval list/approve; tend chat in milestone 1b |
 | Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers`, `/exec`, `/volumes` and `/networks` (writes allowed; networks for creating the sandbox network once), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
 | web UI | run list, run detail, notifications, chat | milestone 1b |

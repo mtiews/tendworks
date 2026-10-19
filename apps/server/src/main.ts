@@ -52,7 +52,7 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 // requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
-// Operations that change state need this token (ADR XXXX (interim-bearer-token-on-the-control-plane-api)).
+// Operations that change state need this token (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
 const apiToken = env("TEND_API_TOKEN");
 if (apiToken.length < 16) {
   console.error("TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`");
