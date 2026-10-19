@@ -1,5 +1,6 @@
 import type { A2A } from "@tendworks/shared";
 import type pg from "pg";
+import type { HarnessSession } from "../harness.js";
 import type { StoredTask, TaskStore } from "../task-store.js";
 
 // The agent runtime owns the schema `agent_runtime`; no other domain reads these tables.
@@ -13,6 +14,8 @@ create table if not exists agent_runtime.tasks (
   task        jsonb not null,
   updated_at  timestamptz not null default now()
 );
+-- The harness session (e.g. the ACP session id), to resume it after a restart.
+alter table agent_runtime.tasks add column if not exists session jsonb;
 `;
 
 /** Creates the agent runtime's tables if they do not exist yet. */
@@ -37,6 +40,7 @@ interface Row {
   agent: string;
   started_at: Date;
   task: A2A.Task;
+  session: HarnessSession | null;
 }
 
 const toStored = (row: Row): StoredTask => ({
@@ -44,6 +48,7 @@ const toStored = (row: Row): StoredTask => ({
   agent: row.agent,
   startedAt: row.started_at.toISOString(),
   task: row.task,
+  ...(row.session === null ? {} : { session: row.session }),
 });
 
 /** Keeps tasks in Postgres, so they survive a restart of the agent runtime. */
@@ -55,7 +60,7 @@ export function createPostgresTaskStore({ pool }: PostgresTaskStoreOptions): Tas
         `insert into agent_runtime.tasks (message_id, task_id, agent, started_at, task)
          values ($1, $2, $3, $4, $5)
          on conflict (message_id) do update set message_id = excluded.message_id
-         returning message_id, agent, started_at, task`,
+         returning message_id, agent, started_at, task, session`,
         [candidate.messageId, candidate.task.id, candidate.agent, candidate.startedAt, JSON.stringify(candidate.task)],
       );
       return toStored(rows[0]!);
@@ -70,6 +75,13 @@ export function createPostgresTaskStore({ pool }: PostgresTaskStoreOptions): Tas
     async get(taskId) {
       const { rows } = await pool.query<Pick<Row, "task">>("select task from agent_runtime.tasks where task_id = $1", [taskId]);
       return rows[0]?.task;
+    },
+    async saveSession(taskId, session) {
+      const { rowCount } = await pool.query("update agent_runtime.tasks set session = $2, updated_at = now() where task_id = $1", [
+        taskId,
+        JSON.stringify(session),
+      ]);
+      if (rowCount === 0) throw new Error(`no such task: ${taskId}`);
     },
   };
 }

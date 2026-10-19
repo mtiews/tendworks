@@ -36,8 +36,9 @@ services:
       retries: 30
 
   # The only way to the Docker API (ADR 0001). Only what the sandbox adapter needs is open:
-  # /_ping, /version, /containers/** (create, start, archive, delete) and /exec/**,
-  # with POST enabling every write method on those. Images are not reachable, so
+  # /_ping, /version, /containers/** (create, start, archive, delete), /exec/** and
+  # /volumes/** (deleting the volumes of a finished agent session), with POST enabling
+  # every write method on those. Images are not reachable, so
   # sandbox images must already be on the host. Every other section is closed,
   # including the events stream the proxy opens by default.
   # It sits on its own internal network that only the worker joins.
@@ -55,6 +56,7 @@ services:
       VERSION: 1
       CONTAINERS: 1
       EXEC: 1
+      VOLUMES: 1
       POST: 1
       EVENTS: 0
     networks:

@@ -14,7 +14,9 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 ENV PATH=/opt/harness/node_modules/.bin:$PATH
 
 # Fixed paths the agent runtime relies on: the workspace, and /session for the harness's
-# home and config directory (HOME and CLAUDE_CONFIG_DIR are set per session).
+# home and config directory (HOME and CLAUDE_CONFIG_DIR are set per session). Both are
+# mounted as volumes of the agent session; an empty volume takes over the content and
+# ownership of these directories, so they must stay owned by the sandbox user.
 RUN mkdir -p /workspace /session/home /session/claude && chown -R 1000:1000 /workspace /session
 
 USER 1000:1000

@@ -4,6 +4,7 @@ type Schemas = Sandbox.components["schemas"];
 
 export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type ExecRequest = Schemas["ExecRequest"];
+export type VolumeMount = Schemas["VolumeMount"];
 
 /** A process in a sandbox with its standard streams open. */
 export interface SandboxProcess {
@@ -19,9 +20,12 @@ export interface SandboxProcess {
  * error `code`, e.g. `file-not-found`.
  */
 export interface Sandboxes {
-  create(template: SandboxTemplate): Promise<{ id: string }>;
+  /** Volumes outlive the sandbox, so a later sandbox mounting them carries on with their files. */
+  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[] }): Promise<{ id: string }>;
   attach(sandboxId: string, request: ExecRequest): Promise<SandboxProcess>;
   readFile(sandboxId: string, path: string): Promise<Uint8Array>;
   writeFile(sandboxId: string, path: string, content: Uint8Array): Promise<void>;
+  /** Destroys the sandbox, but not its volumes. */
   destroy(sandboxId: string): Promise<void>;
+  deleteVolume(volume: string): Promise<void>;
 }

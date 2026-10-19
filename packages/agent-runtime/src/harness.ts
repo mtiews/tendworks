@@ -9,7 +9,16 @@ export interface HarnessTask {
   message: A2A.Message;
   /** How long agents already worked on the task before an interruption (0 for a new task). */
   elapsedMs?: number;
+  /** What the harness kept about the task's agent session before an interruption; absent for a new task. */
+  session?: HarnessSession;
 }
+
+/**
+ * What a harness keeps about its agent session to resume it after an interruption,
+ * e.g. the ACP session id and the sandbox it ran in. The agent runtime stores it with
+ * the task without looking inside.
+ */
+export type HarnessSession = Record<string, string>;
 
 export interface Cost {
   amount: number;
@@ -33,6 +42,8 @@ export interface HarnessObserver {
   record(entry: TranscriptEntry): void;
   /** The agent's progress so far, shown as the working task's status message. */
   progress(text: string): void;
+  /** Keeps the agent session with the task, durably once the promise resolves; replaces what was kept before. */
+  saveSession(session: HarnessSession): Promise<void>;
 }
 
 /**

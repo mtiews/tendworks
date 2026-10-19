@@ -6,6 +6,7 @@ export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type IsolationClass = Schemas["IsolationClass"];
 export type Sandbox = Schemas["Sandbox"];
 export type ExecRequest = Schemas["ExecRequest"];
+export type VolumeMount = Schemas["VolumeMount"];
 export type ExecResult = Schemas["ExecResult"];
 export type SandboxErrorCode = Schemas["Error"]["code"];
 
@@ -25,8 +26,11 @@ export interface AttachedProcess {
  * (Docker, a fake, later OpenSandbox or agent-sandbox) implements it.
  */
 export interface SandboxApi {
-  /** Creates and starts a sandbox; it runs until it is destroyed. */
-  create(template: SandboxTemplate): Promise<Sandbox>;
+  /**
+   * Creates and starts a sandbox; it runs until it is destroyed. Volumes are created
+   * on first use and outlive the sandbox until {@link SandboxApi.deleteVolume}.
+   */
+  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[] }): Promise<Sandbox>;
   /** Runs a command as the sandbox user and waits for it to finish. */
   exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
   /**
@@ -38,8 +42,10 @@ export interface SandboxApi {
   readFile(sandboxId: string, path: string): Promise<Uint8Array>;
   /** Writes a file owned by the sandbox user, creating missing parent directories. */
   writeFile(sandboxId: string, path: string, content: Uint8Array): Promise<void>;
-  /** Destroys the sandbox and everything in it. Idempotent. */
+  /** Destroys the sandbox and everything in it except its volumes. Idempotent. */
   destroy(sandboxId: string): Promise<void>;
+  /** Deletes a volume and its files; fails with `volume-in-use` while a sandbox mounts it. Idempotent. */
+  deleteVolume(volume: string): Promise<void>;
 }
 
 export class SandboxError extends Error {
@@ -69,6 +75,26 @@ export function sandboxUser(template: SandboxTemplate): string {
   if (!match) throw new SandboxError("invalid-request", `sandbox user must be a numeric non-root uid[:gid], got ${JSON.stringify(user)}`);
   return `${match[1]}:${match[2] ?? match[1]}`;
 }
+
+const volumeNamePattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+
+export function assertVolumeName(volume: string): void {
+  if (!volumeNamePattern.test(volume)) throw new SandboxError("invalid-request", `not a volume name: ${JSON.stringify(volume)}`);
+}
+
+/** Checks the volumes of a new sandbox: valid names, absolute paths, each path once. */
+export function assertVolumeMounts(volumes: VolumeMount[]): void {
+  for (const { volume, path } of volumes) {
+    assertVolumeName(volume);
+    assertAbsolutePath(path);
+    if (mountPath(path) === "/") throw new SandboxError("invalid-request", "a volume cannot be mounted on /");
+  }
+  const paths = volumes.map(({ path }) => mountPath(path));
+  if (new Set(paths).size !== paths.length) throw new SandboxError("invalid-request", "two volumes are mounted on the same path");
+}
+
+/** A mount path without trailing slashes. */
+export const mountPath = (path: string) => path.replace(/\/+$/, "") || "/";
 
 export function assertAbsolutePath(path: string): void {
   if (!path.startsWith("/")) throw new SandboxError("invalid-request", `path must be absolute: ${path}`);

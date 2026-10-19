@@ -48,6 +48,8 @@ beforeAll(async () => {
 afterAll(async () => {
   const leftovers = await docker("ps", "-aq", "--filter", `label=${runLabel}`);
   if (leftovers) await docker("rm", "-f", "-v", ...leftovers.split(/\s+/));
+  const volumes = await docker("volume", "ls", "-q", "--filter", `label=${runLabel}`);
+  if (volumes) await docker("volume", "rm", "-f", ...volumes.split(/\s+/));
 });
 
 const createApi = () => createDockerSandboxApi({ url: proxyUrl, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
@@ -129,7 +131,7 @@ describe.concurrent("Docker adapter", () => {
 });
 
 describe("socket proxy", () => {
-  it.each(["/images/json", "/info", "/events", "/networks", "/volumes", "/system/df"])("refuses %s, which the adapter does not need", async (path) => {
+  it.each(["/images/json", "/info", "/events", "/networks", "/system/df"])("refuses %s, which the adapter does not need", async (path) => {
     const response = await fetch(new URL(path, proxyUrl), { signal: AbortSignal.timeout(2_000) });
     await response.body?.cancel();
 

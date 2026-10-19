@@ -12,4 +12,5 @@ export {
   type SandboxApi,
   type SandboxErrorCode,
   type SandboxTemplate,
+  type VolumeMount,
 } from "./sandbox-api.js";

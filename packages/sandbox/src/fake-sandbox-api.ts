@@ -1,7 +1,10 @@
 import {
   assertAbsolutePath,
   assertSandboxId,
+  assertVolumeMounts,
+  assertVolumeName,
   defaultIsolationClass,
+  mountPath,
   sandboxUser,
   newSandboxId,
   SandboxError,
@@ -12,10 +15,23 @@ import {
   type SandboxApi,
 } from "./sandbox-api.js";
 
+type Files = Map<string, Uint8Array>;
+
 interface FakeSandbox {
   sandbox: Sandbox;
   user: string;
-  files: Map<string, Uint8Array>;
+  /** Files outside volumes, by absolute path. */
+  files: Files;
+  /** Mounted volumes by mount path; their files by path relative to it. */
+  mounts: Map<string, Files>;
+}
+
+/** Where a file lives: in the sandbox itself or in a mounted volume, and under which key. */
+function locate(sandbox: FakeSandbox, path: string): { files: Files; key: string } {
+  for (const [mount, files] of sandbox.mounts) {
+    if (path.startsWith(`${mount}/`)) return { files, key: path.slice(mount.length + 1) };
+  }
+  return { files: sandbox.files, key: path };
 }
 
 /**
@@ -23,10 +39,11 @@ interface FakeSandbox {
  * Docker. Nothing is executed: `exec` understands a handful of busybox
  * commands (echo, cat, id -u, pwd, printenv) and answers 127 for anything else.
  * `attach` runs the same commands; `cat` without arguments echoes its input
- * until the input is closed.
+ * until the input is closed. Volumes are kept in memory beyond their sandboxes.
  */
 export function createFakeSandboxApi(): SandboxApi {
   const sandboxes = new Map<string, FakeSandbox>();
+  const volumes = new Map<string, Files>();
 
   const find = (sandboxId: string): FakeSandbox => {
     assertSandboxId(sandboxId);
@@ -36,7 +53,9 @@ export function createFakeSandboxApi(): SandboxApi {
   };
 
   return {
-    async create(template) {
+    async create(template, { volumes: mounts = [] } = {}) {
+      assertVolumeMounts(mounts);
+      const user = sandboxUser(template);
       const sandbox: Sandbox = {
         id: newSandboxId(),
         template: template.metadata.name,
@@ -44,7 +63,12 @@ export function createFakeSandboxApi(): SandboxApi {
         state: "running",
         createdAt: new Date().toISOString(),
       };
-      sandboxes.set(sandbox.id, { sandbox, user: sandboxUser(template), files: new Map() });
+      const mounted = new Map<string, Files>();
+      for (const { volume, path } of mounts) {
+        if (!volumes.has(volume)) volumes.set(volume, new Map());
+        mounted.set(mountPath(path), volumes.get(volume)!);
+      }
+      sandboxes.set(sandbox.id, { sandbox, user, files: new Map(), mounts: mounted });
       return sandbox;
     },
     async exec(sandboxId, request) {
@@ -57,25 +81,39 @@ export function createFakeSandboxApi(): SandboxApi {
       return finished(run(sandbox, request));
     },
     async readFile(sandboxId, path) {
-      const { files } = find(sandboxId);
+      const sandbox = find(sandboxId);
       assertAbsolutePath(path);
-      const content = files.get(path);
+      const { files, key } = locate(sandbox, path);
+      const content = files.get(key);
       if (!content) throw new SandboxError("file-not-found", `no file ${path} in sandbox ${sandboxId}`);
       return content.slice();
     },
     async writeFile(sandboxId, path, content) {
-      const { files } = find(sandboxId);
+      const sandbox = find(sandboxId);
       assertAbsolutePath(path);
-      files.set(path, content.slice());
+      const { files, key } = locate(sandbox, path);
+      files.set(key, content.slice());
     },
     async destroy(sandboxId) {
       sandboxes.delete(sandboxId);
+    },
+    async deleteVolume(volume) {
+      assertVolumeName(volume);
+      const files = volumes.get(volume);
+      if (files && [...sandboxes.values()].some(({ mounts }) => [...mounts.values()].includes(files))) {
+        throw new SandboxError("volume-in-use", `volume ${volume} is mounted by a sandbox`);
+      }
+      volumes.delete(volume);
     },
   };
 }
 
 function run(sandbox: FakeSandbox, { command, workingDirectory = "/", env = {} }: ExecRequest): ExecResult {
   const ok = (stdout: string): ExecResult => ({ exitCode: 0, stdout, stderr: "" });
+  const read = (path: string) => {
+    const { files, key } = locate(sandbox, path);
+    return files.get(key);
+  };
   const [program, ...args] = command;
   switch (program) {
     case "echo":
@@ -89,11 +127,11 @@ function run(sandbox: FakeSandbox, { command, workingDirectory = "/", env = {} }
       return value === undefined ? { exitCode: 1, stdout: "", stderr: "" } : ok(`${value}\n`);
     }
     case "cat": {
-      const missing = args.filter((path) => !sandbox.files.has(path));
+      const missing = args.filter((path) => read(path) === undefined);
       if (missing.length > 0) {
         return { exitCode: 1, stdout: "", stderr: missing.map((path) => `cat: can't open '${path}': No such file or directory\n`).join("") };
       }
-      return ok(Buffer.concat(args.map((path) => sandbox.files.get(path)!)).toString("utf8"));
+      return ok(Buffer.concat(args.map((path) => read(path)!)).toString("utf8"));
     }
     default:
       return { exitCode: 127, stdout: "", stderr: `${program}: not found\n` };
