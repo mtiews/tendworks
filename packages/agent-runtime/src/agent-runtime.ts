@@ -266,6 +266,17 @@ export function createAgentRuntime({
     return toChat(chat.task, chat.facts);
   }
 
+  /**
+   * The profile of a chat; for one removed from the configuration since the chat started,
+   * a stand-in naming only the harness, enough to end the chat's session but never to run a
+   * turn. Undefined when the harness of a removed profile is not known.
+   */
+  function chatProfile(facts: ChatFacts): LoadedAgentProfile | undefined {
+    const profile = byName.get(facts.agent);
+    if (profile || facts.harness === undefined) return profile;
+    return { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: facts.agent }, spec: { harness: facts.harness as HarnessName } };
+  }
+
   /** A chat's task with its profile, or undefined when the task is no chat. */
   async function findChat(chatId: string): Promise<{ task: A2A.Task; facts: ChatFacts } | undefined> {
     const task = chats.get(chatId)?.task ?? (await store.get(chatId));
@@ -402,7 +413,7 @@ export function createAgentRuntime({
 
       const id = crypto.randomUUID();
       const startedAt = now().toISOString();
-      const facts: ChatFacts = { agent, startedAt, traceparent: newTraceparent() };
+      const facts: ChatFacts = { agent, harness: profile.spec.harness, startedAt, traceparent: newTraceparent() };
       const claimed = await store.claim(
         {
           messageId: message.messageId,
@@ -479,7 +490,8 @@ export function createAgentRuntime({
       let chat = chats.get(chatId);
       if (chat?.ending) return chat.ending;
       if (!chat) {
-        const profile = byName.get(found.facts.agent);
+        // Also a chat whose profile is gone: its session is ended from what was kept of it.
+        const profile = chatProfile(found.facts);
         if (!profile) throw new AgentNotFoundError(found.facts.agent);
         chat = openChat(profile, found.task, found.facts, (await store.find(chatId))?.session);
       }
@@ -509,9 +521,16 @@ export function createAgentRuntime({
         if (chats.has(listed.id) || TERMINAL.has(listed.status.state)) continue;
         const stored = await store.find(listed.id);
         const facts = stored && chatFacts(stored.task);
-        const profile = facts && byName.get(facts.agent);
-        // A chat whose profile is gone from the configuration stays as it is; it cannot go on.
-        if (!stored || !facts || !profile || !available[profile.spec.harness]?.open) continue;
+        if (!stored || !facts) continue;
+        const profile = byName.get(facts.agent);
+        if (!profile) {
+          // The profile is gone from the configuration: the chat cannot go on, its session goes.
+          const removed = chatProfile(facts);
+          if (!removed || !available[removed.spec.harness]?.open) continue;
+          await finishChat(openChat(removed, stored.task, facts, stored.session), "TASK_STATE_FAILED", `agent profile ${facts.agent} is no longer configured; the chat cannot go on`);
+          continue;
+        }
+        if (!available[profile.spec.harness]?.open) continue;
         const chat = openChat(profile, stored.task, facts, stored.session);
         const interrupted = stored.task.status.state === "TASK_STATE_WORKING" && stored.task.history?.findLast((message) => message.role === "ROLE_USER");
         if (interrupted) {

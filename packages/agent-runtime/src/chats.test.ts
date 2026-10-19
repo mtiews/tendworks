@@ -56,7 +56,8 @@ function idleClock() {
 
 /**
  * An agent runtime on the scripted agent; `platform` shares the store, transcripts and
- * sandboxes of an earlier process, `cancelGraceMs` is how long a cancelled turn gets to stop.
+ * sandboxes of an earlier process, `cancelGraceMs` is how long a cancelled turn gets to stop,
+ * `profiles` the agent profiles of the configuration (assistant and developer by default).
  */
 function setup(
   script: AgentScript = { recall: true },
@@ -67,6 +68,7 @@ function setup(
     sandboxes?: ReturnType<typeof scriptedSandboxes>;
     api?: Sandboxes;
     cancelGraceMs?: number;
+    profiles?: AgentProfile.AgentProfile[];
   } = {},
 ) {
   const { store = createInMemoryTaskStore(), transcripts = createInMemoryTranscriptStore(), sandboxes = scriptedSandboxes(script, platform.exec), api = sandboxes.api } = platform;
@@ -77,7 +79,7 @@ function setup(
     templates: (name) => (name === scriptedTemplate.metadata.name ? scriptedTemplate : undefined),
     credential: { kind: "api-key", value: "test-key" },
   });
-  const runtime = createAgentRuntime({ profiles: [assistant, developer], harnesses: { "claude-code": harness }, store, transcripts, idle: idle.sleep });
+  const runtime = createAgentRuntime({ profiles: platform.profiles ?? [assistant, developer], harnesses: { "claude-code": harness }, store, transcripts, idle: idle.sleep });
   return { runtime, sandboxes, store, transcripts, idle };
 }
 
@@ -251,6 +253,43 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.volumes.size).toBe(2);
     await after.runtime.sendChatMessage(id, say("Still there?"));
     expect(await waiting(after.runtime, id)).toMatchObject({ message: "I remember: Hello | Still there?" });
+  });
+
+  /** A chat waiting for a message in a process that dies; the next process's configuration no longer has its profile. */
+  async function chatWhoseProfileWasRemoved() {
+    const sandboxes = scriptedSandboxes({ recall: true });
+    const worker = dyingWorker(sandboxes.api);
+    const before = setup({}, { sandboxes, api: worker.api });
+    const { id } = await before.runtime.startChat("assistant", say("Hello"));
+    await waiting(before.runtime, id);
+    worker.die();
+    const after = setup({}, { sandboxes, store: before.store, transcripts: before.transcripts, profiles: [developer] });
+    return { id, sandboxes, after };
+  }
+
+  it("ends a chat whose profile was removed from the configuration, and removes its sandbox and volumes", async () => {
+    const { id, sandboxes, after } = await chatWhoseProfileWasRemoved();
+
+    const ended = await after.runtime.endChat(id);
+
+    expect(ended).toMatchObject({ id, status: "ended" });
+    expect(sandboxes.sandboxes.size).toBe(0);
+    expect(sandboxes.volumes.size).toBe(0);
+    expect(await after.runtime.listSessions()).toEqual([]);
+  });
+
+  it("fails a chat whose profile was removed from the configuration when it takes up the chats after a restart, and removes its sandbox and volumes", async () => {
+    const { id, sandboxes, after } = await chatWhoseProfileWasRemoved();
+
+    await after.runtime.resumeChats();
+
+    const chat = await after.runtime.getChat(id);
+    expect(chat).toMatchObject({ status: "failed", message: "agent profile assistant is no longer configured; the chat cannot go on" });
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect(sandboxes.sandboxes.size).toBe(0);
+    expect(sandboxes.volumes.size).toBe(0);
+    expect(after.store.published.at(-1)).toMatchObject({ type: "dev.tendworks.chat.ended", data: { agent: "assistant", status: "failed" } });
+    expect(after.idle.waiting).toEqual([]);
   });
 
   it("refuses a message while a turn runs", async () => {
