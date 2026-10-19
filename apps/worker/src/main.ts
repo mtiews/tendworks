@@ -1,5 +1,11 @@
 import { serve } from "@hono/node-server";
-import { AgentProfileError, createAgentRuntime, loadAgentProfiles } from "@tendworks/agent-runtime";
+import {
+  AgentProfileError,
+  createAgentRuntime,
+  createPostgresTaskStore,
+  loadAgentProfiles,
+  migrateAgentRuntimeStore,
+} from "@tendworks/agent-runtime";
 import { createHealthApi } from "@tendworks/health";
 import {
   createExecutionEngineProbe,
@@ -31,9 +37,11 @@ try {
 const engineAddress = env("TEND_EXECUTION_ENGINE_ADDRESS");
 const pool = new pg.Pool({ connectionString: env("TEND_DATABASE_URL") });
 await migrateOrchestrationStore(pool);
+await migrateAgentRuntimeStore(pool);
 
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
-const agents = createAgentRuntime({ profiles });
+// Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
+const agents = createAgentRuntime({ profiles, store: createPostgresTaskStore({ pool }) });
 const store = createPostgresRunStore({ pool });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents }) });

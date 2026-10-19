@@ -13,6 +13,10 @@
   "dependencies": {
     "@tendworks/shared": "workspace:*",
     "ajv": "8.20.0",
+    "pg": "8.23.1",
     "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
   }
 }
