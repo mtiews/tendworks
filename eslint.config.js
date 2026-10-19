@@ -12,6 +12,8 @@ export default tseslint.config(
       "packages/shared/src/generated/**",
       "tests/architecture/fixtures/**",
       "images/**",
+      // Agent worktrees are full checkouts of other branches.
+      ".claude/**",
     ],
   },
   js.configs.recommended,
