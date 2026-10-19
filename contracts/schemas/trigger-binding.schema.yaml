@@ -82,14 +82,26 @@ $defs:
     properties:
       integration:
         type: string
-        enum: [fake]
+        enum: [fake, github]
         description: >-
           Which issue tracker answers. `fake` serves the issues listed under `fake`, for
-          tests and demos; real trackers are added behind the same port.
+          tests and demos; `github` asks the GitHub REST API with the settings under
+          `github`.
       issues:
         $ref: '#/$defs/issueFilter'
       fake:
         $ref: '#/$defs/fakeIssueTracker'
+      github:
+        $ref: '#/$defs/githubIssueTracker'
+    allOf:
+      - if:
+          properties:
+            integration:
+              const: github
+        then:
+          required: [github]
+          properties:
+            github: true
   issueFilter:
     title: IssueFilter
     description: Which issues match. All conditions must hold.
@@ -121,6 +133,39 @@ $defs:
         type: array
         items:
           $ref: '#/$defs/issue'
+  githubIssueTracker:
+    title: GithubIssueTracker
+    description: How the `github` issue tracker reaches the repository.
+    type: object
+    required: [token]
+    additionalProperties: false
+    examples:
+      - token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }
+    properties:
+      token:
+        $ref: '#/$defs/secretRef'
+        description: >-
+          Token that may read the repository's issues. Pull requests are never reported
+          as issues.
+  secretRef:
+    title: SecretRef
+    description: >-
+      Reference to a secret the platform holds, so the secret itself never appears in
+      configuration. In the laptop profile secrets are environment variables of the
+      platform, set from `deploy/.env`.
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^[A-Z_][A-Z0-9_]*$
+            description: Name of the secret, e.g. `TENDWORKS_PLATFORM_GITHUB_TOKEN`.
   issue:
     title: Issue
     description: An issue as an issue tracker reports it.
