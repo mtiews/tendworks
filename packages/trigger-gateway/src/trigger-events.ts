@@ -5,8 +5,8 @@ export type TriggerFiredEvent = TriggerEvents.TriggerFiredEvent;
 /**
  * Port through which the trigger gateway emits its events. `tx` is the transaction that
  * records the firing, so the firing and its event commit together (outbox). Publishing
- * an event whose id is already known is a no-op. The event bus later provides a
- * publisher of the same shape, wired in the server bundle.
+ * an event whose id is already known is a no-op. The server bundle passes the event
+ * bus, which has the same shape (ADR 0004).
  */
 export interface EventPublisher<Tx> {
   publish(tx: Tx, event: TriggerFiredEvent): Promise<void>;

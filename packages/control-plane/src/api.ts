@@ -1,6 +1,7 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { Configuration } from "./configuration.js";
+import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
 import type { TriggersPort } from "./triggers.js";
@@ -21,6 +22,8 @@ export interface ControlPlaneApiOptions {
   runs: RunsPort;
   /** The trigger gateway, which owns the schedule; without it no triggers are listed. */
   triggers?: TriggersPort;
+  /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
+  notifications?: NotificationsPort;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -31,6 +34,7 @@ export function createControlPlaneApi({
   configuration,
   runs,
   triggers = { list: async () => [] },
+  notifications,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   const app = new Hono();
   const problem = (status: 400 | 404 | 503, title: string, detail?: string): Response =>
@@ -73,6 +77,15 @@ export function createControlPlaneApi({
       return problem(503, "Trigger gateway unavailable", error instanceof Error ? error.message : String(error));
     }
     return c.json({ items } satisfies Schemas["triggerList"], 200);
+  });
+
+  app.get("/notifications", async (c) => {
+    if (!notifications) return problem(503, "Notifications unavailable", "no notification store is configured");
+    try {
+      return c.json({ items: await notifications.list() } satisfies Schemas["NotificationList"], 200);
+    } catch (error) {
+      return problem(503, "Notifications unavailable", error instanceof Error ? error.message : String(error));
+    }
   });
 
   app.onError((error) => {

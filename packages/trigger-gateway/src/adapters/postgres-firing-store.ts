@@ -42,8 +42,8 @@ export async function migrateTriggerGatewayStore(pool: pg.Pool): Promise<void> {
 }
 
 /**
- * Stores events in the trigger gateway's outbox table, in the transaction of the firing.
- * Delivery over the event bus follows; until then the outbox is the durable record.
+ * Stores events in the trigger gateway's own outbox table, in the transaction of the firing.
+ * Default publisher for tests; the server bundle passes the event bus instead (ADR 0004).
  */
 export function createPostgresOutbox(pool: pg.Pool): EventPublisher<SqlTransaction> & { events(): Promise<TriggerFiredEvent[]> } {
   return {

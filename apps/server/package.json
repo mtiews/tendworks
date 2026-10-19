@@ -10,6 +10,8 @@
   "dependencies": {
     "@hono/node-server": "2.1.3",
     "@tendworks/control-plane": "workspace:*",
+    "@tendworks/event-bus": "workspace:*",
+    "@tendworks/human-interaction": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",
     "pg": "8.23.1"
   },

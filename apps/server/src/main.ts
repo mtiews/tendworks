@@ -8,6 +8,13 @@ import {
   loadConfiguration,
   type Configuration,
 } from "@tendworks/control-plane";
+import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
+import {
+  createLoggingNotificationChannel,
+  createPostgresNotificationStore,
+  createRunOutcomeNotifier,
+  migrateHumanInteractionStore,
+} from "@tendworks/human-interaction";
 import {
   createControlPlaneRunStarter,
   createPostgresFiringStore,
@@ -37,7 +44,16 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 
 const databaseUrl = env("TEND_DATABASE_URL");
 const pool = new pg.Pool({ connectionString: databaseUrl });
+await migrateEventBus(pool);
+await migrateHumanInteractionStore(pool);
 await migrateTriggerGatewayStore(pool);
+
+// Human interaction: run outcomes from the event bus become notifications, recorded
+// before the notification channel (a log for now) delivers them.
+const notifications = createPostgresNotificationStore(pool);
+const notifier = createRunOutcomeNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
+const bus = createPostgresEventBus({ pool });
+bus.subscribe("human-interaction.run-outcomes", notifier.handle, { types: notifier.types });
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control
@@ -47,7 +63,8 @@ const inProcess = (target: () => { fetch(request: Request): Promise<Response> })
 const workerUrl = env("TEND_WORKER_URL");
 const triggerGateway = createTriggerGateway({
   bindings: configuration.triggerBindings,
-  store: createPostgresFiringStore({ pool }),
+  // trigger.fired goes onto the event bus in the transaction that records the firing.
+  store: createPostgresFiringStore({ pool, publisher: bus }),
   runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) }),
 });
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
@@ -56,6 +73,7 @@ const api = createControlPlaneApi({
   bundles: [{ name: "worker", baseUrl: workerUrl }],
   configuration,
   runs: createOrchestrationClient({ baseUrl: workerUrl }),
+  notifications,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
 });
 
@@ -67,6 +85,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, async () => {
     await triggerGateway.stop();
     server.close(async () => {
+      await bus.close();
       await pool.end();
       process.exit(0);
     });
