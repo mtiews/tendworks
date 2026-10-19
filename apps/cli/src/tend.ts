@@ -15,6 +15,8 @@ type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
 type AgentList = ControlPlane.components["schemas"]["AgentList"];
 type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
+type Chat = ControlPlane.components["schemas"]["chat"];
+type ChatList = ControlPlane.components["schemas"]["chatList"];
 
 /** What `tend run logs` prints: the transcript of each agent step, absent where none was found. */
 interface RunLogs {
@@ -34,6 +36,11 @@ export interface TendIo {
   sleep?: (ms: number) => Promise<void>;
   /** The lines the operator types, for interactive commands (`tend chat`); opened only when one runs. */
   lines?: () => AsyncIterableIterator<string>;
+  /**
+   * Hands Ctrl+C to an interactive command instead of ending the process, until the
+   * returned function is called; registered only while one runs.
+   */
+  interrupts?: (onInterrupt: () => void) => () => void;
 }
 
 /** How often `--follow` looks for new steps and for the end of the run. */
@@ -223,13 +230,78 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       });
   }
 
-  program
+  const chat = program
     .command("chat")
-    .description("chat with an agent profile that allows chats; /end ends the chat, an empty input (Ctrl+D) leaves it open")
+    .description(
+      "chat with an agent profile that allows chats; Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
+    )
     .argument("<profile>", "agent profile")
     .action(async (agent: string, _options: unknown, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
-      await chat({ agent, client, baseUrl, io });
+      await startChat({ agent, client, baseUrl, io });
+    });
+
+  /** A chat by id, or a clear error when there is none. */
+  const getChat = async (client: ControlPlaneClient, baseUrl: string, chatId: string): Promise<Chat> => {
+    const { data, error, response } = await client.GET("/chats/{chatId}", { params: { path: { chatId } } }).catch((cause: unknown) => {
+      throw new UnreachableError(baseUrl, cause);
+    });
+    if (response.status === 404) throw new Error(`chat ${chatId} not found`);
+    if (!data) throw new AnswerError(response, error);
+    return data;
+  };
+
+  chat
+    .command("list")
+    .description("list chats, the most recently started first, with profile, status, start, last activity and cost")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/chats").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatChatList));
+    });
+
+  chat
+    .command("get")
+    .description("show one chat")
+    .argument("<id>", "chat id")
+    .addOption(outputOption())
+    .action(async (chatId: string, options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      io.stdout(render(await getChat(client, baseUrl, chatId), options.output, formatChat));
+    });
+
+  chat
+    .command("attach")
+    .description("print the history of a chat and continue it live, from any client; Ctrl+C cancels a running turn and leaves while the agent waits")
+    .argument("<id>", "chat id")
+    .action(async (chatId: string, _options: unknown, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const found = await getChat(client, baseUrl, chatId);
+      const terminal = chatTerminal(io);
+      try {
+        io.stdout(`chat ${chatId} with ${found.agent} (${found.status}); type /end to end it\n`);
+        await converse({ chatId, client, baseUrl, io, terminal, sent: [] });
+      } finally {
+        await terminal.close();
+      }
+    });
+
+  chat
+    .command("end")
+    .description("end a chat for good; its transcript stays readable")
+    .argument("<id>", "chat id")
+    .action(async (chatId: string, _options: unknown, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } }).catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (response.status === 404) throw new Error(`chat ${chatId} not found`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(`chat ${chatId} ended\n`);
     });
 
   try {
@@ -304,6 +376,31 @@ function formatAgentList(list: AgentList): string {
     ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", ")]),
   ];
   return table(rows);
+}
+
+function formatChatList(list: ChatList): string {
+  const rows = [
+    ["ID", "AGENT", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
+    ...list.items.map((chat) => [chat.id, chat.agent, chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
+  ];
+  return table(rows);
+}
+
+function formatChat(chat: Chat): string {
+  const fields = [
+    ["CHAT", chat.id],
+    ["AGENT", chat.agent],
+    ["STATUS", chat.status],
+    ["STARTED", chat.startedAt],
+    ["LAST ACTIVITY", chat.lastActivityAt],
+    ...(chat.endedAt ? [["ENDED", chat.endedAt]] : []),
+    ...(chat.cost ? [["COST", formatCost(chat.cost)]] : []),
+    ...(chat.transcript ? [["TRANSCRIPT", chat.transcript]] : []),
+  ];
+  const width = Math.max(...fields.map(([label]) => label!.length), "MESSAGE".length) + 2;
+  // The agent's last answer, or why the chat failed; text over several lines continues under the first.
+  const message = chat.message ? `${"MESSAGE".padEnd(width)}${chat.message.replaceAll("\n", `\n${" ".repeat(width)}`)}\n` : "";
+  return `${table(fields.map(([label, value]) => [label!.padEnd(width - 2), value!]))}${message}`;
 }
 
 function formatTriggerList(list: TriggerList): string {
@@ -494,116 +591,279 @@ async function followRun({ runId, client, baseUrl, output, io }: { runId: string
 const END_CHAT = "/end";
 
 /**
- * `tend chat <profile>`: an interactive chat (ADR 0015). The first line starts the chat,
- * then the agent's output streams live (ADR 0017) until its turn ends (`input-required`)
- * and the next line goes to the agent. All state is on the platform: leaving (end of
- * input) keeps the chat open, `/end` ends it. A broken stream is resumed with
- * `Last-Event-ID`.
+ * What happens during an interactive chat, in order: the operator types a line (undefined
+ * at the end of input) or presses Ctrl+C; the transcript gains an entry, the chat ends,
+ * or following it failed.
  */
-async function chat({ agent, client, baseUrl, io }: { agent: string; client: ControlPlaneClient; baseUrl: string; io: TendIo }) {
-  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const unreachable = (cause: unknown): never => {
-    throw new UnreachableError(baseUrl, cause);
-  };
-  const lines = io.lines?.() ?? (async function* () {})();
-  /** The next line with text, or undefined when the operator left. */
-  const ask = async (): Promise<string | undefined> => {
-    for (;;) {
-      io.stdout("> ");
-      const next = await lines.next();
-      if (next.done) {
-        io.stdout("\n");
-        return undefined;
-      }
-      const text = next.value.trim();
-      if (text !== "") return text;
-    }
-  };
+type ChatEvent =
+  | { kind: "line"; text: string | undefined }
+  | { kind: "interrupt" }
+  | { kind: "entry"; entry: TranscriptEntry }
+  | { kind: "ended" }
+  | { kind: "failed"; error: unknown };
 
+/**
+ * The operator's side of an interactive chat: typed lines (read one at a time, only when
+ * asked for) and Ctrl+C, as events of one sequence that the chat's transcript joins, so
+ * neither blocks the other.
+ */
+function chatTerminal(io: TendIo) {
+  const events = queue<ChatEvent>();
+  const lines = io.lines?.() ?? (async function* () {})();
+  let reading = false;
+  const stopInterrupts = io.interrupts?.(() => events.push({ kind: "interrupt" })) ?? (() => {});
+  return {
+    events,
+    /** Reads the next line, unless a read is pending already. */
+    read() {
+      if (reading) return;
+      reading = true;
+      void lines.next().then(
+        (next) => {
+          reading = false;
+          events.push({ kind: "line", text: next.done ? undefined : next.value });
+        },
+        () => events.push({ kind: "line", text: undefined }),
+      );
+    },
+    async close() {
+      stopInterrupts();
+      await lines.return?.();
+    },
+  };
+}
+
+type ChatTerminal = ReturnType<typeof chatTerminal>;
+
+/** Events in the order they happen, taken one at a time. */
+function queue<T>() {
+  const queued: T[] = [];
+  const waiting: ((event: T) => void)[] = [];
+  return {
+    push(event: T) {
+      const taker = waiting.shift();
+      if (taker) taker(event);
+      else queued.push(event);
+    },
+    next(): Promise<T> {
+      return queued.length > 0 ? Promise.resolve(queued.shift()!) : new Promise((resolve) => waiting.push(resolve));
+    },
+  };
+}
+
+/**
+ * `tend chat <profile>`: an interactive chat (ADR 0015). The first line starts the chat,
+ * which then goes on as in {@link converse}.
+ */
+async function startChat({ agent, client, baseUrl, io }: { agent: string; client: ControlPlaneClient; baseUrl: string; io: TendIo }) {
+  const terminal = chatTerminal(io);
   try {
-    const first = await ask();
-    if (first === undefined) return;
-    const started = await client.POST("/chats", { body: { agent, text: first } }).catch(unreachable);
+    let first: string | undefined;
+    while (first === undefined) {
+      io.stdout("> ");
+      terminal.read();
+      const event = await terminal.events.next();
+      // Ctrl+C or the end of input before the first message: no chat.
+      if (event.kind !== "line" || event.text === undefined) {
+        io.stdout("\n");
+        return;
+      }
+      if (event.text.trim() !== "") first = event.text.trim();
+    }
+    const started = await client.POST("/chats", { body: { agent, text: first } }).catch((cause: unknown) => {
+      throw new UnreachableError(baseUrl, cause);
+    });
     if (!started.data) {
       if (started.response.status === 400 && started.error?.detail) throw new Error(started.error.detail);
       throw new AnswerError(started.response, started.error);
     }
-    const chatId = started.data.id;
-    const of = { params: { path: { chatId } } };
-    io.stdout(`chat ${chatId} with ${agent}; type /end to end it, Ctrl+D to leave it open\n`);
+    io.stdout(`chat ${started.data.id} with ${agent}; type /end to end it\n`);
+    await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first] });
+  } finally {
+    await terminal.close();
+  }
+}
 
-    /** The operator's next message, sent; "left" or "ended" when there is none. */
-    const answerTurn = async (): Promise<"sent" | "left" | "ended"> => {
-      for (;;) {
-        const text = await ask();
-        if (text === undefined) {
-          io.stdout(`left chat ${chatId}; it stays open\n`);
-          return "left";
-        }
-        if (text === END_CHAT) {
-          const ended = await client.POST("/chats/{chatId}/end", of).catch(unreachable);
-          if (!ended.data) throw new AnswerError(ended.response, ended.error);
-          io.stdout(`chat ${chatId} ended\n`);
-          return "ended";
-        }
-        const sent = await client.POST("/chats/{chatId}/messages", { ...of, body: { text } }).catch(unreachable);
-        if (sent.data) return "sent";
-        if (sent.response.status !== 409) throw new AnswerError(sent.response, sent.error);
-        io.stderr(`tend: ${sent.error?.detail ?? "the chat cannot take a message now"}\n`);
-        if (sent.error?.title === "Chat ended") return "ended";
-      }
-    };
+const textOf = (message: { parts: ({ text: string } | object)[] }) => message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join(" ");
 
-    const printer = entryPrinter(io.stdout, "table");
-    let last = -1;
-    for (let failures = 0; ; ) {
+/**
+ * An interactive chat from this client (ADR 0015): the history first, then the chat's
+ * transcript live (ADR 0017), whoever wrote to it; once the agent waits, the next line
+ * goes to the agent. All state is on the platform, so any number of clients can do this
+ * at once, and any of them can send the next message. Ctrl+C cancels a running turn;
+ * while the agent waits, Ctrl+C or the end of input leaves the chat open; `/end` ends
+ * it. A broken stream is resumed with `Last-Event-ID`.
+ */
+async function converse({
+  chatId,
+  client,
+  baseUrl,
+  io,
+  terminal,
+  sent,
+}: {
+  chatId: string;
+  client: ControlPlaneClient;
+  baseUrl: string;
+  io: TendIo;
+  terminal: ChatTerminal;
+  /** Messages this client sent whose echo in the transcript is not printed again, as they are on the screen already. */
+  sent: string[];
+}) {
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const unreachable = (cause: unknown): never => {
+    throw new UnreachableError(baseUrl, cause);
+  };
+  const of = { params: { path: { chatId } } };
+  const { events } = terminal;
+  const stop = new AbortController();
+
+  // A prompt waits on its line; whatever is printed next starts on a line of its own.
+  let prompted = false;
+  const write = (text: string) => {
+    if (prompted) io.stdout("\n");
+    prompted = false;
+    io.stdout(text);
+  };
+  const prompt = () => {
+    if (!prompted) io.stdout("> ");
+    prompted = true;
+    terminal.read();
+  };
+  const printer = entryPrinter(write, "table");
+
+  /** The transcript so far; the position of its last entry. */
+  const history = async (): Promise<number> => {
+    const { data, error, response } = await client.GET("/chats/{chatId}/transcript", of).catch(unreachable);
+    if (response.status === 404) throw new Error(`chat ${chatId} not found`);
+    if (!data) throw new AnswerError(response, error);
+    for (const entry of data.items) events.push({ kind: "entry", entry });
+    return data.items.at(-1)?.position ?? -1;
+  };
+
+  /** Follows the transcript live after `last`, as events, until the chat ends or this client leaves. */
+  const follow = async (last: number) => {
+    for (let failures = 0; !stop.signal.aborted; ) {
       let answer;
       try {
         answer = await client.GET("/chats/{chatId}/transcript/stream", {
           params: { path: { chatId }, header: last < 0 ? {} : { "Last-Event-ID": String(last) } },
           parseAs: "stream",
+          signal: stop.signal,
         });
       } catch (cause) {
+        if (stop.signal.aborted) return;
         if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
         await sleep(POLL_MS);
         continue;
       }
       if (!answer.response.ok || !answer.data) throw new AnswerError(answer.response, answer.error);
-      const events = readServerSentEvents(answer.data);
-      for (;;) {
-        let next;
-        try {
-          next = await events.next();
-        } catch {
-          break; // The connection broke; resumed below.
+      try {
+        for await (const event of readServerSentEvents(answer.data)) {
+          failures = 0;
+          if (event.event === "end") {
+            events.push({ kind: "ended" });
+            return;
+          }
+          if (event.event !== "entry") continue;
+          const entry = JSON.parse(event.data) as TranscriptEntry;
+          last = entry.position;
+          events.push({ kind: "entry", entry });
         }
-        if (next.done) break;
-        failures = 0;
-        if (next.value.event === "end") {
-          printer.endStep();
-          return;
-        }
-        if (next.value.event !== "entry") continue;
-        const entry = JSON.parse(next.value.data) as TranscriptEntry;
-        last = entry.position;
-        // The operator's own messages are on the screen already.
-        if (entry.type === "task-started" || entry.type === "message-received") continue;
-        if (entry.type !== "input-required") {
-          printer.entry(entry);
-          continue;
-        }
-        printer.endStep();
-        if (entry.cost) io.stdout(`(${formatCost(entry.cost)} so far)\n`);
-        if ((await answerTurn()) !== "sent") {
-          void events.return(undefined);
-          return;
-        }
+      } catch {
+        // The connection broke (or this client left); resumed below.
       }
+      if (stop.signal.aborted) return;
       if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
       await sleep(POLL_MS);
     }
+  };
+
+  /** Asks the agent to stop the running turn; the transcript shows when it did. */
+  const cancel = () =>
+    void client.POST("/chats/{chatId}/cancel", of).then(
+      ({ data, error, response }) => {
+        // A turn that ended meanwhile, or a chat another client ended, needs no cancel.
+        if (!data && response.status !== 409) events.push({ kind: "failed", error: new AnswerError(response, error) });
+      },
+      (cause: unknown) => events.push({ kind: "failed", error: new UnreachableError(baseUrl, cause) }),
+    );
+
+  try {
+    void history()
+      .then(follow)
+      .catch((error: unknown) => events.push({ kind: "failed", error }));
+    let waiting = false;
+    let cancelling = false;
+    for (;;) {
+      const event = await events.next();
+      switch (event.kind) {
+        case "failed":
+          throw event.error;
+        case "ended":
+          printer.endStep();
+          write(`chat ${chatId} has ended\n`);
+          return;
+        case "entry": {
+          const { entry } = event;
+          if (entry.type === "task-started" || entry.type === "message-received") {
+            waiting = false;
+            const own = sent.indexOf(textOf(entry.message));
+            if (own >= 0) sent.splice(own, 1);
+            else printer.entry(entry);
+          } else if (entry.type === "input-required") {
+            printer.endStep();
+            if (entry.cost) write(`(${formatCost(entry.cost)} so far)\n`);
+            waiting = true;
+            cancelling = false;
+            prompt();
+          } else {
+            printer.entry(entry);
+          }
+          break;
+        }
+        case "interrupt":
+          if (waiting || cancelling) {
+            // Ctrl+C while the agent waits, or a second one while a cancel is under way: leave.
+            prompted = true;
+            write(`left chat ${chatId}; it stays open\n`);
+            return;
+          }
+          cancelling = true;
+          write("cancelling the turn; Ctrl+C again leaves the chat open\n");
+          cancel();
+          break;
+        case "line": {
+          prompted = false;
+          if (event.text === undefined) {
+            io.stdout(`\nleft chat ${chatId}; it stays open\n`);
+            return;
+          }
+          const text = event.text.trim();
+          if (text === END_CHAT) {
+            const ended = await client.POST("/chats/{chatId}/end", of).catch(unreachable);
+            if (!ended.data) throw new AnswerError(ended.response, ended.error);
+            io.stdout(`chat ${chatId} ended\n`);
+            return;
+          }
+          if (text !== "") {
+            const answer = await client.POST("/chats/{chatId}/messages", { ...of, body: { text } }).catch(unreachable);
+            if (answer.data) {
+              sent.push(text);
+              waiting = false;
+            } else if (answer.response.status === 409) {
+              io.stderr(`tend: ${answer.error?.detail ?? "the chat cannot take a message now"}\n`);
+            } else {
+              throw new AnswerError(answer.response, answer.error);
+            }
+          }
+          if (waiting) prompt();
+          break;
+        }
+      }
+    }
   } finally {
-    await lines.return?.();
+    stop.abort();
   }
 }
 

@@ -243,6 +243,23 @@ describe("agent runtime API: chats", () => {
     expect(await after.json()).toMatchObject({ title: "Chat ended" });
   });
 
+  it("cancels a running turn and answers with the chat waiting for the next message; refuses it once the chat ended", async () => {
+    const { call } = setup();
+    const chat = (await (await call("POST", "/chats", { agent: "assistant", text: "Hello" })).json()) as Chat;
+
+    const cancelled = await call("POST", `/chats/${chat.id}/cancel`);
+    const next = await call("POST", `/chats/${chat.id}/messages`, { text: "Again" });
+    await call("POST", `/chats/${chat.id}/end`);
+    const afterEnd = await call("POST", `/chats/${chat.id}/cancel`);
+
+    expect(cancelled.status).toBe(200);
+    expect(await cancelled.json()).toMatchObject({ id: chat.id, status: "input-required", message: "the turn was cancelled" });
+    expect(next.status).toBe(200);
+    expect(afterEnd.status).toBe(409);
+    expect(await afterEnd.json()).toMatchObject({ title: "Chat ended" });
+    expect((await call("POST", "/chats/unknown/cancel")).status).toBe(404);
+  });
+
   it("lists and gets chats, and serves their transcripts by chat id", async () => {
     const { call, finishTurn } = setup();
     const chat = (await (await call("POST", "/chats", { agent: "assistant", text: "Hello" })).json()) as Chat;

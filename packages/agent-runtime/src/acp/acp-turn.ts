@@ -52,6 +52,13 @@ export interface AcpSession {
    * cost is what this turn added to the session's cumulative cost.
    */
   prompt(prompt: acp.ContentBlock[], options: { timeoutMs: number }): Promise<AcpTurn>;
+  /**
+   * Asks the agent to stop the running prompt turn (`session/cancel`); the turn then ends
+   * with stop reason `cancelled`. An agent that does not stop within the grace period
+   * loses its harness process: the turn ends cancelled and the session is closed.
+   * Nothing happens while no turn runs.
+   */
+  cancel(): Promise<void>;
   /** Ends the harness process cleanly. */
   close(): Promise<void>;
 }
@@ -203,6 +210,8 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
 
   timers.keepAlive = setInterval(() => void agent.request(KEEP_ALIVE, {}).catch(() => {}), keepAliveMs);
   const id = sessionId;
+  /** Ends the wait of the running prompt turn for its answer, once the agent was asked to cancel it. */
+  let cancelTurn: (() => void) | undefined;
   return {
     sessionId: id,
     resumed,
@@ -213,15 +222,24 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
       reply = "";
       const before = cost;
       let timeout: NodeJS.Timeout | undefined;
+      let grace: NodeJS.Timeout | undefined;
+      // A cancelled turn ends with the agent's answer to `session/cancel`, or after the grace period without it.
+      const unanswered = new Promise<"unanswered">((resolve) => (cancelTurn = () => (grace ??= setTimeout(() => resolve("unanswered"), cancelGraceMs))));
       try {
         const turn = agent.request(acp.methods.agent.session.prompt, { sessionId: id, prompt });
         turn.catch(() => {});
         const timedOut = new Promise<"timed-out">((resolve) => (timeout = setTimeout(() => resolve("timed-out"), timeoutMs)));
-        const ended = await Promise.race([turn, closed, timedOut]);
+        const ended = await Promise.race([turn, closed, timedOut, unanswered]);
         if (ended === "timed-out") {
           await agent.notify(acp.methods.agent.session.cancel, { sessionId: id }).catch(() => {});
           await Promise.race([turn.catch(() => {}), closed.catch(() => {}), sleep(cancelGraceMs)]);
           return failed(`the agent session timed out after ${Math.round(timeoutMs / 1000)} s and was cancelled`);
+        }
+        if (ended === "unanswered") {
+          // The agent did not stop; a session still busy with the old turn takes no further one.
+          observer.record(turnEnded("cancelled"));
+          await close();
+          return { outcome: "stopped", sessionId: id, stopReason: "cancelled", reply: reply.trim() };
         }
         observer.record(turnEnded(ended.stopReason));
         // The session's cost is cumulative; this turn's is what it added.
@@ -231,7 +249,15 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
         return await failure(error);
       } finally {
         clearTimeout(timeout);
+        clearTimeout(grace);
+        cancelTurn = undefined;
       }
+    },
+    async cancel() {
+      const cancelling = cancelTurn;
+      if (!cancelling) return;
+      await agent.notify(acp.methods.agent.session.cancel, { sessionId: id }).catch(() => {});
+      cancelling();
     },
     close,
   };

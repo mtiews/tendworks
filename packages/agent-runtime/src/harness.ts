@@ -68,6 +68,12 @@ export interface OpenSession {
    * whose sandbox is gone (e.g. after a restart) is resumed first.
    */
   turn(message: A2A.Message): Promise<HarnessTurn>;
+  /**
+   * Asks the agent to stop the running turn, which then ends in `TASK_STATE_INPUT_REQUIRED`
+   * with a `turn-ended` entry of reason `cancelled`; the session goes on. Resolves once
+   * the request is made, not once the turn ended. Nothing happens while no turn runs.
+   */
+  cancel(): Promise<void>;
   /** Ends the session for good, also during a turn: removes its sandbox and its volumes. */
   end(): Promise<void>;
 }

@@ -55,6 +55,12 @@ export interface AgentRuntimePort {
   getChat(chatId: string): Promise<Chat | undefined>;
   /** The next message of a chat; rejects with {@link ChatConflictError} during a turn or after the end; undefined for an unknown chat. */
   sendChatMessage(chatId: string, text: string): Promise<Chat | undefined>;
+  /**
+   * Cancels the running turn of a chat; resolves once the turn stopped, with the chat
+   * waiting for the next message. Rejects with {@link ChatConflictError} after the end;
+   * undefined for an unknown chat.
+   */
+  cancelChatTurn(chatId: string): Promise<Chat | undefined>;
   /** Ends a chat; undefined for an unknown chat. */
   endChat(chatId: string): Promise<Chat | undefined>;
 }
@@ -98,6 +104,13 @@ export function createAgentRuntimeClient(options: { baseUrl: string; fetch?: (re
     },
     async sendChatMessage(chatId, text) {
       const { data, error, response } = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text } });
+      if (data) return data;
+      if (response.status === 404) return undefined;
+      if (response.status === 409 && error) throw new ChatConflictError(error.title, error.detail ?? error.title);
+      throw failed(response, error);
+    },
+    async cancelChatTurn(chatId) {
+      const { data, error, response } = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId } } });
       if (data) return data;
       if (response.status === 404) return undefined;
       if (response.status === 409 && error) throw new ChatConflictError(error.title, error.detail ?? error.title);
@@ -182,6 +195,17 @@ export function createInMemoryAgentRuntime({ chatAgents = [] }: InMemoryAgentRun
       delete working.message;
       chats.set(chatId, working);
       return structuredClone(working);
+    },
+    /** A running turn stops at once, as the agent was asked to. */
+    async cancelChatTurn(chatId: string) {
+      const chat = chats.get(chatId);
+      if (!chat) return undefined;
+      if (chat.status === "ended" || chat.status === "failed") throw new ChatConflictError("Chat ended", `chat ${chatId} has ended; start a new chat`);
+      if (chat.status !== "working") return structuredClone(chat);
+      const reply = "the turn was cancelled";
+      record(chatId, { type: "turn-ended", reason: "cancelled" });
+      record(chatId, { type: "input-required", message: reply, ...(chat.cost ? { cost: chat.cost } : {}) });
+      return update(chatId, { status: "input-required", message: reply });
     },
     async endChat(chatId: string) {
       const chat = chats.get(chatId);

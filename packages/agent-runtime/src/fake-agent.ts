@@ -31,11 +31,18 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
       };
     },
     open({ profile }, observer) {
+      let cancel: (() => void) | undefined;
       return {
         async turn() {
           const { outcome = "completed", delaySeconds = 0, message: reply } = profile.spec.fake ?? {};
           observer.progress("working");
-          if (delaySeconds > 0) await sleep(delaySeconds * 1_000);
+          const cancelled = new Promise<"cancelled">((resolve) => (cancel = () => resolve("cancelled")));
+          const waited = await Promise.race([delaySeconds > 0 ? sleep(delaySeconds * 1_000) : undefined, cancelled]);
+          cancel = undefined;
+          if (waited === "cancelled") {
+            observer.record({ type: "turn-ended", reason: "cancelled" });
+            return { state: "TASK_STATE_INPUT_REQUIRED", message: "the turn was cancelled", cost: { amount: 0, currency: "USD" } };
+          }
           if (outcome === "failed") {
             const text = reply ?? "the fake agent failed as configured";
             observer.record({ type: "error", message: text });
@@ -45,6 +52,9 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
           observer.record({ type: "message-chunk", text });
           observer.record({ type: "turn-ended", reason: "completed" });
           return { state: "TASK_STATE_INPUT_REQUIRED", message: text, cost: { amount: 0, currency: "USD" } };
+        },
+        async cancel() {
+          cancel?.();
         },
         async end() {},
       };

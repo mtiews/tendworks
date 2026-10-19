@@ -33,10 +33,11 @@ const isChat = ajv.getSchema("https://tendworks.dev/schemas/v1/schemas/chat.sche
 const isTranscriptEntry = ajv.getSchema("https://tendworks.dev/schemas/v1/schemas/transcript-entry.schema.yaml")!;
 const isEvent = (type: "chatStarted" | "chatEnded") => ajv.getSchema(`https://tendworks.dev/schemas/v1/events/chat-events.schema.yaml#/$defs/${type}`)!;
 
-function setup(script: AgentScript = { recall: true }) {
+function setup(script: AgentScript = { recall: true }, options: { cancelGraceMs?: number } = {}) {
   const sandboxes = scriptedSandboxes(script);
   const store = createInMemoryTaskStore();
   const harness = createClaudeCodeHarness({
+    ...options,
     sandboxes: sandboxes.api,
     templates: (name) => (name === scriptedTemplate.metadata.name ? scriptedTemplate : undefined),
     credential: { kind: "api-key", value: "test-key" },
@@ -163,6 +164,58 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.sandboxes.size).toBe(0);
     expect(sandboxes.volumes.size).toBe(0);
     expect(await runtime.getChat(id)).toMatchObject({ status: "ended" });
+  });
+
+  it("cancels a running turn: the agent stops, the chat stays open in the same session and takes the next message", async () => {
+    const { runtime, sandboxes } = setup({ hang: "first", reply: ["Back again."] });
+    const { id } = await runtime.startChat("assistant", say("Work forever"));
+    await vi.waitFor(() => expect(sandboxes.observed.prompts).toHaveLength(1));
+
+    const cancelled = await runtime.cancelChatTurn(id);
+    await runtime.sendChatMessage(id, say("Something quick instead"));
+    const next = await waiting(runtime, id);
+
+    expect(sandboxes.observed.cancelled).toBe(true);
+    expect(cancelled).toMatchObject({ id, status: "input-required" });
+    expect(isChat(cancelled), JSON.stringify(isChat.errors)).toBe(true);
+    expect(next).toMatchObject({ status: "input-required", message: "Back again." });
+    expect(sandboxes.created).toHaveLength(1);
+    expect(sandboxes.observed.prompts.map((prompt) => prompt.sessionId)).toEqual(["session-1", "session-1"]);
+    const entries = (await runtime.transcript(id)) ?? [];
+    expect(entries.filter((entry) => ["turn-ended", "input-required", "message-received"].includes(entry.type))).toMatchObject([
+      { type: "turn-ended", reason: "cancelled" },
+      { type: "input-required" },
+      { type: "message-received" },
+      { type: "turn-ended", reason: "completed" },
+      { type: "input-required", message: "Back again." },
+    ]);
+  });
+
+  it("gives up an agent that does not stop when cancelled; the next turn resumes the session in a new sandbox", async () => {
+    const { runtime, sandboxes } = setup({ hang: "first", ignoreCancel: true, reply: ["Back again."] }, { cancelGraceMs: 10 });
+    const { id } = await runtime.startChat("assistant", say("Work forever"));
+    await vi.waitFor(() => expect(sandboxes.observed.prompts).toHaveLength(1));
+
+    const cancelled = await runtime.cancelChatTurn(id);
+    await runtime.sendChatMessage(id, say("Something quick instead"));
+    const next = await waiting(runtime, id);
+
+    expect(cancelled).toMatchObject({ status: "input-required" });
+    expect(next).toMatchObject({ status: "input-required", message: "Back again." });
+    expect(sandboxes.created).toHaveLength(2);
+    expect(sandboxes.destroyed).toEqual(["sandbox1"]);
+    expect(sandboxes.observed.resumed.map((resumed) => resumed.sessionId)).toEqual(["session-1"]);
+  });
+
+  it("changes nothing when cancelling while no turn runs, and refuses to cancel in an ended chat", async () => {
+    const { runtime } = setup({ reply: ["Hi."] });
+    const { id } = await runtime.startChat("assistant", say("Hello"));
+    const idle = await waiting(runtime, id);
+
+    expect(await runtime.cancelChatTurn(id)).toEqual(idle);
+    await runtime.endChat(id);
+    await expect(runtime.cancelChatTurn(id)).rejects.toBeInstanceOf(ChatEndedError);
+    expect(await runtime.cancelChatTurn("unknown")).toBeUndefined();
   });
 
   it("refuses a message to a chat that has ended, and ending it again changes nothing", async () => {

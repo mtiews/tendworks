@@ -468,6 +468,61 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/cancel:
+    post:
+      operationId: cancelChatTurn
+      security:
+        - apiToken: []
+      summary: Cancel the current turn of a chat
+      description: >-
+        Stops the agent's work on the running turn without ending the chat. Answers once
+        the turn has stopped, with the chat waiting for the next message
+        (`input-required`); the transcript shows the turn as cancelled. Cancelling while
+        no turn runs changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The chat, waiting for the next message.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The chat has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /chats/{chatId}/end:
     post:
       operationId: endChat
