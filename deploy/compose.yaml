@@ -106,6 +106,9 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      # Secrets agent profiles pass into sandboxes (spec.env); only TENDWORKS_AGENT_*
+      # variables resolve. The platform token never belongs here.
+      TENDWORKS_AGENT_GITHUB_TOKEN: ${TENDWORKS_AGENT_GITHUB_TOKEN:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
       # Transcripts of agent sessions, kept outside the sandboxes.
@@ -132,7 +135,7 @@ services:
   #   docker compose -f deploy/compose.yaml --profile sandbox-images build
   sandbox-claude-code:
     profiles: [sandbox-images]
-    image: tendworks/sandbox-claude-code:0.85.1
+    image: tendworks/sandbox-claude-code:0.85.1-1
     build:
       context: ../images/sandbox-claude-code
 

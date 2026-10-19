@@ -1,0 +1,41 @@
+# Automated path: the developer agent implements an issue and opens a pull request.
+# Input: { issue: { repository: <owner>/<name>, number, title, body, url } }, as a trigger
+# binding with the default input mapping passes it. The agent works on a checkout of the
+# issue's repository on a branch fixed by the run, so a retry updates the same branch and
+# pull request. The run's output holds the pull request the agent reported.
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: develop-issue
+  version: '0.1.0'
+  summary: Hands an issue to the developer agent, which opens a pull request for it.
+input:
+  from: '${ . + { branch: "tendworks/issue-\(.issue.number)-\($workflow.id[0:8])" } }'
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: >-
+                  ${ "Implement issue #\(.issue.number) of \(.issue.repository): \(.issue.title)\n\n"
+                  + (.issue.body // "(no description)")
+                  + "\n\nIssue: \(.issue.url)\n"
+                  + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.issue.number)." }
+            metadata:
+              dev.tendworks/workspace:
+                repository: '${ "https://github.com/\(.issue.repository).git" }'
+                branch: '${ .branch }'
+      output:
+        as: >-
+          ${ {
+            issue: $input.issue.number,
+            branch: $input.branch,
+            taskId: .id,
+            pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])
+          } }

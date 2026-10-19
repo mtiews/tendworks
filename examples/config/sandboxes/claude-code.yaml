@@ -5,7 +5,7 @@ kind: SandboxTemplate
 metadata:
   name: claude-code
 spec:
-  image: tendworks/sandbox-claude-code:0.85.1
+  image: tendworks/sandbox-claude-code:0.85.1-1
   isolationClass: container
   resources:
     cpus: 2

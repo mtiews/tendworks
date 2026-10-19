@@ -110,6 +110,20 @@ describe("tend run get", () => {
     expect(stdout).toMatch(/^\/do\/1\/review\s+file:\/\/\/t\/task-2.jsonl$/m);
   });
 
+  it("shows the run's output, e.g. the pull request the agent opened", async () => {
+    const withPullRequest: Run = {
+      ...completed,
+      id: "run-with-pull-request",
+      output: { pullRequest: "https://git.example/acme/app/pull/7", branch: "tendworks/run-1", checks: { passed: 3 } },
+    };
+    const { stdout } = await tend(["run", "get", withPullRequest.id], [withPullRequest]);
+
+    expect(stdout).toMatch(/^OUTPUT\s+VALUE$/m);
+    expect(stdout).toMatch(/^pullRequest\s+https:\/\/git\.example\/acme\/app\/pull\/7$/m);
+    expect(stdout).toMatch(/^branch\s+tendworks\/run-1$/m);
+    expect(stdout).toMatch(/^checks\s+\{"passed":3\}$/m);
+  });
+
   it("shows why a failed run failed", async () => {
     const { exitCode, stdout } = await tend(["run", "get", failed.id]);
 

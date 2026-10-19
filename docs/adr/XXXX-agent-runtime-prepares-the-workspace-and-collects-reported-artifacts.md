@@ -1,0 +1,24 @@
+# The agent runtime prepares the agent's workspace and collects the results it reports
+
+For the developer agent to open a pull request for an issue, four things reach the sandbox before the session starts, all generic and all driven by configuration:
+
+- **Task input**: the workflow builds the message (issue title, body, link) like any other A2A message. The agent profile's Markdown body, the role description, is appended to the harness's system prompt (`session/new` and `session/resume` `_meta.systemPrompt.append` of the Claude Code adapter), followed by a short platform note on how to report results.
+- **Workspace**: the message that starts a task may carry `metadata["dev.tendworks/workspace"] = { repository, branch }` (`contracts/schemas/a2a.schema.yaml#/$defs/workspace`). The runtime runs a fixed checkout script in `/workspace` through the sandbox API's `exec`: clone if the workspace is not a checkout yet, then continue the branch if the remote has it, otherwise start it from the default branch. The example workflow `develop-issue` derives the branch from issue number and run id, so a retry of the step, a resumed session (ADR 0009 (agent-sessions-resume-on-their-volumes), the checkout lives on the workspace volume) and a re-sent task all work on the same branch and pull request.
+- **Skills**: `spec.skills` names directories under `skills/` of the configuration folder; every file is copied into `$CLAUDE_CONFIG_DIR/skills/<name>/`, where the harness loads user skills. A missing skill fails validation at startup.
+- **Secrets**: `spec.env` maps environment variable names to secret references (ADR 0008 (secret-references-resolve-against-the-platform-environment)), resolved against the worker's environment, but only variables named `TENDWORKS_AGENT_*`. The developer profile passes `TENDWORKS_AGENT_GITHUB_TOKEN` as `GH_TOKEN`; the image's git uses the GitHub CLI as credential helper. The platform token is not in the worker's environment (checked by `tests/architecture/secrets.test.ts`) and could not be resolved even if it were. A missing secret fails the task naming the secret; resolved values are redacted from transcripts and messages.
+
+Results come back as A2A artifacts: the agent writes a JSON array of `{ name, url, description? }` to `/session/artifacts.json` (`$TENDWORKS_ARTIFACTS`); after a completed turn the runtime turns each entry into an artifact with one `url` part. The developer reports `pull-request`; the workflow's `output.as` puts its URL into the run's output, which `tend run get` shows.
+
+## Considered Options
+
+- **The agent clones the repository itself, told by the prompt**: no platform code, but the checkout and the branch rule would depend on the model following instructions, and a retry could start a second branch.
+- **The platform opens the pull request after the session (push and API call with the agent token)**: deterministic, but puts a GitHub-specific step into the agent runtime; the spec has the agent open it (`git push`, `gh pr create`), and the merge stays a platform step behind the gate.
+- **Parse the pull request URL out of the agent's final answer** (jq `capture` in `output.as`): no platform code, but the final answer is free text; the artifacts file is structured, harness-neutral and reusable for other results.
+- **Pass the platform's whole environment to secret references**: simpler, but a profile could name the platform token or the database URL; the prefix makes "only agent secrets enter a sandbox" a property of the code, not of review.
+
+## Consequences
+
+- The agent token can still merge (accepted risk until a GitHub App token per run, see #2); the role description tells the agent never to merge.
+- `gh` is pinned with its checksum in the sandbox image (`images/sandbox-claude-code`); the image tag gained a revision suffix (`0.85.1-1`), so the image must be rebuilt.
+- Reporting a result depends on the agent writing the file; a run whose agent reported no pull request completes with `pullRequest: null`. The merge step (#14) should treat that as a failure, or look the pull request up by the branch, which is in the run's output too.
+- Every profile that lists a secret needs it set, also for unrelated smoke tests (`hello-developer` now needs `TENDWORKS_AGENT_GITHUB_TOKEN`).

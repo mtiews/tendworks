@@ -106,7 +106,7 @@ Rules for the skeleton:
 Agent profiles with `harness: claude-code` run Claude Code through `@agentclientprotocol/claude-agent-acp` (pinned in `images/sandbox-claude-code/package-lock.json`) in a sandbox from the profile's sandbox template. The agent runtime attaches to the adapter's stdio through the sandbox API, marks the harness onboarding complete and sets `bypassPermissions` in the session's config before it starts, records the ACP stream as the transcript and destroys the sandbox when the session ends (ADR 0007 (agent-runtime-records-transcripts-and-cost-from-acp)). The regular test suites use a scripted ACP agent behind the fake sandbox; the real harness is a manual smoke test:
 
 1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
-2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox.
+2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox. The `developer` profile also passes the agent token in, so set `TENDWORKS_AGENT_GITHUB_TOKEN` (fine-grained, playground repository only, contents and pull requests read/write).
 3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
 4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, the cost and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox, `docker volume ls --filter label=dev.tendworks.volume` no leftover volume.
 
@@ -116,11 +116,34 @@ The workspace (`/workspace`) and the harness's home and config directory (`/sess
 6. `docker compose -f deploy/compose.yaml restart worker`.
 7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
+### Pull request smoke test
+
+The `develop-issue` workflow hands an issue to the `developer` agent. The runtime checks the issue's repository out in the workspace on a branch fixed by the run, copies the profile's skills into the sandbox, passes the agent token in as `GH_TOKEN` and appends the role description to the harness's system prompt; the agent pushes the branch, opens the pull request and records it, so the run's output shows it (ADR XXXX (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)). The regular suites cover this with the scripted agent and a local bare repository; against the playground repository, after steps 1–3:
+
+8. Open an issue in `mtiews/tendworks-playground` with a small, clear change, e.g. "Add a file GREETING.md that says hello".
+9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"issue":{"repository":"mtiews/tendworks-playground","number":<n>,"title":"<title>","body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the time trigger find it: add this binding to the configuration folder, set `TENDWORKS_PLATFORM_GITHUB_TOKEN` and label the issue `ready-for-agent`:
+
+   ```yaml
+   apiVersion: tendworks.dev/v1
+   kind: TriggerBinding
+   metadata: { name: playground-ready-for-agent }
+   spec:
+     schedule: { every: { minutes: 1 } }
+     source:
+       integration: github
+       issues: { repository: mtiews/tendworks-playground, labels: [ready-for-agent], state: open }
+       github: { token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }
+     workflow: develop-issue
+   ```
+
+10. `tend run get <id>` shows the run completed, with `pullRequest` and `branch` (`tendworks/issue-<n>-<first 8 characters of the run id>`) under OUTPUT. The pull request on GitHub comes from that branch, describes the change and references the issue. The transcript has a `workspace-checkout` entry with exit code 0 and an `artifacts` entry; no token appears in the transcript or the run.
+11. Retry: restart the worker while the agent works (step 6). The resumed session continues on the same branch, and no second pull request appears.
+
 ## Open items
 
 - [x] Define the build order of the walking skeleton
 - [x] Write the concrete `compose.yaml`
-- [ ] Example configuration for the existing issue agent (trigger, profile, skills, sandbox template)
+- [x] Example configuration for the existing issue agent (profile, skills, sandbox template, workflow `develop-issue`; the playground trigger binding is in the pull request smoke test)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token
 - [ ] Design review for milestone 1b (chat session model) once S2 works
