@@ -123,8 +123,18 @@ describe.skipIf(!credentialSelected())("a chat across a platform restart and an 
     expect(volumesWhileIdle.split("\n").sort()).toEqual([`tendworks-volume-${chatId}-session`, `tendworks-volume-${chatId}-workspace`]);
     expect(answered).toMatchObject({ status: "input-required", message: "I remember: Remember me. | Still there?" });
     expect(listed.message).toMatch(/^resumed session scripted-[0-9a-f-]+\nafter\.txt\nbefore\.txt$/);
+    // One agent session throughout: every new sandbox resumed it. How often depends on how
+    // often the worker started (compose may recreate it on `up`), so only the resume of the
+    // turn after the idle time is counted.
     const entries = await transcript(chatId);
-    expect(entries.filter((entry) => entry.type === "session-started")).toHaveLength(1);
-    expect(entries.filter((entry) => entry.type === "session-resumed")).toHaveLength(2);
+    const [session, ...more] = entries.filter((entry) => entry.type === "session-started");
+    expect(more).toEqual([]);
+    expect(entries.filter((entry) => entry.type === "session-resume-failed")).toEqual([]);
+    const resumes = entries.filter((entry) => entry.type === "session-resumed");
+    expect(resumes.map((entry) => (entry as { sessionId: string }).sessionId)).toEqual(resumes.map(() => (session as { sessionId: string }).sessionId));
+    const afterIdle = entries.findIndex((entry) => entry.type === "message-received" && JSON.stringify(entry).includes("Still there?"));
+    const answeredAfterIdle = entries.findIndex((entry, index) => index > afterIdle && entry.type === "input-required");
+    expect(afterIdle).toBeGreaterThan(0);
+    expect(entries.slice(afterIdle, answeredAfterIdle).map((entry) => entry.type)).toContain("session-resumed");
   });
 });
