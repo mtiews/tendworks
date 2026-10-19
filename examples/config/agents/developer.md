@@ -7,6 +7,8 @@ spec:
   harness: claude-code
   sandbox: claude-code
   skills: [tdd]
+  # No AI attribution (co-author trailers, generated-with lines) in commits and pull requests.
+  attribution: false
   env:
     # The agent token: may push branches and open pull requests on the playground
     # repository. The platform token (polling, merge) is never an agent secret.

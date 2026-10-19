@@ -589,6 +589,25 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     expect(entries).toContainEqual(expect.objectContaining({ type: "artifacts-ignored" }));
   });
 
+  it("turns the harness's AI attribution off when the profile says so, over what the configuration already holds", async () => {
+    const sandboxes = fakeSandboxes();
+    const original = sandboxes.api.create;
+    sandboxes.api.create = async (t) => {
+      const created = await original(t);
+      await sandboxes.api.writeFile(created.id, "/session/claude/settings.json", encode(JSON.stringify({ model: "opus", attribution: { commit: "Made by a robot" } })));
+      return created;
+    };
+
+    await harness(sandboxes.api).run({ ...task(), profile: developer({ attribution: false }) }, observe().observer);
+
+    const { files, request } = sandboxes.attached[0]!;
+    expect(JSON.parse(files.get(`${request.env?.CLAUDE_CONFIG_DIR}/settings.json`)!)).toEqual({
+      model: "opus",
+      permissions: { defaultMode: "bypassPermissions" },
+      attribution: { commit: "", pr: "", sessionUrl: false },
+    });
+  });
+
   it("copies the profile's skills into the harness's config directory before the harness starts", async () => {
     const sandboxes = fakeSandboxes();
     const skills = new Map([["tdd", [{ path: "SKILL.md", content: encode("Red, green.") }, { path: "refs/mocking.md", content: encode("Mock less.") }]]]);

@@ -61,6 +61,13 @@ properties:
           Skills (Agent Skills format) the agent can use, by directory name under
           `skills/` of the configuration folder (`skills/<name>/SKILL.md` plus any files
           next to it). They are copied into the agent's sandbox before the session starts.
+      attribution:
+        type: boolean
+        default: true
+        description: >-
+          Whether the harness may add AI attribution (co-author trailers, generated-with
+          lines, session links) to commits and pull requests. The default `true` keeps the
+          harness default; `false` turns attribution off.
       env:
         type: object
         title: AgentEnvironment

@@ -228,7 +228,7 @@ export function createClaudeCodeHarness({
       try {
         // Kept at once, so a restart before the ACP session exists still finds this sandbox.
         await observer.saveSession({ ...session, sandboxId });
-        await completeOnboarding(sandboxes, sandboxId);
+        await completeOnboarding(sandboxes, sandboxId, profile);
         await copySkills(sandboxId, profile);
         if (requested.workspace) {
           const checkoutFailure = await checkOut(sandboxId, requested.workspace, env, observer, redact);
@@ -274,10 +274,11 @@ async function reportedArtifacts(
 /**
  * A fresh Claude Code config ignores CLAUDE_CODE_OAUTH_TOKEN until onboarding is marked
  * complete (anthropics/claude-code#73403). Marks it in both places the global config may
- * live and lets the session use tools without asking; the sandbox is the boundary.
- * Existing content is kept.
+ * live and lets the session use tools without asking; the sandbox is the boundary. A
+ * profile with `attribution: false` turns Claude Code's AI attribution in commits and pull
+ * requests off. Existing content is kept, except where the profile decides.
  */
-async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string): Promise<void> {
+async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string, profile: LoadedAgentProfile): Promise<void> {
   const merge = async (path: string, change: (current: Record<string, unknown>) => Record<string, unknown>) => {
     let current: Record<string, unknown> = {};
     try {
@@ -293,6 +294,7 @@ async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string): Prom
   await merge(`${CONFIG_DIR}/settings.json`, (settings) => ({
     ...settings,
     permissions: { defaultMode: "bypassPermissions", ...(settings.permissions as Record<string, unknown> | undefined) },
+    ...(profile.spec.attribution === false ? { attribution: { commit: "", pr: "", sessionUrl: false } } : {}),
   }));
 }
 
