@@ -524,14 +524,15 @@ describe("Claude Code harness", () => {
     expect(sandboxes.observed.permission).toEqual({ outcome: { outcome: "selected", optionId: "yes" } });
   });
 
-  it.each<[acp.StopReason, string]>([
-    ["refusal", "TASK_STATE_REJECTED"],
-    ["max_tokens", "TASK_STATE_FAILED"],
-    ["max_turn_requests", "TASK_STATE_FAILED"],
-  ])("ends a turn stopped by %s in %s", async (stopReason, state) => {
+  it.each<[acp.StopReason, string, RegExp]>([
+    ["refusal", "TASK_STATE_REJECTED", /./],
+    ["max_tokens", "TASK_STATE_FAILED", /stopped early: it reached its token limit/],
+    ["max_turn_requests", "TASK_STATE_FAILED", /stopped early: it reached its limit of model requests per turn/],
+  ])("ends a turn stopped by %s in %s", async (stopReason, state, message) => {
     const result = await harness(fakeSandboxes({ stopReason }).api).run(task(), observe().observer);
 
     expect(result.state).toBe(state);
+    expect(result.message).toMatch(message);
   });
 
   it("keeps a quiet session alive with requests the harness answers, so idle connections are not cut", async () => {

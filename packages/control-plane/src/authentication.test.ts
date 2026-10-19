@@ -22,7 +22,7 @@ function setup() {
         ...(method === "GET" ? {} : { body: JSON.stringify(body) }),
       }),
     );
-    return { status: response.status, challenge: response.headers.get("www-authenticate"), body: (await response.json()) as unknown };
+    return { status: response.status, challenge: response.headers.get("www-authenticate"), body: await response.json() };
   };
   return { request, runs, merges };
 }

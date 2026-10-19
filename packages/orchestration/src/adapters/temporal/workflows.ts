@@ -43,7 +43,7 @@ export async function executeRunWorkflow(execution: RunExecution): Promise<void>
         return await agents.sendMessage(agent, request);
       } catch (error) {
         // Report why the agent could not be reached, not the engine's wrapper message.
-        if (error instanceof ActivityFailure && error.cause) throw new Error(error.cause.message);
+        if (error instanceof ActivityFailure && error.cause) throw new Error(error.cause.message, { cause: error });
         throw error;
       }
     },
@@ -51,7 +51,7 @@ export async function executeRunWorkflow(execution: RunExecution): Promise<void>
       try {
         return await endpoints.httpRequest(request);
       } catch (error) {
-        if (error instanceof ActivityFailure && error.cause) throw new Error(error.cause.message);
+        if (error instanceof ActivityFailure && error.cause) throw new Error(error.cause.message, { cause: error });
         throw error;
       }
     },

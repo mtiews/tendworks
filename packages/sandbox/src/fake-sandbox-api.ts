@@ -133,6 +133,8 @@ function run(sandbox: FakeSandbox, { command, workingDirectory = "/", env = {} }
       }
       return ok(Buffer.concat(args.map((path) => read(path)!)).toString("utf8"));
     }
+    case undefined:
+      return { exitCode: 127, stdout: "", stderr: "no command given\n" };
     default:
       return { exitCode: 127, stdout: "", stderr: `${program}: not found\n` };
   }

@@ -49,7 +49,7 @@ export function stubGithubApi({ repositories, token, maxPageSize = 2 }: StubGith
     if (page * perPage < matching.length) {
       const next = new URL(url);
       next.searchParams.set("page", String(page + 1));
-      headers.link = `<${next}>; rel="next"`;
+      headers.link = `<${next.href}>; rel="next"`;
     }
     return json(
       200,

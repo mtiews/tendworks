@@ -67,7 +67,7 @@ describe("github issue tracker failures", () => {
 
   it("gives up on a request GitHub does not answer in time", async () => {
     const hanging: typeof fetch = (_input, init) =>
-      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)));
+      new Promise((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted", { cause: init.signal?.reason }))));
     const tracker = createGithubIssueTracker({ token, fetch: hanging, timeoutMs: 10 });
 
     await expect(tracker.findIssues(filter)).rejects.toThrow(/cannot reach GitHub/);

@@ -92,7 +92,8 @@ const engine = await createTemporalRunEngine({ address: engineAddress });
 // Other domains' events that name a run (e.g. approval.decided) go to that run, whose
 // `listen` tasks receive them. The subscription's position survives restarts, so an event
 // published while the worker was down is delivered when it is back.
-bus.subscribe("orchestration.run-events", createRunEventForwarder(engine).handle);
+const runEventForwarder = createRunEventForwarder(engine);
+bus.subscribe("orchestration.run-events", runEventForwarder.handle.bind(runEventForwarder));
 // `call: http` tasks may only reach the control plane API; workflows find it as
 // `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
 // repository token lives in the server bundle, never in this one.
@@ -119,13 +120,22 @@ const stopped = runWorker.run().catch((error: unknown) => {
   process.exit(1);
 });
 
+async function shutdown() {
+  runWorker.shutdown();
+  server.close();
+  await stopped;
+  await bus.close();
+  await Promise.all([engine.close(), pool.end()]);
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, async () => {
-    runWorker.shutdown();
-    server.close();
-    await stopped;
-    await bus.close();
-    await Promise.all([engine.close(), pool.end()]);
-    process.exit(0);
+  process.once(signal, () => {
+    shutdown().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error("shutdown failed:", error);
+        process.exit(1);
+      },
+    );
   });
 }

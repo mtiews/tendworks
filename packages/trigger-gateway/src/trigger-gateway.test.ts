@@ -229,17 +229,12 @@ describe("trigger gateway", () => {
   it("lists how each binding's last check went: started runs, or why it failed", async () => {
     const runs = createInMemoryRunStarter();
     const store = createInMemoryFiringStore();
-    let failure: Error | undefined;
+    const findIssues = vi.fn(async () => [issue(1)]);
     const gateway = createTriggerGateway({
       bindings: [binding([])],
       store,
       runs,
-      issueTrackers: () => ({
-        findIssues: async () => {
-          if (failure) throw failure;
-          return [issue(1)];
-        },
-      }),
+      issueTrackers: () => ({ findIssues }),
       now: () => new Date("2026-10-18T10:02:30.000Z"),
     });
     const lastEvaluation = async () => (await gateway.triggers())[0]!.lastEvaluation;
@@ -248,7 +243,7 @@ describe("trigger gateway", () => {
     await gateway.check("ready-issues");
     expect(await lastEvaluation()).toEqual({ at: "2026-10-18T10:02:30.000Z", status: "succeeded", startedRuns: 1 });
 
-    failure = new Error("GitHub answered 403: API rate limit exceeded");
+    findIssues.mockRejectedValueOnce(new Error("GitHub answered 403: API rate limit exceeded"));
     await expect(gateway.check("ready-issues")).rejects.toThrow("rate limit");
     expect(await lastEvaluation()).toEqual({
       at: "2026-10-18T10:02:30.000Z",

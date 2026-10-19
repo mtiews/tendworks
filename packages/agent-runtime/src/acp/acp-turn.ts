@@ -72,6 +72,26 @@ export async function runAcpTurn(options: AcpTurnOptions): Promise<AcpTurn> {
         case "usage_update":
           if (update.cost) cost = { amount: update.cost.amount, currency: update.cost.currency };
           break;
+        // Recorded above, but they neither add to the reply nor change the cost: the agent's
+        // thoughts, echoed user input, tool call progress, plans, modes, commands, session
+        // metadata, compaction and subagent updates, and notices.
+        case "agent_thought_chunk":
+        case "user_message_chunk":
+        case "tool_call_update":
+        case "plan":
+        case "plan_update":
+        case "plan_removed":
+        case "available_commands_update":
+        case "current_mode_update":
+        case "config_option_update":
+        case "session_info_update":
+        case "session_message":
+        case "session_message_chunk":
+        case "compaction_summary_chunk":
+        case "compaction_update":
+        case "subagent_update":
+        case "notice":
+          break;
       }
     })
     .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {

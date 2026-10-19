@@ -13,7 +13,7 @@ export interface NotificationChannel {
 }
 
 /** Writes notifications to a log instead of delivering them; the channel of the walking skeleton. */
-export function createLoggingNotificationChannel(log: (line: string) => void = console.log): NotificationChannel {
+export function createLoggingNotificationChannel(log: (line: string) => void = console.info): NotificationChannel {
   return {
     async deliver(notification) {
       const detail = notification.detail ? ` (${notification.detail})` : "";

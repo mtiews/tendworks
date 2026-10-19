@@ -55,7 +55,7 @@ export function createTriggerGateway({
   secrets = createSecretResolver("platform", {}),
   issueTrackers = (source) => issueTrackerFor(source, { secrets }),
   now = () => new Date(),
-  log = (line) => console.log(line),
+  log = (line) => console.info(line),
 }: TriggerGatewayOptions): TriggerGateway {
   const byName = new Map(bindings.map((binding) => [binding.metadata.name, binding]));
   const timers = new Map<string, NodeJS.Timeout>();

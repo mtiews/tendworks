@@ -1,5 +1,5 @@
 import type { Orchestration } from "@tendworks/shared";
-import type { EventPublisher, RunEvent } from "./run-events.js";
+import type { RunEvent } from "./run-events.js";
 
 export type Run = Orchestration.components["schemas"]["run"];
 export type RunStatus = Orchestration.components["schemas"]["runStatus"];

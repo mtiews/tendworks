@@ -43,7 +43,7 @@ export function describeTaskStore(name: string, setup: () => Promise<TaskStore> 
 
       expect(claims[1]).toEqual(claims[0]);
       expect(later).toEqual(claims[0]);
-      const loser = claims[0]!.task.id === a.task.id ? b : a;
+      const loser = claims[0].task.id === a.task.id ? b : a;
       expect(await store.get(loser.task.id)).toBeUndefined();
     });
 

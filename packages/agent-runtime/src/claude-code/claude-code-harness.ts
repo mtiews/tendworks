@@ -195,15 +195,17 @@ export function createClaudeCodeHarness({
     const cost = turn.cost ? { cost: turn.cost } : {};
     switch (turn.stopReason) {
       case "end_turn": {
-        const artifacts = await reportedArtifacts(sandboxes, sandboxId, taskId, observer.record);
+        const artifacts = await reportedArtifacts(sandboxes, sandboxId, taskId, (entry) => observer.record(entry));
         return { state: "TASK_STATE_COMPLETED", message: turn.reply, ...cost, ...(artifacts.length > 0 ? { artifacts } : {}) };
       }
       case "refusal":
         return { state: "TASK_STATE_REJECTED", message: turn.reply || "the agent refused the task", ...cost };
       case "cancelled":
         return { state: "TASK_STATE_CANCELED", message: turn.reply || "the session was cancelled", ...cost };
-      default:
-        return { state: "TASK_STATE_FAILED", message: `the agent stopped early (${turn.stopReason})${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
+      case "max_tokens":
+        return { state: "TASK_STATE_FAILED", message: `the agent stopped early: it reached its token limit${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
+      case "max_turn_requests":
+        return { state: "TASK_STATE_FAILED", message: `the agent stopped early: it reached its limit of model requests per turn${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
     }
   }
 

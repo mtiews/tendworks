@@ -60,7 +60,7 @@ export function stubGithubApi({ repositories, token }: StubGithubApiOptions): ty
     }
     return json(404, { message: "Not Found" });
   };
-  return Object.assign(stub, { requests }) as typeof fetch & { requests: string[] };
+  return Object.assign<typeof fetch, { requests: string[] }>(stub, { requests });
 }
 
 function json(status: number, body: unknown): Response {

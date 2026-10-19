@@ -70,7 +70,7 @@ await migrateTriggerGatewayStore(pool);
 const notifications = createPostgresNotificationStore(pool);
 const notifier = createNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
 const bus = createPostgresEventBus({ pool });
-bus.subscribe("human-interaction.notifications", notifier.handle, { types: notifier.types });
+bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
 
 const workerUrl = env("TEND_WORKER_URL");
 const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
@@ -122,16 +122,24 @@ const api = createControlPlaneApi({
 });
 
 const port = Number(env("PORT", "8080"));
-const server = serve({ fetch: api.fetch, port }, () => console.log(`control plane listening on :${port}`));
+const server = serve({ fetch: (request) => api.fetch(request), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
+async function shutdown() {
+  await triggerGateway.stop();
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  await bus.close();
+  await pool.end();
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, async () => {
-    await triggerGateway.stop();
-    server.close(async () => {
-      await bus.close();
-      await pool.end();
-      process.exit(0);
-    });
+  process.once(signal, () => {
+    shutdown().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error("shutdown failed:", error);
+        process.exit(1);
+      },
+    );
   });
 }

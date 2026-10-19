@@ -22,7 +22,7 @@ export async function checkPlatform(
     checkComponents(probes, probeTimeoutMs),
     ...bundles.map((bundle) => checkBundle(bundle, probeTimeoutMs)),
   ]);
-  const components = [...own!, ...remote.flat()];
+  const components = [...own, ...remote.flat()];
   return { status: overallState(components), components, checkedAt: new Date().toISOString() };
 }
 

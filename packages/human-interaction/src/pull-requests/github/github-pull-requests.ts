@@ -44,7 +44,7 @@ export function createGithubPullRequests({ token, fetch = globalThis.fetch, time
       });
       body = await response.json().catch(() => undefined);
     } catch (error) {
-      throw new Error(`cannot reach GitHub to merge ${url}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`cannot reach GitHub to merge ${url}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
     return { status: response.status, body: body !== null && typeof body === "object" ? (body as Record<string, unknown>) : {} };
   }

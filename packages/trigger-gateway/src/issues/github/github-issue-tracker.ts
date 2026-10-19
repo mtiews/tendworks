@@ -44,7 +44,7 @@ export function createGithubIssueTracker({ token, fetch = globalThis.fetch, time
       });
       body = await response.json().catch(() => undefined);
     } catch (error) {
-      throw new Error(`cannot reach GitHub to list issues of ${repository}: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`cannot reach GitHub to list issues of ${repository}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
     }
     if (!response.ok) throw failure(repository, response, body);
     if (!Array.isArray(body)) throw new Error(`unexpected answer from GitHub while listing issues of ${repository}: not a list of issues`);
