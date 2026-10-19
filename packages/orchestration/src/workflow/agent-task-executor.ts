@@ -17,3 +17,7 @@ export interface AgentTaskExecutor {
 /** Keys the interpreter sets in `SendMessageRequest.metadata`. */
 export const RUN_ID = "dev.tendworks/runId";
 export const STEP_REFERENCE = "dev.tendworks/stepReference";
+
+/** Keys agents set in `Task.metadata` (contracts/schemas/a2a.schema.yaml). */
+export const TRANSCRIPT = "dev.tendworks/transcript";
+export const COST = "dev.tendworks/cost";

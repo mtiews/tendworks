@@ -1,7 +1,9 @@
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { describeAgentTasks } from "./agent-tasks.suite.js";
-import { createAgentRuntime, createInMemoryTaskStore } from "./index.js";
+import { createFakeHarness } from "./fake-agent.js";
+import { describeHarness } from "./harness.suite.js";
+import { createAgentRuntime, createInMemoryTaskStore, createInMemoryTranscriptStore } from "./index.js";
 
 const profile = (name: string, fake: AgentProfile.FakeAgent = {}): AgentProfile.AgentProfile => ({
   apiVersion: "tendworks.dev/v1",
@@ -10,7 +12,16 @@ const profile = (name: string, fake: AgentProfile.FakeAgent = {}): AgentProfile.
   spec: { harness: "fake", fake },
 });
 
-describeAgentTasks("fake agent", () => ({ agents: createAgentRuntime({ profiles: [profile("echo")] }), agent: "echo" }));
+describeHarness("fake agent", () => ({
+  harness: createFakeHarness({ sleep: async () => {} }),
+  profile: profile("echo", { message: "Hello" }),
+  reply: "Hello",
+}));
+
+describeAgentTasks("fake agent", () => {
+  const transcripts = createInMemoryTranscriptStore();
+  return { agents: createAgentRuntime({ profiles: [profile("echo")], transcripts }), agent: "echo", transcripts };
+});
 
 const request = (parts: A2A.Part[]): A2A.SendMessageRequest => ({
   message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts },
@@ -36,6 +47,35 @@ describe("fake agent", () => {
 
     expect(task.status).toMatchObject({ state: "TASK_STATE_FAILED", message: { parts: [{ text: "not today" }] } });
     expect(task.artifacts).toBeUndefined();
+  });
+
+  it("shows the task as working while the agent works", async () => {
+    let finish!: () => void;
+    const opened: string[] = [];
+    const store = createInMemoryTranscriptStore();
+    const runtime = createAgentRuntime({
+      profiles: [profile("slow", { delaySeconds: 1 })],
+      sleep: () => new Promise<void>((resolve) => (finish = resolve)),
+      transcripts: { open: (taskId) => (opened.push(taskId), store.open(taskId)), read: (ref) => store.read(ref) },
+    });
+
+    const done = runtime.sendMessage("slow", request([{ text: "work" }]));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const working = await runtime.getTask(opened[0]!);
+
+    expect(working?.status.state).toBe("TASK_STATE_WORKING");
+    finish();
+    expect((await done).status.state).toBe("TASK_STATE_COMPLETED");
+  });
+
+  it("fails the task when the profile's harness is not available in this runtime", async () => {
+    const runtime = createAgentRuntime({
+      profiles: [{ ...profile("developer"), spec: { harness: "claude-code", sandbox: "claude-code" } }],
+    });
+
+    const task = await runtime.sendMessage("developer", request([{ text: "work" }]));
+
+    expect(task.status).toMatchObject({ state: "TASK_STATE_FAILED", message: { parts: [{ text: expect.stringContaining("claude-code") }] } });
   });
 
   it("works for the configured time before it answers", async () => {
@@ -70,7 +110,7 @@ describe("fake agent", () => {
     expect(waited).toEqual([7_000]);
     expect(task.status.state).toBe("TASK_STATE_COMPLETED");
     expect(task.history).toEqual([message.message]);
-    expect(task.metadata).toEqual({ "dev.tendworks/resumed": 1 });
+    expect(task.metadata).toMatchObject({ "dev.tendworks/resumed": 1, "dev.tendworks/transcript": expect.any(String) });
     expect(await before.getTask(task.id)).toEqual(task);
   });
 });

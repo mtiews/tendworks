@@ -60,6 +60,11 @@ $defs:
         items:
           $ref: '#/$defs/message'
       metadata:
+        description: >-
+          Free map. On tasks of agent sessions Tendworks sets `dev.tendworks/transcript`
+          (reference to the session's transcript, kept outside the sandbox) and
+          `dev.tendworks/cost` (what the session cost: `{amount, currency}`, see
+          run.schema.yaml#/$defs/cost).
         $ref: '#/$defs/struct'
   taskStatus:
     title: TaskStatus

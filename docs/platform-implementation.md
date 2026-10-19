@@ -101,6 +101,15 @@ Rules for the skeleton:
 - **Event bus with its first consumer.** The control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker). Run and step events go onto the event bus in the transaction of the run state (ADR 0003, ADR 0005); the first consumer is human interaction, which records a notification for every completed or failed run before delivering it.
 - **Resume is tested from S1 on**, not at the end.
 
+## Claude Code harness
+
+Agent profiles with `harness: claude-code` run Claude Code through `@agentclientprotocol/claude-agent-acp` (pinned in `images/sandbox-claude-code/package-lock.json`) in a sandbox from the profile's sandbox template. The agent runtime attaches to the adapter's stdio through the sandbox API, marks the harness onboarding complete and sets `bypassPermissions` in the session's config before it starts, records the ACP stream as the transcript and destroys the sandbox when the session ends (ADR 0007 (agent-runtime-records-transcripts-and-cost-from-acp)). The regular test suites use a scripted ACP agent behind the fake sandbox; the real harness is a manual smoke test:
+
+1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
+2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox.
+3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
+4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, the cost and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox.
+
 ## Open items
 
 - [x] Define the build order of the walking skeleton

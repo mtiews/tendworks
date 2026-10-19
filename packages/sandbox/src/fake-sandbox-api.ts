@@ -5,6 +5,7 @@ import {
   sandboxUser,
   newSandboxId,
   SandboxError,
+  type AttachedProcess,
   type ExecRequest,
   type ExecResult,
   type Sandbox,
@@ -21,6 +22,8 @@ interface FakeSandbox {
  * In-memory sandbox backend for tests and for running the platform without
  * Docker. Nothing is executed: `exec` understands a handful of busybox
  * commands (echo, cat, id -u, pwd, printenv) and answers 127 for anything else.
+ * `attach` runs the same commands; `cat` without arguments echoes its input
+ * until the input is closed.
  */
 export function createFakeSandboxApi(): SandboxApi {
   const sandboxes = new Map<string, FakeSandbox>();
@@ -46,6 +49,12 @@ export function createFakeSandboxApi(): SandboxApi {
     },
     async exec(sandboxId, request) {
       return run(find(sandboxId), request);
+    },
+    async attach(sandboxId, request) {
+      const sandbox = find(sandboxId);
+      const [program, ...args] = request.command;
+      if (program === "cat" && args.length === 0) return echo();
+      return finished(run(sandbox, request));
     },
     async readFile(sandboxId, path) {
       const { files } = find(sandboxId);
@@ -89,4 +98,37 @@ function run(sandbox: FakeSandbox, { command, workingDirectory = "/", env = {} }
     default:
       return { exitCode: 127, stdout: "", stderr: `${program}: not found\n` };
   }
+}
+
+let processes = 0;
+const encoder = new TextEncoder();
+
+/** A process that copies its input to its output until the input is closed. */
+function echo(): AttachedProcess {
+  const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  let exit!: (code: number) => void;
+  const exited = new Promise<number>((resolve) => (exit = resolve));
+  const [stdout, watched] = readable.tee();
+  void watched.pipeTo(new WritableStream()).then(() => exit(0));
+  return { id: `fake${++processes}`, stdin: writable, stdout, stderr: streamOf(""), exited };
+}
+
+/** A process that has already run to its end. */
+function finished({ exitCode, stdout, stderr }: ExecResult): AttachedProcess {
+  return {
+    id: `fake${++processes}`,
+    stdin: new WritableStream(),
+    stdout: streamOf(stdout),
+    stderr: streamOf(stderr),
+    exited: Promise.resolve(exitCode),
+  };
+}
+
+function streamOf(text: string): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      if (text !== "") controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
 }

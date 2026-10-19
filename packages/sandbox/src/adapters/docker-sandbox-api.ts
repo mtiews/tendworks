@@ -1,3 +1,5 @@
+import { request as httpRequest } from "node:http";
+import type { Socket } from "node:net";
 import { posix } from "node:path";
 import {
   assertAbsolutePath,
@@ -6,6 +8,7 @@ import {
   sandboxUser,
   newSandboxId,
   SandboxError,
+  type ExecRequest,
   type IsolationClass,
   type Sandbox,
   type SandboxApi,
@@ -37,6 +40,66 @@ function demultiplex(raw: Uint8Array): { stdout: string; stderr: string } {
   return { stdout: decode(chunks[1]), stderr: decode(chunks[2]) };
 }
 
+/** Reads Docker's multiplexed attach stream frame by frame as chunks arrive. */
+class FrameReader {
+  seenStdout = false;
+  private buffer: Buffer = Buffer.alloc(0);
+
+  constructor(private readonly onFrame: (stream: number, payload: Uint8Array) => void) {}
+
+  read(chunk: Buffer): void {
+    this.buffer = this.buffer.length === 0 ? chunk : Buffer.concat([this.buffer, chunk]);
+    while (this.buffer.length >= 8) {
+      const size = this.buffer.readUInt32BE(4);
+      if (this.buffer.length < 8 + size) return;
+      this.onFrame(this.buffer[0]!, new Uint8Array(this.buffer.subarray(8, 8 + size)));
+      this.buffer = this.buffer.subarray(8 + size);
+    }
+  }
+}
+
+/** A readable stream fed from outside; pushes after the reader cancelled are dropped. */
+function pushStream() {
+  let controller!: ReadableStreamDefaultController<Uint8Array>;
+  let open = true;
+  const stream = new ReadableStream<Uint8Array>({
+    start: (c) => void (controller = c),
+    cancel: () => void (open = false),
+  });
+  return {
+    stream,
+    push(chunk: Uint8Array) {
+      if (open) controller.enqueue(chunk);
+    },
+    end() {
+      if (open) controller.close();
+      open = false;
+    },
+  };
+}
+
+/** Starts an exec with the connection upgraded to a raw stream (Docker's "hijacked" attach). */
+function upgrade(target: URL, body: unknown): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const payload = JSON.stringify(body);
+    const request = httpRequest(target, {
+      method: "POST",
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(payload), connection: "Upgrade", upgrade: "tcp" },
+    });
+    request.once("upgrade", (_response, socket, head) => {
+      if (head.length > 0) socket.unshift(head);
+      resolve(socket);
+    });
+    request.once("response", (response) => {
+      let text = "";
+      response.setEncoding("utf8").on("data", (chunk: string) => (text += chunk));
+      response.once("end", () => reject(new Error(`starting a command failed: ${response.statusCode} ${text.trim()}`)));
+    });
+    request.once("error", reject);
+    request.end(payload);
+  });
+}
+
 /**
  * Sandbox API on the Docker Engine API. Needs only the socket proxy sections
  * CONTAINERS, EXEC and POST; images must already be on the host.
@@ -63,6 +126,24 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
     return message.includes("no such container")
       ? new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`)
       : new SandboxError("file-not-found", `no file ${path} in sandbox ${sandboxId}`);
+  };
+
+  const createExec = async (sandboxId: string, request: ExecRequest, { stdin }: { stdin: boolean }): Promise<string> => {
+    assertSandboxId(sandboxId);
+    const created = await call("POST", `/containers/${containerName(sandboxId)}/exec`, {
+      json: {
+        Cmd: request.command,
+        AttachStdin: stdin,
+        AttachStdout: true,
+        AttachStderr: true,
+        Tty: false, // keeps stdout and stderr apart and the bytes untouched
+        ...(request.workingDirectory === undefined ? {} : { WorkingDir: request.workingDirectory }),
+        ...(request.env === undefined ? {} : { Env: Object.entries(request.env).map(([key, value]) => `${key}=${value}`) }),
+      },
+    });
+    if (created.status === 404) throw new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`);
+    if (!created.ok) throw await failure(created, "starting a command");
+    return ((await created.json()) as { Id: string }).Id;
   };
 
   const api: SandboxApi = {
@@ -123,19 +204,7 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       return sandbox;
     },
     async exec(sandboxId, request) {
-      assertSandboxId(sandboxId);
-      const created = await call("POST", `/containers/${containerName(sandboxId)}/exec`, {
-        json: {
-          Cmd: request.command,
-          AttachStdout: true,
-          AttachStderr: true,
-          ...(request.workingDirectory === undefined ? {} : { WorkingDir: request.workingDirectory }),
-          ...(request.env === undefined ? {} : { Env: Object.entries(request.env).map(([key, value]) => `${key}=${value}`) }),
-        },
-      });
-      if (created.status === 404) throw new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`);
-      if (!created.ok) throw await failure(created, "starting a command");
-      const { Id: execId } = (await created.json()) as { Id: string };
+      const execId = await createExec(sandboxId, request, { stdin: false });
 
       const started = await call("POST", `/exec/${execId}/start`, { json: { Detach: false, Tty: false } });
       if (!started.ok) throw await failure(started, "starting a command");
@@ -148,6 +217,48 @@ export function createDockerSandboxApi({ url, labels = {} }: DockerSandboxApiOpt
       // When the program cannot be started, the runtime writes its error to the stdout stream.
       if (stdout.startsWith("OCI runtime exec failed")) return { exitCode: ExitCode, stdout: "", stderr: stderr + stdout };
       return { exitCode: ExitCode, stdout, stderr };
+    },
+    async attach(sandboxId, request) {
+      const execId = await createExec(sandboxId, request, { stdin: true });
+      const socket = await upgrade(new URL(`/exec/${execId}/start`, url), { Detach: false, Tty: false });
+      const stdout = pushStream();
+      const stderr = pushStream();
+      const frames = new FrameReader((stream, payload) => {
+        // When the program cannot be started, the runtime writes its error to the stdout stream.
+        if (stream === 1 && !frames.seenStdout && Buffer.from(payload).toString("utf8").startsWith("OCI runtime exec failed")) stream = 2;
+        if (stream === 1) frames.seenStdout = true;
+        (stream === 1 ? stdout : stream === 2 ? stderr : undefined)?.push(payload);
+      });
+      const ended = new Promise<void>((resolve) => {
+        socket.on("data", (chunk: Buffer) => frames.read(chunk));
+        socket.once("close", () => {
+          stdout.end();
+          stderr.end();
+          resolve();
+        });
+      });
+      socket.once("error", () => socket.destroy());
+
+      const exited = ended.then(async () => {
+        // The stream ends as the process exits; the engine may need a moment to record the exit code.
+        for (let attempt = 0; ; attempt++) {
+          const inspected = await call("GET", `/exec/${execId}/json`);
+          if (!inspected.ok) throw await failure(inspected, "reading the exit code");
+          const { Running, ExitCode } = (await inspected.json()) as { Running: boolean; ExitCode: number | null };
+          if (!Running && ExitCode !== null) return ExitCode;
+          if (attempt >= 50) throw new Error(`process ${execId} in sandbox ${sandboxId} did not report an exit code`);
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+      });
+      exited.catch(() => {}); // callers that never await the exit must not cause an unhandled rejection
+
+      const stdin = new WritableStream<Uint8Array>({
+        write: (chunk) =>
+          new Promise<void>((resolve, reject) => socket.write(chunk, (error) => (error ? reject(error) : resolve()))),
+        close: () => new Promise<void>((resolve) => socket.end(resolve)), // half-close: the process sees the end of its input
+        abort: () => void socket.destroy(),
+      });
+      return { id: execId, stdin, stdout: stdout.stream, stderr: stderr.stream, exited };
     },
     async readFile(sandboxId, path) {
       assertSandboxId(sandboxId);

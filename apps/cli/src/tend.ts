@@ -7,6 +7,7 @@ type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
 type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
+type Cost = ControlPlane.components["schemas"]["cost"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
@@ -187,12 +188,31 @@ function formatRun(run: Run): string {
     ["STARTED", run.startedAt ?? ""],
     ["FINISHED", run.finishedAt ?? ""],
     ...(run.error ? [["ERROR", describe(run.error)]] : []),
+    ...(run.steps.some((step) => step.cost) ? [["COST", totalCost(run.steps.flatMap((step) => (step.cost ? [step.cost] : [])))]] : []),
   ];
   const steps = [
-    ["STEP", "STATUS", "TASK", "STARTED", "FINISHED"],
-    ...run.steps.map((step) => [step.reference, step.status, step.taskId ?? "", step.startedAt, step.finishedAt ?? ""]),
+    ["STEP", "STATUS", "TASK", "COST", "STARTED", "FINISHED"],
+    ...run.steps.map((step) => [
+      step.reference,
+      step.status,
+      step.taskId ?? "",
+      step.cost ? formatCost(step.cost) : "",
+      step.startedAt,
+      step.finishedAt ?? "",
+    ]),
   ];
-  return `${table(fields)}\n${table(steps)}`;
+  const withTranscript = run.steps.filter((step) => step.transcript);
+  const transcripts = withTranscript.length > 0 ? `\n${table([["STEP", "TRANSCRIPT"], ...withTranscript.map((step) => [step.reference, step.transcript!])])}` : "";
+  return `${table(fields)}\n${table(steps)}${transcripts}`;
+}
+
+const formatCost = ({ amount, currency }: Cost) => `${Number(amount.toFixed(4))} ${currency}`;
+
+/** Sums costs per currency, e.g. "0.52 USD". */
+function totalCost(costs: Cost[]): string {
+  const sums = new Map<string, number>();
+  for (const { amount, currency } of costs) sums.set(currency, (sums.get(currency) ?? 0) + amount);
+  return [...sums].map(([currency, amount]) => formatCost({ amount, currency })).join(", ");
 }
 
 function formatNotificationList(list: NotificationList): string {

@@ -1,0 +1,12 @@
+# Sandbox for agents with harness claude-code: Claude Code and its ACP adapter, non-root.
+# Build the image once: docker compose -f deploy/compose.yaml --profile sandbox-images build
+apiVersion: tendworks.dev/v1
+kind: SandboxTemplate
+metadata:
+  name: claude-code
+spec:
+  image: tendworks/sandbox-claude-code:0.85.1
+  isolationClass: container
+  resources:
+    cpus: 2
+    memoryMb: 4096
