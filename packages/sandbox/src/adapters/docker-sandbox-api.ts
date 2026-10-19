@@ -210,6 +210,10 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
               VolumeOptions: { Labels: { ...labels, "dev.tendworks.volume": volume } },
             })),
             ...(network === undefined ? {} : { NetworkMode: network }),
+            // The sandbox host by the name Docker Desktop gives it, on Linux too, so a sandbox
+            // reaches the platform's published port the same way everywhere (e.g. the platform
+            // MCP server, TEND_PLATFORM_MCP_URL).
+            ExtraHosts: ["host.docker.internal:host-gateway"],
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],
             PidsLimit: pids,

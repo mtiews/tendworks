@@ -13,6 +13,6 @@ The control plane therefore gets a second token next to `TEND_API_TOKEN` (ADR 00
 
 ## Consequences
 
-- Every sandbox still reaches the control plane's published port on the network (`host.docker.internal` on Docker Desktop, the bridge gateway on Linux); the tokens, not the network, are the guard until the egress proxy closes it.
+- Every sandbox still reaches the control plane's published port on the network (`host.docker.internal`, which the Docker sandbox adapter adds on Linux too); the tokens, not the network, are the guard until the egress proxy closes it.
 - The `tend` CLI and scripts need a token for reading too.
 - One static read token has no identity and is shared by all chat sessions; rotating it means changing `deploy/.env` and restarting server and worker.
