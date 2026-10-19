@@ -1,0 +1,20 @@
+openapi: 3.1.0
+info:
+  title: Tendworks Trigger Gateway API
+  version: 0.1.0
+  description: >-
+    Internal API of the trigger gateway domain, served by the server bundle. The control
+    plane reads triggers through it; it is never published. The trigger gateway owns
+    its schedule and the record of fired triggers.
+paths:
+  /triggers:
+    get:
+      operationId: listTriggers
+      summary: List trigger bindings with their next scheduled execution
+      responses:
+        "200":
+          description: Triggers, ordered by name.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"

@@ -4,6 +4,7 @@ import type { Configuration } from "./configuration.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
+import type { TriggersPort } from "./triggers.js";
 
 type StatusResponse = ControlPlane.paths["/status"]["get"]["responses"];
 type Schemas = ControlPlane.components["schemas"];
@@ -19,6 +20,8 @@ export interface ControlPlaneApiOptions {
   configuration: Configuration;
   /** Orchestration, which owns runs. */
   runs: RunsPort;
+  /** The trigger gateway, which owns the schedule; without it no triggers are listed. */
+  triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
   notifications?: NotificationsPort;
 }
@@ -30,6 +33,7 @@ export function createControlPlaneApi({
   probeTimeoutMs,
   configuration,
   runs,
+  triggers = { list: async () => [] },
   notifications,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   const app = new Hono();
@@ -63,6 +67,16 @@ export function createControlPlaneApi({
   app.get("/runs/:runId", async (c) => {
     const run = await runs.get(c.req.param("runId"));
     return run ? c.json(run satisfies Schemas["run"], 200) : problem(404, "Run not found");
+  });
+
+  app.get("/triggers", async (c) => {
+    let items;
+    try {
+      items = await triggers.list();
+    } catch (error) {
+      return problem(503, "Trigger gateway unavailable", error instanceof Error ? error.message : String(error));
+    }
+    return c.json({ items } satisfies Schemas["triggerList"], 200);
   });
 
   app.get("/notifications", async (c) => {

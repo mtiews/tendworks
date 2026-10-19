@@ -30,6 +30,21 @@ do:
 const agent = (name: string, spec = "harness: fake") =>
   `---\napiVersion: tendworks.dev/v1\nkind: AgentProfile\nmetadata:\n  name: ${name}\nspec:\n  ${spec}\n---\nRole description.\n`;
 
+const trigger = (name: string, workflowName: string) => `
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata: { name: ${name} }
+spec:
+  schedule:
+    every: { minutes: 5 }
+  source:
+    integration: fake
+    issues: { repository: acme/playground, labels: [ready-for-agent], state: open }
+  workflow: ${workflowName}
+  input:
+    issue: '\${ .issue }'
+`;
+
 function issuesOf(dir: string): string[] {
   try {
     loadConfiguration(dir);
@@ -80,7 +95,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, SandboxTemplate)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, SandboxTemplate, TriggerBinding)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -98,6 +113,47 @@ describe("loadConfiguration", () => {
     });
 
     expect(issuesOf(dir)).toEqual(["workflows/b.sw.yaml: workflow 'build' is already defined in workflows/a.sw.yaml"]);
+  });
+
+  it("loads trigger bindings", () => {
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "triggers/ready.yaml": trigger("ready", "build"),
+    });
+
+    const configuration = loadConfiguration(dir);
+
+    expect(configuration.triggerBindings).toEqual([
+      {
+        apiVersion: "tendworks.dev/v1",
+        kind: "TriggerBinding",
+        metadata: { name: "ready" },
+        spec: {
+          schedule: { every: { minutes: 5 } },
+          source: { integration: "fake", issues: { repository: "acme/playground", labels: ["ready-for-agent"], state: "open" } },
+          workflow: "build",
+          input: { issue: "${ .issue }" },
+        },
+      },
+    ]);
+  });
+
+  it("rejects an invalid trigger binding, one bound to an unknown workflow, and duplicates", () => {
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "triggers/a.yaml": trigger("ready", "build"),
+      "triggers/b.yaml": trigger("ready", "build"),
+      "triggers/c.yaml": trigger("ghostly", "ghost"),
+      "triggers/d.yaml": trigger("broken", "build").replace("minutes: 5", "fortnights: 1"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "triggers/b.yaml: trigger binding 'ready' is already defined in triggers/a.yaml",
+      "triggers/d.yaml: /spec/schedule/every: unsupported property 'fortnights'",
+      "triggers/c.yaml: trigger binding 'ghostly' starts workflow 'ghost', but no workflow 'ghost' is configured",
+    ]);
   });
 
   it("rejects a folder that does not exist", () => {

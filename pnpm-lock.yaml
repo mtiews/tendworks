@@ -215,6 +215,9 @@ importers:
       '@tendworks/human-interaction':
         specifier: workspace:*
         version: link:../../packages/human-interaction
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -393,7 +396,27 @@ importers:
         specifier: 7.13.0
         version: 7.13.0(typescript@6.0.3)
 
-  packages/trigger-gateway: {}
+  packages/trigger-gateway:
+    dependencies:
+      '@gabrielbryk/jq-ts':
+        specifier: 1.7.0
+        version: 1.7.0(typescript@6.0.3)
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      hono:
+        specifier: 4.13.13
+        version: 4.13.13
+      openapi-fetch:
+        specifier: 0.17.0
+        version: 0.17.0
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   tests/contract:
     dependencies:
@@ -409,6 +432,9 @@ importers:
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../../packages/trigger-gateway
       openapi-fetch:
         specifier: 0.17.0
         version: 0.17.0

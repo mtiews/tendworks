@@ -1,0 +1,36 @@
+$id: https://tendworks.dev/schemas/v1/trigger.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Trigger
+description: >-
+  Runtime view of a trigger binding as the trigger gateway reports it. Shared by the
+  public control plane API and the internal trigger gateway API.
+$defs:
+  trigger:
+    title: Trigger
+    type: object
+    additionalProperties: false
+    required: [name, workflow, schedule, nextExecutionAt]
+    properties:
+      name:
+        type: string
+        description: Name of the trigger binding.
+      workflow:
+        type: string
+        description: Workflow each match starts.
+      schedule:
+        $ref: './trigger-binding.schema.yaml#/$defs/schedule'
+      nextExecutionAt:
+        type: string
+        format: date-time
+        description: When the trigger next checks its source.
+  triggerList:
+    title: TriggerList
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        description: Triggers, ordered by name.
+        items:
+          $ref: '#/$defs/trigger'

@@ -19,6 +19,9 @@
     },
     {
       "path": "../../packages/human-interaction"
+    },
+    {
+      "path": "../../packages/trigger-gateway"
     }
   ]
 }

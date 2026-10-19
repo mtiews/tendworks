@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import type { AgentProfile, Workflow } from "@tendworks/shared";
+import type { AgentProfile, TriggerBinding, Workflow } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
@@ -14,6 +14,7 @@ const schemas = new URL("../../../contracts/schemas/", import.meta.url);
 const KINDS: Record<string, string> = {
   AgentProfile: "agent-profile.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
+  TriggerBinding: "trigger-binding.schema.yaml",
 };
 const WORKFLOW_SCHEMA = "serverless-workflow.schema.yaml";
 
@@ -30,6 +31,8 @@ export interface Configuration {
   /** The definition of the workflow with this name, as parsed from its file. */
   workflow(name: string): Workflow.Workflow | undefined;
   agentProfiles: AgentProfile.AgentProfile[];
+  /** Trigger bindings, ordered by name; each starts a configured workflow. */
+  triggerBindings: TriggerBinding.TriggerBinding[];
 }
 
 let ajv: Ajv2020 | undefined;
@@ -61,6 +64,7 @@ export function loadConfiguration(dir: string): Configuration {
   const issues: string[] = [];
   const workflows = new Map<string, { file: string; definition: Workflow.Workflow }>();
   const profiles = new Map<string, { file: string; profile: AgentProfile.AgentProfile }>();
+  const bindings = new Map<string, { file: string; binding: TriggerBinding.TriggerBinding }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -104,7 +108,11 @@ export function loadConfiguration(dir: string): Configuration {
       issues.push(typeof kind === "string" ? `${file}: unknown kind '${kind}' (${known})` : `${file}: neither a workflow nor a document with a kind (${known})`);
       continue;
     }
-    check(file, schemaFile, document);
+    if (!check(file, schemaFile, document) || kind !== "TriggerBinding") continue;
+    const binding = document as unknown as TriggerBinding.TriggerBinding;
+    const existing = bindings.get(binding.metadata.name);
+    if (existing) issues.push(`${file}: trigger binding '${binding.metadata.name}' is already defined in ${existing.file}`);
+    else bindings.set(binding.metadata.name, { file, binding });
   }
 
   for (const { file, definition } of workflows.values()) {
@@ -113,11 +121,19 @@ export function loadConfiguration(dir: string): Configuration {
     }
   }
 
+  for (const { file, binding } of bindings.values()) {
+    const { workflow } = binding.spec;
+    if (!workflows.has(workflow)) {
+      issues.push(`${file}: trigger binding '${binding.metadata.name}' starts workflow '${workflow}', but no workflow '${workflow}' is configured`);
+    }
+  }
+
   if (issues.length > 0) throw new ConfigurationError(issues);
   return {
     workflowNames: [...workflows.keys()].sort(),
     workflow: (name) => workflows.get(name)?.definition,
     agentProfiles: [...profiles.values()].map(({ profile }) => profile),
+    triggerBindings: [...bindings.values()].map(({ binding }) => binding).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 

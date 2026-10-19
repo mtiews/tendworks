@@ -47,7 +47,7 @@ async function tend(args: string[]) {
   runs.runs.set(failed.id, failed);
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [] },
     runs,
   });
   let stdout = "";

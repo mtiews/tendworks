@@ -10,4 +10,5 @@ export {
   type RunsPort,
   type StartRunRequest,
 } from "./runs.js";
+export { createTriggerGatewayClient, type Trigger, type TriggersPort } from "./triggers.js";
 export type { ComponentStatus, HealthProbe, PlatformStatus, RuntimeBundle } from "./status.js";

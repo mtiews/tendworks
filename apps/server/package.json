@@ -12,6 +12,7 @@
     "@tendworks/control-plane": "workspace:*",
     "@tendworks/event-bus": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*",
     "pg": "8.23.1"
   },
   "devDependencies": {
