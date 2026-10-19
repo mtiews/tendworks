@@ -5,8 +5,9 @@ import { describePullRequests } from "./pull-requests.suite.js";
 describePullRequests("fake", async (fixtures) => {
   const urls = fixtures.map((_, index) => `https://git.example/acme/app/pull/${index + 1}`);
   return {
-    pullRequests: createFakePullRequests(fixtures.map((fixture, index) => ({ url: urls[index]!, headBranch: `feature-${index + 1}`, ...fixture }))),
+    pullRequests: createFakePullRequests(fixtures.map((fixture, index) => ({ url: urls[index]!, ...fixture }))),
     urls,
+    repository: "acme/app",
     missing: "https://git.example/acme/app/pull/99",
   };
 });

@@ -15,6 +15,7 @@ describePullRequests("github (stubbed API)", async (fixtures) => {
     pullRequests: createGithubPullRequests({ token: TOKEN, fetch }),
     urls: fixtures.map((_, index) => `https://github.com/acme/app/pull/${index + 1}`),
     missing: "https://github.com/acme/app/pull/99",
+    repository: "acme/app",
   };
 });
 

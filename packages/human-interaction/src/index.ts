@@ -42,5 +42,6 @@ export {
   MergeRefusedError,
   type FakePullRequest,
   type MergeResult,
+  type PullRequestDetails,
   type PullRequests,
 } from "./pull-requests/pull-requests.js";

@@ -107,8 +107,8 @@ describe("events the domains emit", () => {
     const approvals = createInMemoryApprovalStore();
     const gate = createMergeGate({
       policies: configuration.policies,
-      runs: async (id) => ({ id, workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR }] }),
-      pullRequests: () => createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open" }]),
+      runs: async (id) => ({ id, workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR, workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } }] }),
+      pullRequests: () => createFakePullRequests([{ url: PR, headBranch: "tendworks/fake", state: "open" }]),
       approvals,
     });
 

@@ -14,6 +14,20 @@ export interface PullRequests {
    * found) and with any other error when it cannot be asked (unreachable, credentials).
    */
   merge(url: string): Promise<MergeResult>;
+  /**
+   * What the repository host says about the pull request at `url`: the repository it
+   * belongs to and the branch it merges from. Rejects with a {@link MergeRefusedError}
+   * when there is no such pull request and with any other error when it cannot be asked.
+   */
+  describe(url: string): Promise<PullRequestDetails>;
+}
+
+/** A pull request as its repository host reports it; repositories as `<owner>/<name>`. */
+export interface PullRequestDetails {
+  repository: string;
+  /** Where the head branch lives; differs from `repository` for a pull request from a fork. */
+  headRepository: string;
+  headBranch: string;
 }
 
 export interface MergeResult {
@@ -40,6 +54,13 @@ export function createFakePullRequests(pullRequests: FakePullRequest[] = []): Pu
   const known = new Map(pullRequests.map((pullRequest) => [pullRequest.url, { ...pullRequest, state: pullRequest.state ?? "open" }]));
   const merged: string[] = [];
   return {
+    async describe(url) {
+      const pullRequest = known.get(url);
+      if (!pullRequest) throw new MergeRefusedError(`no pull request at ${url}`);
+      // The schema fixes the URL as https://<host>/<owner>/<name>/pull/<number>.
+      const repository = new URL(url).pathname.split("/").slice(1, 3).join("/");
+      return { repository, headRepository: pullRequest.headRepository ?? repository, headBranch: pullRequest.headBranch };
+    },
     async merge(url) {
       const pullRequest = known.get(url);
       if (!pullRequest) throw new MergeRefusedError(`no pull request at ${url}`);

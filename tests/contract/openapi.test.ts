@@ -180,10 +180,10 @@ describe("control plane: notifications", () => {
 });
 
 describe("control plane: merges behind the gate, and approval requests", () => {
-  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open" }])) {
+  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/fake", state: "open" }])) {
     const store = createInMemoryApprovalStore();
     const runs = async (runId: string): Promise<GatedRun | undefined> =>
-      runId === "r-1" ? { id: "r-1", workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR }], ...run } : undefined;
+      runId === "r-1" ? { id: "r-1", workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR, workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } }], ...run } : undefined;
     return controlPlane({
       merges: createMergeGate({ policies: configuration.policies, runs, pullRequests: () => pullRequests, approvals: store }),
       approvals: createApprovals({ store }),
@@ -224,7 +224,10 @@ describe("control plane: merges behind the gate, and approval requests", () => {
   });
 
   it("refuses an invalid merge request, a run that is not running and a repository that cannot be reached", async () => {
-    const unreachableRepository: PullRequests = { merge: async () => Promise.reject(new Error("connection refused")) };
+    const unreachableRepository: PullRequests = {
+      merge: async () => Promise.reject(new Error("connection refused")),
+      describe: async () => Promise.reject(new Error("connection refused")),
+    };
 
     expect((await merge(gated(), null)).response.status).toBe(400);
     expect((await merge(gated({ status: "completed" }))).response.status).toBe(409);

@@ -95,13 +95,14 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       ]);
     });
 
-    it("keeps the links a step's agent reported", async () => {
+    it("keeps the workspace a step handed to its agent and the links the agent reported", async () => {
       const run = newRun();
       await context.store.create(run);
       const step = {
         name: "implement",
         reference: "/do/0/implement",
         status: "completed" as const,
+        workspace: { repository: "https://git.example/acme/app.git", branch: "tendworks/issue-7" },
         artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "The change" }],
         startedAt: "2026-10-18T10:00:01.000Z",
         finishedAt: "2026-10-18T10:00:02.000Z",

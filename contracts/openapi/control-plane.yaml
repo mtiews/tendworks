@@ -161,8 +161,10 @@ paths:
         Merges the pull request with the platform's credentials, never an agent's.
         The caller names the run and the pull request; everything else comes from the
         platform's own records: the run must be running and must have reported the pull
-        request (an artifact of one of its steps), and the policies that apply to the
-        run's workflow decide (the strictest wins). With `allow` the pull request is
+        request (an artifact of one of its steps), the repository host must confirm that
+        the pull request belongs to the repository of the workspace that step handed to
+        its agent and merges from exactly the workspace's branch (not from a fork), and
+        the policies that apply to the run's workflow decide (the strictest wins). With `allow` the pull request is
         merged right away. With `ask` the merge needs an approved approval request for
         this run and pull request: the first request creates one (202), later requests
         answer 202 while it is pending, merge once it is approved and are refused (403)
@@ -193,7 +195,8 @@ paths:
         "400":
           description: >-
             The request is invalid: no pull request given (e.g. the agent reported none),
-            an unknown run, a pull request the run did not report, no policy that
+            an unknown run, a pull request the run did not report, a pull request that is
+            not from the repository and branch of the run's workspace, no policy that
             applies to the run's workflow, or no integration for the pull request's host.
           content:
             application/json:

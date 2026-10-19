@@ -36,14 +36,14 @@ function adapterFor(spec: PullRequestIntegration.PullRequestIntegrationSpec, sec
   switch (spec.integration) {
     case "fake":
       return createFakePullRequests(spec.fake?.pullRequests ?? []);
-    case "github":
-      return {
-        async merge(url) {
-          const name = spec.github!.token.secretRef.name;
-          const token = secrets.resolve(name);
-          if (!token) throw new Error(secrets.problem(name) ?? `secret ${name} is not set`);
-          return createGithubPullRequests({ token, ...(fetch ? { fetch } : {}) }).merge(url);
-        },
+    case "github": {
+      const github = () => {
+        const name = spec.github!.token.secretRef.name;
+        const token = secrets.resolve(name);
+        if (!token) throw new Error(secrets.problem(name) ?? `secret ${name} is not set`);
+        return createGithubPullRequests({ token, ...(fetch ? { fetch } : {}) });
       };
+      return { merge: async (url) => github().merge(url), describe: async (url) => github().describe(url) };
+    }
   }
 }

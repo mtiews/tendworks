@@ -1,5 +1,5 @@
 import type { A2A, Workflow } from "@tendworks/shared";
-import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, type AgentTaskExecutor } from "./agent-task-executor.js";
+import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, WORKSPACE, type AgentTaskExecutor } from "./agent-task-executor.js";
 import { evaluate, evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
 import type { EventInbox } from "./event-inbox.js";
 import type { HttpExecutor, HttpResponse } from "./http-executor.js";
@@ -38,6 +38,8 @@ export interface Step {
   transcript?: string;
   /** What the agent session cost, as the agent reported it. */
   cost?: { amount: number; currency: string };
+  /** The workspace the step handed to the agent (`dev.tendworks/workspace` of its message), as the workflow set it. */
+  workspace?: { repository: string; branch: string };
   /** Links the agent reported as artifacts of its task, e.g. a pull request. */
   artifacts?: { name: string; url: string; description?: string }[];
   error?: WorkflowError;
@@ -136,7 +138,7 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
       } else if ("call" in task && task.call === "http") {
         rawOutput = await callHttp(task, reference, input);
       } else if ("call" in task) {
-        const result = await call(task, reference, input);
+        const result = await call(task, reference, input, step);
         step.taskId = result.id;
         Object.assign(step, sessionRecord(result));
         if (result.status.state !== "TASK_STATE_COMPLETED") {
@@ -212,8 +214,10 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     return [task.listen.read === "envelope" ? event : (event.data ?? null)];
   }
 
-  async function call(task: Workflow.CallA2ATask, reference: string, input: unknown): Promise<A2A.Task> {
+  async function call(task: Workflow.CallA2ATask, reference: string, input: unknown, step: Step): Promise<A2A.Task> {
     const parameters = evaluateTemplate(task.with.parameters, input, variables(input)) as Workflow.WithA2AParameters;
+    const workspace = workspaceOf(parameters.message.metadata);
+    if (workspace) step.workspace = workspace;
     // The DSL speaks A2A 0.3 (`kind` parts, role `user`); the port speaks A2A 1.0.
     // The message id is derived from run and step, so a retried call is recognisable.
     const request: A2A.SendMessageRequest = {
@@ -281,6 +285,13 @@ function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost" | "arti
     ...(typeof transcript === "string" ? { transcript } : {}),
     ...(typeof cost?.amount === "number" && typeof cost.currency === "string" ? { cost: { amount: cost.amount, currency: cost.currency } } : {}),
   };
+}
+
+/** The workspace a message asks for, when it names a repository and a branch. */
+function workspaceOf(metadata: Record<string, unknown> | undefined): Step["workspace"] {
+  const value = metadata?.[WORKSPACE];
+  if (!isObject(value) || typeof value.repository !== "string" || typeof value.branch !== "string") return undefined;
+  return { repository: value.repository, branch: value.branch };
 }
 
 function toPart(part: Workflow.A2APart): A2A.Part {

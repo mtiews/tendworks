@@ -21,6 +21,12 @@ do:
             parts:
               - kind: text
                 text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+            # The workspace the run hands to the agent. The fake agent checks nothing out, but
+            # the merge gate only merges a pull request of this repository from this branch.
+            metadata:
+              dev.tendworks/workspace:
+                repository: https://git.example/example/playground.git
+                branch: tendworks/fake
       output:
         as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
   # From here on as in develop-issue: merge behind the gate, or wait for the approval.
