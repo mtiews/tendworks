@@ -25,7 +25,7 @@ check "run completed" test "$STATUS" = completed
 check "agent answered 'hello from the sandbox'" grep -qi "hello from the sandbox" <<<"$REPLY"
 check "cost is reported and not zero" node -e "process.exit(Number('$COST') > 0 ? 0 : 1)"
 check "transcript exists" test -n "$TRANSCRIPT"
-check "transcript has an ACP session" test "$(count_entries "$TRANSCRIPT" acp-session)" -ge 1
+check "transcript has an agent session" test "$(count_entries "$TRANSCRIPT" session-started)" -ge 1
 check_no_tokens "$TRANSCRIPT" "$RUN_ID"
 check_no_leftovers
 finish "hello-developer ran Claude Code in a sandbox (run $RUN_ID; details: tend run get $RUN_ID)"

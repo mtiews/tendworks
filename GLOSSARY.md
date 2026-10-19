@@ -18,6 +18,10 @@ _Avoid_: conversation, harness session
 An agent session a human starts and leads directly, without a run, workflow or trigger. Any client can attach to it, leave and come back until the human ends it.
 _Avoid_: conversation, interactive run, chat run
 
+**Transcript**:
+What happened in one agent session (messages, tool calls and results, turns, resumes), as product-neutral entries numbered by their position. Kept outside the sandbox and readable through the API while the session runs.
+_Avoid_: log (except in `tend run logs`), session file, history
+
 **Sandbox**:
 An isolated, short-lived environment in which exactly one agent session's harness runs.
 _Avoid_: container (that is one isolation class), VM, box

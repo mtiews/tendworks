@@ -47,24 +47,23 @@ wait_run() {
   echo "$status"
 }
 
-# Prints the container path of the first transcript of run $1 (empty while there is none).
-# The run API names a step's transcript only once the step has finished, so while it runs
-# the transcript is found in the worker by the run id in its task message.
+# Prints the API path of the transcript of run $1's first agent step (empty while no step
+# names its task). A step names its task as soon as the agent runtime created it.
 transcript_path() {
-  local path
-  path=$(api_get "/runs/$1" | field 'r.steps?.find((s) => s.transcript)?.transcript' | sed 's|^file://||')
-  if [ -z "$path" ]; then
-    path=$(MSYS_NO_PATHCONV=1 compose exec -T worker sh -c \
-      "grep -l '\"messageId\":\"$1/' \"\$TEND_TRANSCRIPT_DIR\"/*.jsonl 2>/dev/null | head -1" 2>/dev/null || true)
-  fi
-  echo "$path" | tr -d '\r'
+  local task
+  task=$(api_get "/runs/$1" | field 'r.steps?.find((s) => s.taskId)?.taskId')
+  [ -z "$task" ] || echo "/runs/$1/tasks/$task/transcript"
 }
 
-# Prints transcript $1; MSYS_NO_PATHCONV keeps Git Bash from rewriting the container path.
-transcript() { [ -n "$1" ] && MSYS_NO_PATHCONV=1 compose exec -T worker cat "$1" 2>/dev/null || true; }
+# Prints transcript $1 (an API path from transcript_path) as JSON: { items: [entries] }.
+transcript() { [ -n "$1" ] && api_get "$1" || true; }
 
-# Counts transcript entries of type $2 in transcript $1.
-count_entries() { { transcript "$1" | grep -c "\"type\":\"$2\"" || true; } | head -1; }
+# Counts the entries of type $2 in transcript $1 (0 when it cannot be read).
+count_entries() {
+  local count
+  count=$(transcript "$1" | field "r.items.filter((e) => e.type === '$2').length")
+  echo "${count:-0}"
+}
 
 # Records a check: check "<description>" <condition command...>
 check() {
