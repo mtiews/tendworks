@@ -124,7 +124,7 @@ From the start, the model is built as "steps that consume and produce artifacts,
 - `trigger.fired` — an external event triggered a binding
 - `run.started`, `run.completed`, `run.failed`, `run.cancelled`
 - `step.started`, `step.completed`, `step.failed`, `step.checkpointed`
-- `agent.message` — message from an agent (for live view and chat)
+- agent output (messages, tool calls) is not an event: clients follow it as transcript entries through the API (ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus)); the bus carries only lifecycle events of agent sessions and chats
 - `agent.input_required` — agent needs an answer
 - `approval.requested`, `approval.decided`, `approval.expired`
 - `artifact.created`
@@ -228,11 +228,11 @@ An agent run consists of three replaceable layers: A2A upwards, ACP to the harne
 1. Orchestration sends an A2A task to the agent profile (e.g. `developer`).
 2. The agent runtime requests a sandbox from the profile's template via the sandbox API and restores the workspace from the last checkpoint (Git branch + snapshot).
 3. Inside the sandbox, the harness (e.g. Claude Code) starts in ACP mode. The runtime speaks ACP over stdio or a small bridge process.
-4. ACP events (messages, tool calls, questions) become A2A status updates and `agent.message` events.
+4. ACP events (messages, tool calls, questions) become A2A status updates and product-neutral transcript entries, which clients follow live through the API (ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus)).
 5. If the agent needs an answer, the runtime sets the A2A task to *input-required*. The answer can come from the UI (chat), from another agent or from a policy.
 6. At the end: checkpoint, register artifacts, destroy the sandbox or put it to sleep.
 
-**Chat with running agents** uses the same path: the UI sends an A2A message to the running task, and the runtime forwards it into the session via ACP. There is no special channel bypassing the orchestrator.
+**Chat with running agents** uses the same path: the UI sends an A2A message to the running task, and the runtime forwards it into the session via ACP. There is no special channel bypassing the orchestrator. A chat a human starts directly is the same: an A2A task without a run that waits in *input-required* between turns (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
 
 **Isolation classes of the sandbox API**
 
@@ -421,10 +421,11 @@ The first milestone is a single end-to-end workflow across all seams; after that
 
 **Walking skeleton – refined (review of 18 Oct 2026)**
 
-The starting point is an existing project in which an agent in a Docker container already solves issues in a GitHub repo, commits and merges. The walking skeleton moves this onto the platform. It is split into two milestones so the first one stays thin:
+The starting point is an existing project in which an agent in a Docker container already solves issues in a GitHub repo, commits and merges. The walking skeleton moves this onto the platform. It is split into milestones so the first one stays thin:
 
 1. **Milestone 1 – automated, end to end:** GitHub issue (label or webhook) → trigger gateway → workflow → agent in sandbox → commit, pull request, merge → notification. The merge initially goes through a gate that can be switched to automatic via policy. Clients are the API and the `tend` CLI only.
-2. **Milestone 1b – interactive and web UI:** A simple chat window in the web UI starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same chat later serves to intervene in running automated runs. 1b also brings the first web UI views (run list, run detail with transcript and cost, notifications). It starts once the agent step of milestone 1 (harness via ACP in a sandbox) works, because the chat builds on it; its open design questions (e.g. whether a chat session is a run without a workflow or only an agent session) are settled in a separate design review at that point.
+2. **Milestone 1b – chat path:** A chat starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same mechanism later serves to intervene in running automated runs. Clients are the API and `tend chat`; agent output of chats and run steps can be followed live. Design review of 19 Oct 2026: ADR 0015 (a-chat-is-an-a2a-task-without-a-run), ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token), ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus).
+3. **Milestone 1c – web UI:** the first web UI views (run list, run detail with live transcript and cost, notifications, chat window), as a client of the APIs from milestones 1 and 1b; designed in its own review.
 
 The walking skeleton uses GitHub instead of Forgejo; the connection goes through the same integration port. End-to-end runs target a dedicated playground repository, not `tendworks` itself, so the existing container agent and the platform never pick up the same issues; the existing agent is switched off once milestone 1 is met.
 
@@ -446,16 +447,16 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 
 **Interactive path (chat, milestone 1b)**
 
-In the web UI, a chat window opens an agent session with a chosen profile and repository. As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Tool calls and file changes are visible live, questions are answered directly in the chat, and the session can be resumed later.
+`tend chat <profile>` opens a chat with a profile that allows chats (`spec.chat`), optionally with a public repository checked out as its workspace. As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Messages and tool calls are visible live, questions are answered directly in the chat, and any client can leave the chat and attach to it again later (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
 
-- **Permissions in the walking skeleton:** work in the sandbox workspace only; no push, no pull request, no merge.
-- **Platform context via MCP:** the chat agent gets a read-only MCP server on the control plane API (first stage of the meta-agent). Example tools: `list_runs` (active and recent runs with status), `get_run` (details, steps, errors), `list_triggers` (including next scheduled execution), `list_agents` (profiles and running sessions).
+- **Permissions in the walking skeleton:** work in the sandbox workspace only; no push, no pull request, no merge. Enforced by credentials, not by the prompt: the chat profile (`assistant`) holds no repository token.
+- **Platform context via MCP:** the chat agent gets a read-only MCP server on the control plane API (first stage of the meta-agent) with a read-only token; agents in workflows get neither (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)). Tools: `list_runs` (active and recent runs with status), `get_run` (details, steps, errors), `list_triggers` (including next scheduled execution), `list_agents` (profiles and their active agent sessions, run steps and chats).
 - **Example questions that must work:** "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?"
 
-**Success criterion (milestone 1b):** A chat session can be started, work in the workspace, be interrupted and resumed, and the three example questions are answered correctly from the platform's live state. Runs, transcripts, cost and notifications are visible in the web UI.
+**Success criterion (milestone 1b):** A chat can be started with `tend chat`, work in the workspace and survive being left and attached again (also from a second client), an idle sandbox and a platform restart mid-turn without loss; the three example questions are answered correctly from the platform's live state; an agent in a workflow cannot read the platform API; `tend run logs <id> --follow` streams a running agent step.
 
-1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: interactive chat path and first web UI, as refined above. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
-2. **Visibility and intervention.** UI with run list, live stream of `agent.message` events, chat into running sessions, cost display.
+1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
+2. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display.
 3. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
 4. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
 5. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.

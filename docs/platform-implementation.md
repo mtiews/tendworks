@@ -50,8 +50,8 @@ tendworks/
     health/                  # platform library, not a domain: health probes and the runtime health API
     platform/                # platform library, not a domain: CloudEvent envelope and trace context, secret references
   apps/
-    server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction
-    worker/                  # walking skeleton: bundles orchestration, agent-runtime (mcp-platform from milestone 1b)
+    server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction (mcp-platform from milestone 1b)
+    worker/                  # walking skeleton: bundles orchestration, agent-runtime
     web/                     # web UI: run list, chat
     cli/                     # tend CLI on the generated API client
   images/
@@ -73,13 +73,13 @@ Packages under `packages/` map to the domains; apps under `apps/` are only bundl
 | --- | --- | --- |
 | Postgres | state, events, database for Temporal | yes |
 | Temporal (dev mode) | durable execution of runs | yes |
-| `server` | control plane API, web UI, time trigger | yes |
-| `worker` | workflow interpreter, agent runtime with ACP, MCP server for the chat | yes |
+| `server` | control plane API, MCP server for chats (milestone 1b), web UI (milestone 1c), time trigger | yes |
+| `worker` | workflow interpreter, agent runtime with ACP | yes |
 | `sandbox-claude-code` | sandbox image, started via Docker (isolation class `container`, `gvisor` opt-in) | yes |
-| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR 0014 (interim-bearer-token-on-the-control-plane-api)) |
-| tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend agent list, tend trigger list, tend notification list, tend approval list/approve; tend chat in milestone 1b |
+| Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR 0014 (interim-bearer-token-on-the-control-plane-api)), from milestone 1b plus a read-only token for chat agents (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)) |
+| tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend agent list, tend trigger list, tend notification list, tend approval list/approve; tend chat and tend run logs --follow in milestone 1b |
 | Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers`, `/exec`, `/volumes` and `/networks` (writes allowed; networks for creating the sandbox network once), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
-| web UI | run list, run detail, notifications, chat | milestone 1b |
+| web UI | run list, run detail, notifications, chat | milestone 1c |
 
 ## Walking skeleton: build order (milestone 1)
 
@@ -171,4 +171,5 @@ After the agent step the platform merges the pull request as the workflow's `mer
 - [x] Example configuration for the existing issue agent (profile, skills, sandbox template, workflow `develop-issue`, the suspended playground trigger binding `playground-ready-for-agent`)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token
-- [ ] Design review for milestone 1b (chat session model) once S2 works
+- [x] Design review for milestone 1b (chat session model) once S2 works (ADR 0015, ADR 0016, ADR 0017)
+- [ ] Design review for milestone 1c (web UI)
