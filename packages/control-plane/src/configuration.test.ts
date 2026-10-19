@@ -95,7 +95,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, SandboxTemplate, TriggerBinding)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, SandboxTemplate, TriggerBinding)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -179,6 +179,39 @@ describe("loadConfiguration", () => {
       "triggers/a.yaml: /spec/source: must have required property 'github'",
       "triggers/b.yaml: /spec/source/github/token: must be object",
     ]);
+  });
+
+  it("loads policies and rejects invalid ones and duplicates", () => {
+    const policy = (name: string, merge: string) => `apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: ${name} }\nspec: { merge: ${merge} }\n`;
+    const valid = folder({ "policies/auto.yaml": policy("merge-gate", "auto"), "policies/ask.yaml": policy("careful", "ask") });
+    expect(loadConfiguration(valid).policies.map((p) => [p.metadata.name, p.spec.merge])).toEqual([
+      ["careful", "ask"],
+      ["merge-gate", "auto"],
+    ]);
+
+    const invalid = folder({
+      "policies/a.yaml": policy("merge-gate", "auto"),
+      "policies/b.yaml": policy("merge-gate", "ask"),
+      "policies/c.yaml": policy("sloppy", "always"),
+    });
+    expect(issuesOf(invalid)).toEqual([
+      "policies/b.yaml: policy 'merge-gate' is already defined in policies/a.yaml",
+      "policies/c.yaml: /spec/merge: must be equal to one of the allowed values (auto, ask)",
+    ]);
+  });
+
+  it("accepts http calls in workflows without asking for agent profiles", () => {
+    const dir = folder({
+      "workflows/merge.sw.yaml": `
+document: { dsl: '1.0.3', namespace: test, name: merge, version: '0.1.0' }
+do:
+  - merge:
+      call: http
+      with: { method: post, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }' }
+`,
+    });
+
+    expect(loadConfiguration(dir).workflowNames).toEqual(["merge"]);
   });
 
   it("rejects a folder that does not exist", () => {

@@ -1,0 +1,34 @@
+# The shape of develop-issue with fakes: the fake agent reports a pull request on a
+# reserved .example host, and the platform merges it in its fake pull request
+# integration behind the policy `merge-gate`. Runs without a model or a repository.
+# Start it with: POST /runs {"workflow": "fake-develop-and-merge", "input": {"issue": {"number": 1, "title": "Say hello"}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: fake-develop-and-merge
+  version: '0.1.0'
+  summary: A fake agent opens a pull request and the platform merges it.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-pr-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+      output:
+        as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          pullRequest: '${ .pullRequest }'
+          policy: merge-gate
+      output:
+        as: '${ $input + { merged: .merged, decision: .decision } }'

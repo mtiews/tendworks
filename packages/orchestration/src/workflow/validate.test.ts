@@ -40,15 +40,47 @@ do:${implement}
     expect(issues).toEqual(["/do/1/review/do/0/wait: unsupported task type 'listen' (supported: call, do)"]);
   });
 
-  it("rejects a call type other than a2a", () => {
+  it("rejects a call type other than a2a and http", () => {
+    const issues = issuesOf(`${header}
+do:
+  - fetch:
+      call: grpc
+      with: { proto: { endpoint: https://example.com/a.proto }, service: { name: S, host: example.com }, method: M }
+`);
+
+    expect(issues).toEqual(["/do/0/fetch: unsupported call type 'grpc' (supported: a2a, http)"]);
+  });
+
+  it("accepts an http call with a literal or computed endpoint and a body", () => {
+    const definition = validateWorkflow(
+      parse(`${header}
+do:
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        headers: { x-request: '\${ .id }' }
+        body: { pullRequest: '\${ .pullRequest }', policy: merge-gate }
+  - ping:
+      call: http
+      with: { method: get, endpoint: https://example.com/ping }
+`),
+    );
+
+    expect(definition.do).toHaveLength(2);
+  });
+
+  it("names the http call arguments the interpreter does not support", () => {
     const issues = issuesOf(`${header}
 do:
   - fetch:
       call: http
-      with: { method: get, endpoint: https://example.com }
+      with: { method: get, endpoint: example.com, output: raw }
 `);
 
-    expect(issues).toEqual(["/do/0/fetch: unsupported call type 'http' (supported: a2a)"]);
+    expect(issues).toEqual(expect.arrayContaining(["/do/0/fetch/with: unsupported property 'output'"]));
+    expect(issues.some((issue) => issue.startsWith("/do/0/fetch/with/endpoint:"))).toBe(true);
   });
 
   it("names a property the interpreter does not support", () => {

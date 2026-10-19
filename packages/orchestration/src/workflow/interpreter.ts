@@ -1,6 +1,7 @@
 import type { A2A, Workflow } from "@tendworks/shared";
 import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, type AgentTaskExecutor } from "./agent-task-executor.js";
 import { evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
+import type { HttpExecutor, HttpResponse } from "./http-executor.js";
 
 // Deterministic core: no I/O, no clock, no randomness. All side effects go through
 // the executor, so the interpreter can run inside a durable execution engine.
@@ -9,8 +10,20 @@ export interface RunOptions {
   runId: string;
   input: unknown;
   executor: AgentTaskExecutor;
+  /** Makes the requests of `call: http` tasks; without it they fail. */
+  http?: HttpExecutor;
+  /** The `$runtime` argument of runtime expressions. */
+  runtime?: RuntimeDescriptor;
   /** Called with a snapshot of a step when it starts and when it ends. */
   recordStep?: (step: Step) => Promise<void>;
+}
+
+/** Information about the runtime executing the workflow (DSL runtime descriptor). */
+export interface RuntimeDescriptor {
+  name: string;
+  version?: string;
+  /** Implementation specific; Tendworks sets `controlPlaneUrl`, the base URL of the control plane API. */
+  metadata: Record<string, unknown>;
 }
 
 export interface Step {
@@ -73,7 +86,8 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
   // The spec leaves the initial context open; we start empty.
   let context: unknown = {};
   const workflowVariable = { id: options.runId, input: options.input };
-  const variables = (input: unknown): Variables => ({ context, input, workflow: workflowVariable });
+  const runtime = options.runtime ?? { name: "tendworks", metadata: {} };
+  const variables = (input: unknown): Variables => ({ context, input, workflow: workflowVariable, runtime });
 
   async function runTaskList(tasks: Workflow.TaskList, scope: string, input: unknown): Promise<unknown> {
     let data = input;
@@ -91,7 +105,9 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     try {
       const input = transform(task.input?.from, rawInput, variables(rawInput));
       let rawOutput: unknown;
-      if ("call" in task) {
+      if ("call" in task && task.call === "http") {
+        rawOutput = await callHttp(task, reference, input);
+      } else if ("call" in task) {
         const result = await call(task, reference, input);
         step.taskId = result.id;
         Object.assign(step, sessionRecord(result));
@@ -124,7 +140,42 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     }
   }
 
-  async function call(task: Workflow.CallTask, reference: string, input: unknown): Promise<A2A.Task> {
+  async function callHttp(task: Workflow.CallHTTPTask, reference: string, input: unknown): Promise<unknown> {
+    const { method, endpoint, headers = {}, body } = task.with;
+    const request = {
+      method: method.toUpperCase(),
+      endpoint: String(evaluateTemplate(endpoint, input, variables(input))),
+      headers: evaluateTemplate(headers, input, variables(input)) as Record<string, string>,
+      ...(body === undefined ? {} : { body: evaluateTemplate(body, input, variables(input)) }),
+    };
+    let response: HttpResponse;
+    try {
+      if (!options.http) throw new Error("this runtime makes no HTTP calls");
+      response = await options.http.request(request);
+    } catch (error) {
+      throw new TaskFailure({
+        type: `${ERROR_TYPES}communication`,
+        status: 503,
+        instance: reference,
+        title: "HTTP call could not be made",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (response.status < 200 || response.status > 299) {
+      // Endpoints answer with problem details (RFC 7807); keep their title and detail.
+      const problem = isObject(response.content) ? response.content : {};
+      throw new TaskFailure({
+        type: `${ERROR_TYPES}communication`,
+        status: response.status,
+        instance: reference,
+        title: typeof problem.title === "string" ? problem.title : `HTTP call answered ${response.status}`,
+        ...(typeof problem.detail === "string" ? { detail: problem.detail } : typeof response.content === "string" && response.content ? { detail: response.content } : {}),
+      });
+    }
+    return response.content ?? null;
+  }
+
+  async function call(task: Workflow.CallA2ATask, reference: string, input: unknown): Promise<A2A.Task> {
     const parameters = evaluateTemplate(task.with.parameters, input, variables(input)) as Workflow.WithA2AParameters;
     // The DSL speaks A2A 0.3 (`kind` parts, role `user`); the port speaks A2A 1.0.
     // The message id is derived from run and step, so a retried call is recognisable.
@@ -166,6 +217,10 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     if (failure instanceof TaskFailure) return { status: "failed", error: failure.error, steps };
     throw failure;
   }
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function detail(parts: A2A.Part[] | undefined): { detail?: string } {

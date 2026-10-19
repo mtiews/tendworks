@@ -12,8 +12,10 @@ $comment: >-
   Apache License 2.0). Definitions are copied and narrowed: taskBase properties are
   inlined into each task, and only the tasks, call types and fields listed here are
   kept. Supported: task `do`; task `call` with `a2a` and method `message/send`, where
-  the agent card endpoint names an agent profile as `agent://<profile>`; data flow via
-  `input.from`, `output.as` and `export.as`. Add a definition from the official schema
+  the agent card endpoint names an agent profile as `agent://<profile>`; task `call`
+  with `http` (method, endpoint, headers, body; output `content`); data flow via
+  `input.from`, `output.as` and `export.as`; runtime expression arguments `$context`,
+  `$input`, `$workflow` and `$runtime`. Add a definition from the official schema
   here when the interpreter learns it.
 type: object
 required: [document, do]
@@ -88,18 +90,79 @@ $defs:
     description: A discrete unit of work that contributes to achieving the overall objectives defined by the workflow.
     # if/then/else instead of the official oneOf yields one precise error per mistake.
     # tsType tells the type generator what the conditional means.
-    tsType: CallTask | DoTask
+    tsType: CallA2ATask | CallHTTPTask | DoTask
     type: object
     if:
       properties:
         call: true
       required: [call]
     then:
-      $ref: '#/$defs/callTask'
+      if:
+        properties:
+          call:
+            const: http
+      then:
+        $ref: '#/$defs/callHttpTask'
+      else:
+        $ref: '#/$defs/callA2ATask'
     else:
       $ref: '#/$defs/doTask'
-  callTask:
-    title: CallTask
+  callHttpTask:
+    title: CallHTTPTask
+    description: >-
+      Calls an HTTP endpoint. Tendworks runs it from the worker and only lets it reach the
+      control plane API, whose base URL runtime expressions read as
+      `$runtime.metadata.controlPlaneUrl`. The output is the response content (JSON
+      parsed); a status outside 200–299 fails the task with the problem details the
+      endpoint answered.
+    type: object
+    additionalProperties: false
+    required: [call, with]
+    properties:
+      call:
+        type: string
+        const: http
+      with:
+        $ref: '#/$defs/httpArguments'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  httpArguments:
+    type: object
+    title: HTTPArguments
+    description: The HTTP call arguments.
+    additionalProperties: false
+    required: [method, endpoint]
+    properties:
+      method:
+        type: string
+        enum: [get, post, put, patch, delete, GET, POST, PUT, PATCH, DELETE]
+        title: HTTPMethod
+        description: The HTTP request method.
+      endpoint:
+        type: string
+        title: HTTPEndpoint
+        description: An absolute URI, or a runtime expression that yields one.
+        anyOf:
+          - pattern: ^\s*\$\{.+\}\s*$
+          - pattern: ^[A-Za-z][A-Za-z0-9+\-.]*://.*
+      headers:
+        type: object
+        title: HTTPHeaders
+        description: Header names and values; values may be runtime expressions.
+        additionalProperties:
+          type: string
+      body:
+        title: HTTPBody
+        tsType: unknown
+        description: The request body, sent as JSON. String leaves of the form `${ ... }` are runtime expressions.
+  callA2ATask:
+    title: CallA2ATask
     description: Hands a task to an agent profile using the A2A task model.
     type: object
     additionalProperties: false

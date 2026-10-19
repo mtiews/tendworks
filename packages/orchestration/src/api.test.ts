@@ -6,7 +6,9 @@ import {
   createInMemoryRunStore,
   createOrchestrationApi,
   createRunActivities,
+  InMemoryHttpExecutor,
   type AgentTaskExecutor,
+  type RuntimeDescriptor,
 } from "./index.js";
 import { InMemoryAgentTaskExecutor } from "./workflow/in-memory-agent-task-executor.js";
 
@@ -25,10 +27,13 @@ do:
             parts: [{ kind: text, text: '\${ "Hello \\(.name)" }' }]
 `);
 
-function setup(agents: AgentTaskExecutor = new InMemoryAgentTaskExecutor()) {
+function setup(
+  agents: AgentTaskExecutor = new InMemoryAgentTaskExecutor(),
+  { http = new InMemoryHttpExecutor(), runtime }: { http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor } = {},
+) {
   const store = createInMemoryRunStore();
-  const engine = createInProcessRunEngine(createRunActivities({ store, agents }));
-  const api = createOrchestrationApi({ store, engine });
+  const engine = createInProcessRunEngine(createRunActivities({ store, agents, http }));
+  const api = createOrchestrationApi({ store, engine, ...(runtime ? { runtime } : {}) });
   const request = async (method: string, path: string, body?: unknown) => {
     const response = await api.fetch(
       new Request(`http://orchestration.test${path}`, {
@@ -141,5 +146,26 @@ describe("orchestration API", () => {
 
     expect(status).toBe(404);
     expect(body).toMatchObject({ status: 404, title: "Run not found" });
+  });
+
+  it("starts runs with the runtime it describes, so workflows can reach the control plane", async () => {
+    const http = new InMemoryHttpExecutor().respond(() => ({ status: 200, content: { merged: true } }));
+    const { request } = setup(new InMemoryAgentTaskExecutor(), {
+      http,
+      runtime: { name: "tendworks", metadata: { controlPlaneUrl: "http://control-plane.test" } },
+    });
+    const merge = parse(`
+document: { dsl: '1.0.3', namespace: test, name: merge, version: '0.1.0' }
+do:
+  - merge:
+      call: http
+      with: { method: post, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }' }
+`);
+
+    const run = (await request("POST", "/runs", { workflow: merge })).body as Run;
+
+    const done = await until(async () => (await request("GET", `/runs/${run.id}`)).body, finished);
+    expect(done).toMatchObject({ status: "completed", output: { merged: true } });
+    expect(http.requests.map((r) => r.endpoint)).toEqual(["http://control-plane.test/pull-requests/merge"]);
   });
 });

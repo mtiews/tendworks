@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { runWorkflow, validateWorkflow } from "../index.js";
 import { InMemoryAgentTaskExecutor } from "./in-memory-agent-task-executor.js";
+import { InMemoryHttpExecutor } from "./in-memory-http-executor.js";
 
 const header = `document: { dsl: '1.0.3', namespace: test, name: wf, version: '0.1.0' }\n`;
 
@@ -376,6 +377,112 @@ do:
         detail: "agent runtime unavailable",
       });
       expect(run.steps.map((s) => s.status)).toEqual(["failed", "failed"]);
+    });
+  });
+
+  describe("call http", () => {
+    const merge = () =>
+      workflow(`
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://developer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: build it }]
+      output:
+        as: '\${ { pullRequest: .artifacts[0].parts[0].url } }'
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          pullRequest: '\${ .pullRequest }'
+          policy: merge-gate
+      output:
+        as: '\${ { merged: .merged, pullRequest: $input.pullRequest } }'
+`);
+    const developer = () =>
+      new InMemoryAgentTaskExecutor().agent("developer", () => ({
+        id: "t-dev",
+        status: { state: "TASK_STATE_COMPLETED" },
+        artifacts: [{ artifactId: "t-dev/pr", name: "pull-request", parts: [{ url: "https://git.example/acme/app/pull/7" }] }],
+      }));
+    const runtime = { name: "tendworks", metadata: { controlPlaneUrl: "http://control-plane:8080" } };
+
+    it("sends the request with its expressions evaluated and passes the response content on", async () => {
+      const http = new InMemoryHttpExecutor().respond(() => ({ status: 200, content: { merged: true, commit: "abc" } }));
+
+      const run = await runWorkflow(merge(), { runId: "r", input: {}, executor: developer(), http, runtime });
+
+      expect(http.requests).toEqual([
+        {
+          method: "POST",
+          endpoint: "http://control-plane:8080/pull-requests/merge",
+          headers: {},
+          body: { pullRequest: "https://git.example/acme/app/pull/7", policy: "merge-gate" },
+        },
+      ]);
+      expect(run).toEqual({
+        status: "completed",
+        output: { merged: true, pullRequest: "https://git.example/acme/app/pull/7" },
+        steps: [
+          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev" },
+          { name: "merge", reference: "/do/1/merge", status: "completed" },
+        ],
+      });
+    });
+
+    it("fails the step and the run with the problem the endpoint answered outside 2xx", async () => {
+      const http = new InMemoryHttpExecutor().respond(() => ({
+        status: 409,
+        content: { title: "Pull request cannot be merged", status: 409, detail: "Pull Request is not mergeable" },
+      }));
+
+      const run = await runWorkflow(merge(), { runId: "r", input: {}, executor: developer(), http, runtime });
+
+      const error = {
+        type: "https://serverlessworkflow.io/spec/1.0.0/errors/communication",
+        status: 409,
+        instance: "/do/1/merge",
+        title: "Pull request cannot be merged",
+        detail: "Pull Request is not mergeable",
+      };
+      expect(run).toEqual({
+        status: "failed",
+        error,
+        steps: [
+          { name: "implement", reference: "/do/0/implement", status: "completed", taskId: "t-dev" },
+          { name: "merge", reference: "/do/1/merge", status: "failed", error },
+        ],
+      });
+    });
+
+    it("names the status when the endpoint answers without problem details", async () => {
+      const http = new InMemoryHttpExecutor().respond(() => ({ status: 502, content: "Bad Gateway" }));
+
+      const run = await runWorkflow(merge(), { runId: "r", input: {}, executor: developer(), http, runtime });
+
+      expect(run.error).toMatchObject({ status: 502, title: "HTTP call answered 502", detail: "Bad Gateway" });
+    });
+
+    it("fails the run with a communication error when no response comes", async () => {
+      const http = new InMemoryHttpExecutor().respond(() => {
+        throw new Error("connect ECONNREFUSED");
+      });
+
+      const run = await runWorkflow(merge(), { runId: "r", input: {}, executor: developer(), http, runtime });
+
+      expect(run.error).toEqual({
+        type: "https://serverlessworkflow.io/spec/1.0.0/errors/communication",
+        status: 503,
+        instance: "/do/1/merge",
+        title: "HTTP call could not be made",
+        detail: "connect ECONNREFUSED",
+      });
     });
   });
 

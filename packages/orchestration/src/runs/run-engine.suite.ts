@@ -2,6 +2,9 @@ import { afterAll, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import type { AgentTaskExecutor } from "../workflow/agent-task-executor.js";
 import { InMemoryAgentTaskExecutor } from "../workflow/in-memory-agent-task-executor.js";
+import { InMemoryHttpExecutor } from "../workflow/in-memory-http-executor.js";
+import type { RuntimeDescriptor } from "../workflow/interpreter.js";
+import type { Workflow } from "@tendworks/shared";
 import { validateWorkflow } from "../workflow/validate.js";
 import type { RunActivities } from "./execute-run.js";
 import { createInMemoryRunStore } from "./in-memory-run-store.js";
@@ -52,9 +55,16 @@ do:
 `),
     );
 
-    async function execute(agents: AgentTaskExecutor): Promise<Run> {
+    async function execute(
+      agents: AgentTaskExecutor,
+      {
+        workflow = definition,
+        http = new InMemoryHttpExecutor(),
+        runtime,
+      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor } = {},
+    ): Promise<Run> {
       const store = createInMemoryRunStore();
-      const { engine, stop } = await setup(createRunActivities({ store, agents }));
+      const { engine, stop } = await setup(createRunActivities({ store, agents, http }));
       if (stop) stops.push(stop);
       const runId = crypto.randomUUID();
       await store.create({ id: runId, workflow: "two-steps", status: "pending", input: { goal: "ship" }, steps: [], createdAt: new Date().toISOString() });
@@ -62,8 +72,9 @@ do:
         runId,
         workflow: "two-steps",
         traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-        definition,
+        definition: workflow,
         input: { goal: "ship" },
+        ...(runtime ? { runtime } : {}),
       });
       for (let attempt = 0; attempt < 300; attempt++) {
         const run = (await store.get(runId))!;
@@ -101,6 +112,33 @@ do:
         steps: [{ name: "plan", status: "completed" }, { name: "build", status: "failed" }],
       });
       expect(run.error?.detail).toContain("no such agent profile: developer");
+    });
+
+    it("makes the http calls of a run, with the runtime the run was started with", async () => {
+      const http = new InMemoryHttpExecutor().respond(() => ({ status: 200, content: { merged: true } }));
+      const workflow = validateWorkflow(
+        parse(`
+document: { dsl: '1.0.3', namespace: test, name: two-steps, version: '0.1.0' }
+do:
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body: { goal: '\${ .goal }' }
+`),
+      );
+
+      const run = await execute(new InMemoryAgentTaskExecutor(), {
+        workflow,
+        http,
+        runtime: { name: "tendworks", metadata: { controlPlaneUrl: "http://control-plane.test" } },
+      });
+
+      expect(run).toMatchObject({ status: "completed", output: { merged: true }, steps: [{ name: "merge", status: "completed" }] });
+      expect(http.requests).toEqual([
+        { method: "POST", endpoint: "http://control-plane.test/pull-requests/merge", headers: {}, body: { goal: "ship" } },
+      ]);
     });
   });
 }

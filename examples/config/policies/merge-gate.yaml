@@ -1,0 +1,9 @@
+# The gate in front of merging the pull requests of the example workflows.
+# `auto`: the platform merges as soon as the workflow asks. `ask`: an approval request
+# decides first (not supported yet; a merge step under `ask` fails, nothing is merged).
+apiVersion: tendworks.dev/v1
+kind: Policy
+metadata:
+  name: merge-gate
+spec:
+  merge: auto

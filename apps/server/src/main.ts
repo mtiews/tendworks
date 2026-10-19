@@ -11,6 +11,9 @@ import {
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import {
   createLoggingNotificationChannel,
+  createMergeGate,
+  createPullRequestIntegrations,
+  PLATFORM_GITHUB_TOKEN,
   createPostgresNotificationStore,
   createRunOutcomeNotifier,
   migrateHumanInteractionStore,
@@ -55,6 +58,14 @@ const notifier = createRunOutcomeNotifier({ store: notifications, channel: creat
 const bus = createPostgresEventBus({ pool });
 bus.subscribe("human-interaction.run-outcomes", notifier.handle, { types: notifier.types });
 
+// Human interaction: the merge gate. Policies decide; merges go through the pull request
+// integration with the platform token, which only this bundle holds (ADR 0008).
+const merges = createMergeGate({
+  policies: configuration.policies,
+  pullRequests: createPullRequestIntegrations({ githubToken: () => process.env[PLATFORM_GITHUB_TOKEN] }),
+});
+console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
+
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control
 // plane reads triggers through the trigger gateway's internal API.
@@ -74,6 +85,7 @@ const api = createControlPlaneApi({
   configuration,
   runs: createOrchestrationClient({ baseUrl: workerUrl }),
   notifications,
+  merges,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
 });
 

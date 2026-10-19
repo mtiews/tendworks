@@ -139,6 +139,12 @@ The `develop-issue` workflow hands an issue to the `developer` agent. The runtim
 10. `tend run get <id>` shows the run completed, with `pullRequest` and `branch` (`tendworks/issue-<n>-<first 8 characters of the run id>`) under OUTPUT. The pull request on GitHub comes from that branch, describes the change and references the issue. The transcript has a `workspace-checkout` entry with exit code 0 and an `artifacts` entry; no token appears in the transcript or the run.
 11. Retry: restart the worker while the agent works (step 6). The resumed session continues on the same branch, and no second pull request appears.
 
+After the agent step the platform merges the pull request as the workflow's `merge` step: the worker calls the control plane's `POST /pull-requests/merge`, whose merge gate reads the policy `merge-gate` (`examples/config/policies/merge-gate.yaml`, `merge: auto`) and merges with `TENDWORKS_PLATFORM_GITHUB_TOKEN`, which only the server holds (ADR XXXX (the-platform-merges-through-a-gate-on-the-control-plane-api)). The regular suites merge in the fake integration (`fake-develop-and-merge`); against the playground repository, with `TENDWORKS_PLATFORM_GITHUB_TOKEN` set (fine-grained, playground only: contents and pull requests read/write, issues read):
+
+12. In step 10, `tend run get <id>` additionally shows the `merge` step completed and `merged: true` and the merge `commit` under OUTPUT; on GitHub the pull request is merged by the platform token's owner, not by the agent. The server log names no token.
+13. Failure: run `develop-issue` for an issue the agent cannot finish, or set the token to an invalid value and restart the server. The run fails at `/do/1/merge` with a readable title and detail (e.g. "No pull request to merge", "Repository unavailable: GitHub answered 401: Bad credentials ..."); nothing is merged.
+14. With `merge: ask` in the policy the merge step fails with "Merge needs an approval" and the pull request stays open (approval requests follow in #15).
+
 ## Open items
 
 - [x] Define the build order of the walking skeleton

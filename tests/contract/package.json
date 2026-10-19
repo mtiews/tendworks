@@ -7,6 +7,7 @@
   "dependencies": {
     "@tendworks/agent-runtime": "workspace:*",
     "@tendworks/control-plane": "workspace:*",
+    "@tendworks/human-interaction": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",

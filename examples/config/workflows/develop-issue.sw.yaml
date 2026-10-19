@@ -2,7 +2,8 @@
 # Input: { issue: { repository: <owner>/<name>, number, title, body, url } }, as a trigger
 # binding with the default input mapping passes it. The agent works on a checkout of the
 # issue's repository on a branch fixed by the run, so a retry updates the same branch and
-# pull request. The run's output holds the pull request the agent reported.
+# pull request. The platform then merges the pull request the agent reported, behind the
+# gate of the policy `merge-gate`; the run's output holds the pull request and the merge.
 document:
   dsl: '1.0.3'
   namespace: examples
@@ -39,3 +40,16 @@ do:
             taskId: .id,
             pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])
           } }
+  # The platform, not the agent, merges: the control plane's merge gate decides by the
+  # policy `merge-gate` and merges with the platform's token. A run whose agent reported
+  # no pull request fails here with the reason.
+  - merge:
+      call: http
+      with:
+        method: post
+        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        body:
+          pullRequest: '${ .pullRequest }'
+          policy: merge-gate
+      output:
+        as: '${ $input + { merged: .merged, commit: .commit } }'
