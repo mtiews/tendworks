@@ -34,6 +34,8 @@ create table if not exists orchestration.steps (
   finished_at timestamptz,
   primary key (run_id, reference)
 );
+alter table orchestration.steps add column if not exists transcript text;
+alter table orchestration.steps add column if not exists cost jsonb;
 create table if not exists orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
@@ -97,6 +99,8 @@ interface StepRow {
   name: string;
   status: StepRecord["status"];
   task_id: string | null;
+  transcript: string | null;
+  cost: NonNullable<StepRecord["cost"]> | null;
   error: NonNullable<StepRecord["error"]> | null;
   started_at: Date;
   finished_at: Date | null;
@@ -168,12 +172,16 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
     async saveStep(runId, step, events) {
       await transaction(async (tx) => {
         await tx.query(
-          `insert into orchestration.steps (run_id, reference, name, status, task_id, error, started_at, finished_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8)
+          `insert into orchestration.steps (run_id, reference, name, status, task_id, transcript, cost, error, started_at, finished_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            on conflict (run_id, reference) do update set
              name = excluded.name, status = excluded.status, task_id = excluded.task_id,
+             transcript = excluded.transcript, cost = excluded.cost,
              error = excluded.error, finished_at = excluded.finished_at`,
-          [runId, step.reference, step.name, step.status, step.taskId ?? null, json(step.error), step.startedAt, step.finishedAt ?? null],
+          [
+            runId, step.reference, step.name, step.status, step.taskId ?? null, step.transcript ?? null, json(step.cost),
+            json(step.error), step.startedAt, step.finishedAt ?? null,
+          ],
         );
       }, events);
     },
@@ -207,6 +215,8 @@ function toStep(row: StepRow): StepRecord {
     reference: row.reference,
     status: row.status,
     ...(row.task_id === null ? {} : { taskId: row.task_id }),
+    ...(row.transcript === null ? {} : { transcript: row.transcript }),
+    ...(row.cost === null ? {} : { cost: row.cost }),
     ...(row.error === null ? {} : { error: row.error }),
     startedAt: row.started_at.toISOString(),
     ...(row.finished_at === null ? {} : { finishedAt: row.finished_at.toISOString() }),

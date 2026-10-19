@@ -15,6 +15,8 @@ const completed: Run = {
       reference: "/do/0/implement",
       status: "completed",
       taskId: "task-1",
+      transcript: "file:///var/lib/tendworks/transcripts/task-1.jsonl",
+      cost: { amount: 0.4217, currency: "USD" },
       startedAt: "2026-10-18T10:00:01.000Z",
       finishedAt: "2026-10-18T10:00:02.000Z",
     },
@@ -41,10 +43,9 @@ const failed: Run = {
   createdAt: "2026-10-18T11:00:00.000Z",
 };
 
-async function tend(args: string[]) {
+async function tend(args: string[], extra: Run[] = []) {
   const runs = createInMemoryRuns();
-  runs.runs.set(completed.id, completed);
-  runs.runs.set(failed.id, failed);
+  for (const run of [completed, failed, ...extra]) runs.runs.set(run.id, run);
   const api = createControlPlaneApi({
     probes: [],
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [] },
@@ -88,8 +89,25 @@ describe("tend run get", () => {
     expect(stdout).toMatch(/^RUN\s+0b6c4c1e-run-completed$/m);
     expect(stdout).toMatch(/^WORKFLOW\s+hello-agent$/m);
     expect(stdout).toMatch(/^STATUS\s+completed$/m);
-    expect(stdout).toMatch(/^STEP\s+STATUS\s+TASK\s+STARTED\s+FINISHED$/m);
-    expect(stdout).toMatch(/^\/do\/0\/implement\s+completed\s+task-1\s+2026-10-18T10:00:01.000Z\s+2026-10-18T10:00:02.000Z$/m);
+    expect(stdout).toMatch(/^STEP\s+STATUS\s+TASK\s+COST\s+STARTED\s+FINISHED$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+completed\s+task-1\s+0.4217 USD\s+2026-10-18T10:00:01.000Z\s+2026-10-18T10:00:02.000Z$/m);
+  });
+
+  it("shows the cost of the run and where each agent session's transcript is", async () => {
+    const twoSteps: Run = {
+      ...completed,
+      id: "run-with-two-agents",
+      steps: [
+        completed.steps[0]!,
+        { ...completed.steps[0]!, reference: "/do/1/review", taskId: "task-2", transcript: "file:///t/task-2.jsonl", cost: { amount: 0.1, currency: "USD" } },
+      ],
+    };
+    const { stdout } = await tend(["run", "get", twoSteps.id], [twoSteps]);
+
+    expect(stdout).toMatch(/^COST\s+0.5217 USD$/m);
+    expect(stdout).toMatch(/^STEP\s+TRANSCRIPT$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+file:\/\/\/var\/lib\/tendworks\/transcripts\/task-1.jsonl$/m);
+    expect(stdout).toMatch(/^\/do\/1\/review\s+file:\/\/\/t\/task-2.jsonl$/m);
   });
 
   it("shows why a failed run failed", async () => {

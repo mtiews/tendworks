@@ -235,6 +235,53 @@ do:
     ]);
   });
 
+  it("records the transcript reference and cost the agent reports with its task, ignoring malformed ones", async () => {
+    const executor = new InMemoryAgentTaskExecutor()
+      .agent("developer", () => ({
+        id: "t-dev",
+        status: { state: "TASK_STATE_COMPLETED" },
+        metadata: { "dev.tendworks/transcript": "file:///transcripts/t-dev.jsonl", "dev.tendworks/cost": { amount: 0.42, currency: "USD" } },
+      }))
+      .agent("reviewer", () => ({
+        id: "t-rev",
+        status: { state: "TASK_STATE_COMPLETED" },
+        metadata: { "dev.tendworks/transcript": 7, "dev.tendworks/cost": { amount: "a lot" } },
+      }));
+    const definition = workflow(`
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://developer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: build it }]
+  - review:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://reviewer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: review it }]
+`);
+
+    const run = await runWorkflow(definition, { runId: "r", input: {}, executor });
+
+    expect(run.steps).toEqual([
+      {
+        name: "implement",
+        reference: "/do/0/implement",
+        status: "completed",
+        taskId: "t-dev",
+        transcript: "file:///transcripts/t-dev.jsonl",
+        cost: { amount: 0.42, currency: "USD" },
+      },
+      { name: "review", reference: "/do/1/review", status: "completed", taskId: "t-rev" },
+    ]);
+  });
+
   describe("when a call fails", () => {
     const definition = () =>
       workflow(`
