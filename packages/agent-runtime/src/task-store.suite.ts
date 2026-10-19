@@ -66,5 +66,19 @@ export function describeTaskStore(name: string, setup: () => Promise<TaskStore> 
     it("refuses to update a task it does not know", async () => {
       await expect(store.update(candidate().task)).rejects.toThrow(/no such task/);
     });
+
+    it("keeps the harness session of a task and returns it to later claims", async () => {
+      const first = candidate();
+      await store.claim(first);
+
+      await store.saveSession(first.task.id, { sessionId: "session-1" });
+      await store.saveSession(first.task.id, { sessionId: "session-1", sandboxId: "sandbox1" });
+
+      expect(await store.claim(candidate(first.messageId))).toEqual({ ...first, session: { sessionId: "session-1", sandboxId: "sandbox1" } });
+    });
+
+    it("refuses to keep a session for a task it does not know", async () => {
+      await expect(store.saveSession("unknown-task", { sessionId: "session-1" })).rejects.toThrow(/no such task/);
+    });
   });
 }

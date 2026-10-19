@@ -19,12 +19,19 @@ export interface ClaudeCodeHarnessOptions {
   timeoutMs?: number;
 }
 
-// Fixed paths inside the sandbox image (images/sandbox-claude-code). The harness's
-// home and config directory live under /session so a volume can keep them later.
+// Fixed paths inside the sandbox image (images/sandbox-claude-code). The workspace and
+// /session, which holds the harness's home and config directory, are volumes of the
+// agent session, so a new sandbox after a restart carries on with them.
 export const WORKSPACE = "/workspace";
-const HOME = "/session/home";
-const CONFIG_DIR = "/session/claude";
+const SESSION = "/session";
+const HOME = `${SESSION}/home`;
+const CONFIG_DIR = `${SESSION}/claude`;
 const ADAPTER = "claude-agent-acp";
+
+/** The prompt of a resumed session: the interrupted turn itself is not continued by the harness. */
+const CONTINUE =
+  "The platform restarted while you were working on this task, and your last turn was interrupted. " +
+  "Check the state of the workspace, then continue the task where you left off and finish it.";
 
 const credentialVariables: Record<ClaudeCodeCredential["kind"], string> = {
   "oauth-token": "CLAUDE_CODE_OAUTH_TOKEN",
@@ -48,7 +55,7 @@ export function createClaudeCodeHarness({
   const redact = (text: string) => (credential && credential.value !== "" ? text.replaceAll(credential.value, "***") : text);
 
   return {
-    async run({ profile, message }, observer) {
+    async run({ taskId, profile, message, session }, observer) {
       if (!credential) {
         return failed("no harness credential configured: set TEND_CLAUDE_CODE_CREDENTIAL to oauth-token or api-key and the matching variable in deploy/.env");
       }
@@ -56,14 +63,29 @@ export function createClaudeCodeHarness({
       const template = templateName === undefined ? undefined : templates(templateName);
       if (!template) return failed(`agent profile ${profile.metadata.name}: no sandbox template ${JSON.stringify(templateName ?? "")} is configured`);
 
+      // One pair of volumes per agent session (= task), named after the task.
+      const volumes = [
+        { volume: `${taskId}-workspace`, path: WORKSPACE },
+        { volume: `${taskId}-session`, path: SESSION },
+      ];
+      // An interrupted session's sandbox is abandoned (its adapter ended with the old
+      // worker's connection); it must go before a new sandbox mounts the same volumes.
+      if (session?.sandboxId !== undefined) {
+        observer.progress("removing the sandbox of the interrupted session");
+        await sandboxes.destroy(session.sandboxId).catch(() => {});
+      }
       observer.progress("starting a sandbox");
       let sandboxId: string;
       try {
-        sandboxId = (await sandboxes.create(template)).id;
+        sandboxId = (await sandboxes.create(template, { volumes })).id;
       } catch (error) {
+        // The task fails for good, so volumes the backend may have created go too.
+        await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume).catch(() => {})));
         return failed(`cannot create a sandbox from template ${template.metadata.name}: ${error instanceof Error ? error.message : String(error)}`);
       }
       try {
+        // Kept at once, so a restart before the ACP session exists still finds this sandbox.
+        await observer.saveSession({ ...session, sandboxId });
         await completeOnboarding(sandboxes, sandboxId);
         const process = await sandboxes.attach(sandboxId, {
           command: [ADAPTER],
@@ -85,6 +107,8 @@ export function createClaudeCodeHarness({
           redact,
           keepAliveMs,
           timeoutMs,
+          onSession: (sessionId) => observer.saveSession({ sessionId, sandboxId }),
+          ...(session?.sessionId === undefined ? {} : { resume: { sessionId: session.sessionId, prompt: [{ type: "text", text: CONTINUE }] } }),
         });
         if (turn.outcome === "error") return failed(redact(turn.error));
         const cost = turn.cost ? { cost: turn.cost } : {};
@@ -102,7 +126,9 @@ export function createClaudeCodeHarness({
         return failed(redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`));
       } finally {
         // Destroying the sandbox also ends background commands a cancel leaves running.
+        // The session has ended, so its volumes go too; only an interrupted session keeps them.
         await sandboxes.destroy(sandboxId);
+        await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume)));
       }
     },
   };

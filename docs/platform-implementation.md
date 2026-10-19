@@ -77,7 +77,7 @@ Packages under `packages/` map to the domains; apps under `apps/` are only bundl
 | `sandbox-claude-code` | sandbox image, started via Docker (isolation class `container`, `gvisor` opt-in) | yes |
 | Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch |
 | tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend trigger list, tend notification list, tend approval list/approve; tend chat in milestone 1b |
-| Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers` and `/exec` (writes allowed), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
+| Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers`, `/exec` and `/volumes` (writes allowed), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
 | web UI | run list, run detail, notifications, chat | milestone 1b |
 
 ## Walking skeleton: build order (milestone 1)
@@ -108,7 +108,13 @@ Agent profiles with `harness: claude-code` run Claude Code through `@agentclient
 1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
 2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox.
 3. `docker compose -f deploy/compose.yaml up -d --build --wait`, then start the example: `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'`.
-4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, the cost and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox.
+4. `tend run get <id>` shows the run completed, the reply `hello from the sandbox`, the cost and the transcript reference; read the transcript with `docker compose -f deploy/compose.yaml exec worker cat <path>`. `docker ps -a --filter label=dev.tendworks.sandbox` lists no leftover sandbox, `docker volume ls --filter label=dev.tendworks.volume` no leftover volume.
+
+The workspace (`/workspace`) and the harness's home and config directory (`/session`) are volumes of the agent session, and the ACP session id is kept with the task, so after a platform restart the harness resumes the session with `session/resume` in a new sandbox (ADR XXXX (agent-sessions-resume-on-their-volumes)). Manual restart smoke test with the real harness, after steps 1–3:
+
+5. Start `curl -X POST localhost:8080/runs -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
+6. `docker compose -f deploy/compose.yaml restart worker`.
+7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
 ## Open items
 

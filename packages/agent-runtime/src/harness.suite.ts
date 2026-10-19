@@ -22,7 +22,11 @@ export function describeHarness(name: string, setup: () => HarnessSuiteContext |
     const observe = () => {
       const entries: TranscriptEntry[] = [];
       const progress: string[] = [];
-      const observer: HarnessObserver = { record: (entry) => entries.push(entry), progress: (text) => progress.push(text) };
+      const observer: HarnessObserver = {
+        record: (entry) => entries.push(entry),
+        progress: (text) => progress.push(text),
+        saveSession: async () => {},
+      };
       return { observer, entries, progress };
     };
 

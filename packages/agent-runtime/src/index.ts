@@ -3,7 +3,7 @@ export { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks } from "./agent-t
 export { AgentProfileError, loadAgentProfiles } from "./agent-profiles.js";
 export { createClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude-code/claude-code-harness.js";
 export { claudeCodeCredentialFromEnv, type ClaudeCodeCredential } from "./claude-code/credentials.js";
-export type { Cost, Harness, HarnessObserver, HarnessResult, HarnessTask } from "./harness.js";
+export type { Cost, Harness, HarnessObserver, HarnessResult, HarnessSession, HarnessTask } from "./harness.js";
 export type { Sandboxes, SandboxProcess, SandboxTemplate } from "./sandboxes.js";
 export { createInMemoryTaskStore, type StoredTask, type TaskStore } from "./task-store.js";
 export { createPostgresTaskStore, migrateAgentRuntimeStore, type PostgresTaskStoreOptions } from "./adapters/postgres-task-store.js";
