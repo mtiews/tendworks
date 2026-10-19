@@ -247,7 +247,7 @@ export async function openAcpSession(options: AcpSessionOptions): Promise<AcpSes
           // The agent did not stop; a session still busy with the old turn takes no further one.
           observer.record(turnEnded("cancelled"));
           await close();
-          return { outcome: "stopped", sessionId: id, stopReason: "cancelled", reply: reply.trim() };
+          return { outcome: "stopped", sessionId: id, stopReason: "cancelled", reply: redact(reply.trim()) };
         }
         observer.record(turnEnded(ended.stopReason));
         // The session's cost is cumulative; this turn's is what it added.

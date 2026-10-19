@@ -348,7 +348,7 @@ export function createClaudeCodeHarness({
         });
         if ("outcome" in acp) {
           await sandboxes.destroy(sandboxId).catch(() => {});
-          return { failure: failed(acp.error) };
+          return { failure: failed(prepared.redact(acp.error)) };
         }
         current = { sandboxId, acp };
         return current;
@@ -372,7 +372,7 @@ export function createClaudeCodeHarness({
             // A resumed session holds the interrupted turn's message already; a new one gets it again.
             const prompt = interrupted && connected.acp.resumed ? [{ type: "text" as const, text: CHAT_CONTINUE }] : message.parts.flatMap(toContent);
             const turn = await connected.acp.prompt(prompt, { timeoutMs });
-            if (turn.outcome === "error") return { state: "TASK_STATE_FAILED", message: turn.error };
+            if (turn.outcome === "error") return { state: "TASK_STATE_FAILED", message: prepared.redact(turn.error) };
             return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf(turn.stopReason, turn.reply), ...(turn.cost ? { cost: turn.cost } : {}) };
           } catch (error) {
             return { state: "TASK_STATE_FAILED", message: prepared.redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`) };

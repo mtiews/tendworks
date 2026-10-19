@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import type * as acp from "@agentclientprotocol/sdk";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -347,6 +348,18 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.created).toHaveLength(2);
     expect(sandboxes.destroyed).toEqual(["sandbox1"]);
     expect(sandboxes.observed.resumed.map((resumed) => resumed.sessionId)).toEqual(["session-1"]);
+  });
+
+  it("never reveals a secret in what an agent that does not stop when cancelled wrote so far", async () => {
+    const leak: acp.SessionUpdate = { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "the key is test-key" } };
+    const { runtime, sandboxes } = setup({ hang: "first", ignoreCancel: true, updates: [leak] }, { cancelGraceMs: 10 });
+    const { id } = await runtime.startChat("assistant", say("Work forever"));
+    await vi.waitFor(() => expect(sandboxes.observed.prompts).toHaveLength(1));
+
+    const cancelled = await runtime.cancelChatTurn(id);
+
+    expect(cancelled).toMatchObject({ status: "input-required", message: "the key is ***" });
+    expect(JSON.stringify(await runtime.transcript(id))).not.toContain("test-key");
   });
 
   it("changes nothing when cancelling while no turn runs, and refuses to cancel in an ended chat", async () => {
