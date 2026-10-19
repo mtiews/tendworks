@@ -339,3 +339,37 @@ $defs:
       type: { const: error }
       message:
         type: string
+  streamEvent:
+    title: TranscriptStreamEvent
+    description: >-
+      One Server-Sent Event of a live transcript stream (`text/event-stream`), as a client
+      parses it: `id` and `event` are the SSE fields, `data` is the event's data read as
+      JSON. An `entry` event carries one transcript entry; its id is the entry's position,
+      so a client that reconnects sends the last id it received as `Last-Event-ID` and
+      continues right after that entry. An `end` event closes the stream: the task ended
+      and no entry follows. Comments (lines starting with `:`) keep an idle connection open.
+    oneOf:
+      - $ref: '#/$defs/entryEvent'
+      - $ref: '#/$defs/endEvent'
+  entryEvent:
+    title: TranscriptEntryEvent
+    type: object
+    additionalProperties: false
+    required: [id, event, data]
+    properties:
+      id:
+        type: string
+        description: The entry's position as a decimal number.
+        pattern: '^(0|[1-9][0-9]*)$'
+      event: { const: entry }
+      data: { $ref: '#/$defs/transcriptEntry' }
+  endEvent:
+    title: TranscriptEndEvent
+    type: object
+    additionalProperties: false
+    required: [event, data]
+    properties:
+      event: { const: end }
+      data:
+        type: object
+        additionalProperties: false

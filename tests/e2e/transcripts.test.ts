@@ -1,8 +1,11 @@
+import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ControlPlane } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
-import { client } from "./support/control-plane.js";
+import { baseUrl, client, READ_TOKEN } from "./support/control-plane.js";
+
+const composeFile = fileURLToPath(new URL("../../deploy/compose.yaml", import.meta.url));
 
 type Run = ControlPlane.components["schemas"]["run"];
 type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
@@ -84,6 +87,88 @@ describe("transcripts of running steps on the compose stack", () => {
       expect(entries.map((entry) => entry.position)).toEqual(entries.map((_, index) => index));
       expect(await ended(runId, 240_000)).toMatchObject({ status: "completed" });
       expect((await transcript(runId, taskId)).at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED" });
+    },
+  );
+});
+
+/** The events of a transcript stream; reading stops once `until` is true for the events so far. */
+async function streamEvents(response: Response, until: (events: StreamEvent[]) => boolean = () => false): Promise<StreamEvent[]> {
+  const events: StreamEvent[] = [];
+  const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  try {
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      buffer += chunk.value;
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop()!;
+      for (const block of blocks) {
+        const fields = Object.fromEntries(block.split("\n").filter((line) => !line.startsWith(":")).map((line) => [line.slice(0, line.indexOf(":")), line.slice(line.indexOf(":") + 2)]));
+        if (fields.data === undefined) continue;
+        events.push({ ...(fields.id === undefined ? {} : { id: fields.id }), event: fields.event!, data: JSON.parse(fields.data) as unknown });
+        if (until(events)) return events;
+      }
+    }
+    return events;
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+}
+interface StreamEvent {
+  id?: string;
+  event: string;
+  data: unknown;
+}
+
+const stream = (runId: string, taskId: string, lastEventId?: string) =>
+  fetch(`${baseUrl}/runs/${runId}/tasks/${taskId}/transcript/stream`, {
+    headers: { authorization: `Bearer ${READ_TOKEN}`, ...(lastEventId === undefined ? {} : { "last-event-id": lastEventId }) },
+  });
+
+describe("following running steps live on the compose stack", () => {
+  it("streams a running fake agent step with the read-only token and resumes after Last-Event-ID", { timeout: 120_000 }, async () => {
+    const { runId, taskId } = await runningStep("slow-agent");
+
+    const first = await stream(runId, taskId);
+    const started = await streamEvents(first, (events) => events.length === 1);
+    const stillRunning = (await getRun(runId)).status;
+    const rest = await streamEvents(await stream(runId, taskId, started[0]!.id));
+
+    expect(first.status).toBe(200);
+    expect(first.headers.get("content-type")).toMatch(/^text\/event-stream/);
+    expect(started).toEqual([{ id: "0", event: "entry", data: expect.objectContaining({ position: 0, type: "task-started" }) }]);
+    expect(stillRunning).toBe("running");
+    expect(rest.map((event) => event.id ?? event.event)).toEqual(["1", "2", "3", "end"]);
+    expect(rest.map((event) => (event.data as { type?: string }).type)).toEqual(["message-chunk", "turn-ended", "task-ended", undefined]);
+  });
+
+  it("refuses to stream without a token", async () => {
+    expect((await fetch(`${baseUrl}/runs/r-1/tasks/t-1/transcript/stream`)).status).toBe(401);
+  });
+
+  it.skipIf(!credentialSelected())(
+    "tend run logs --follow shows what the scripted ACP agent does before its step finishes, and stops when the run ends",
+    { timeout: 300_000 },
+    async () => {
+      const { runId } = await runningStep("restart-scripted");
+      // The tend CLI as the server image ships it, against the stack's own API.
+      const tend = spawn("docker", ["compose", "-f", composeFile, "exec", "-T", "server", "node", "apps/cli/dist/main.js", "--url", "http://localhost:8080", "--token", READ_TOKEN, "run", "logs", runId, "--follow"]);
+      let stdout = "";
+      let stderr = "";
+      tend.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString()));
+      tend.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
+      const exited = new Promise<number | null>((resolve) => tend.on("close", resolve));
+
+      await until("the agent's first tool call in the followed logs", 120_000, async () => (stdout.includes("Write before.txt") ? true : undefined));
+      const whileFollowing = await getRun(runId);
+      const exitCode = await exited;
+
+      expect(whileFollowing.steps[0]?.status).toBe("running");
+      expect({ exitCode, stderr }).toEqual({ exitCode: 0, stderr: "" });
+      expect(stdout).toMatch(/^== \/do\/0\/\S+ \(\S+\)\n\d\d:\d\d:\d\d {2}task {7}scripted-developer: /);
+      expect(stdout).toMatch(/tool {7}Write before\.txt\n(.*\n)*.*tool {7}Write after\.txt\n/);
+      // The last entry; the agent's reply in it continues over several lines.
+      expect(stdout).toMatch(/\n\d\d:\d\d:\d\d {2}ended {6}TASK_STATE_COMPLETED: [^]*\(0\.01 USD\)\n$/);
+      expect((await getRun(runId)).status).toBe("completed");
     },
   );
 });

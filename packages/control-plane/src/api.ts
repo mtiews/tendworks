@@ -175,6 +175,28 @@ export function createControlPlaneApi({
     return c.json({ items } satisfies Schemas["TranscriptEntryList"], 200);
   });
 
+  app.get("/runs/:runId/tasks/:taskId/transcript/stream", async (c) => {
+    const runId = c.req.param("runId");
+    const taskId = c.req.param("taskId");
+    const lastEventId = c.req.header("last-event-id");
+    if (lastEventId !== undefined && !/^(0|[1-9][0-9]*)$/.test(lastEventId)) {
+      return problem(400, "Invalid Last-Event-ID", "Last-Event-ID must be the position of a transcript entry, e.g. 41");
+    }
+    const run = await runs.get(runId);
+    if (!run) return problem(404, "Run not found");
+    if (!run.steps.some((step) => step.taskId === taskId)) return problem(404, "Task not found", `no step of run ${runId} handed task ${taskId} to an agent`);
+    if (!agentRuntime) return problem(503, "Agent runtime unavailable", "no agent runtime is configured");
+    let stream;
+    try {
+      stream = await agentRuntime.streamTranscript(taskId, lastEventId === undefined ? {} : { after: Number(lastEventId) });
+    } catch (error) {
+      return problem(503, "Agent runtime unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!stream) return problem(404, "Transcript not found", `task ${taskId} has no transcript`);
+    // Passed through as it comes (ADR 0017); the agent runtime ends it when the task ends.
+    return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+  });
+
   app.get("/agents", (c) => {
     const items = configuration.agentProfiles
       .map(({ metadata, spec }): Schemas["Agent"] => {

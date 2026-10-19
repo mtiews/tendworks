@@ -130,6 +130,8 @@ const stopped = runWorker.run().catch((error: unknown) => {
 async function shutdown() {
   runWorker.shutdown();
   server.close();
+  // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.
+  if ("closeAllConnections" in server) server.closeAllConnections();
   await stopped;
   await bus.close();
   await Promise.all([engine.close(), pool.end()]);

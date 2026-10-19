@@ -34,7 +34,55 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /tasks/{taskId}/transcript/stream:
+    get:
+      operationId: streamTaskTranscript
+      summary: Follow the transcript of a task's agent session live
+      description: >-
+        The transcript as Server-Sent Events (ADR 0017): first the entries recorded so far,
+        then each new entry as it is recorded, until the task ends; then an `end` event, and
+        the stream closes. For a task that already ended, all entries and the `end` event.
+        Each entry event's id is the entry's position; with `Last-Event-ID` the stream
+        starts right after that position, so a client that reconnects misses nothing and
+        sees nothing twice. Secrets the session was given are redacted.
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: >-
+            The live transcript. The schema describes each event of the stream, as a
+            client parses it (the role of OpenAPI 3.2's `itemSchema`).
+          content:
+            text/event-stream:
+              schema:
+                $ref: "../schemas/transcript-entry.schema.yaml#/$defs/streamEvent"
+        "400":
+          description: "`Last-Event-ID` is not the position of an entry."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No task with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
 components:
+  parameters:
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: Position of the last entry the client received; the stream continues after it.
+      schema:
+        type: string
+        pattern: "^(0|[1-9][0-9]*)$"
   schemas:
     TranscriptEntryList:
       type: object

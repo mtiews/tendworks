@@ -14,6 +14,7 @@ import {
   type PullRequests,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
+import { readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
@@ -184,6 +185,50 @@ describe("control plane: transcripts of run steps, through orchestration and the
 
     expect((await transcript(client, run.id, run.steps[0]!.taskId!)).response.status).toBe(503);
   });
+
+  const stream = (client: ReturnType<typeof controlPlane>, runId: string, taskId: string, lastEventId?: string) =>
+    client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
+      params: { path: { runId, taskId }, header: lastEventId === undefined ? {} : { "Last-Event-ID": lastEventId } },
+      parseAs: "stream",
+    });
+  async function events(body: ReadableStream<Uint8Array> | null | undefined) {
+    const all: { id?: string; event?: string; data: string }[] = [];
+    for await (const event of readServerSentEvents(body!)) all.push(event);
+    return all;
+  }
+
+  it("streams the entries of a step's agent session, each event as the contract describes it, after Last-Event-ID", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    const whole = await stream(client, run.id, run.steps[0]!.taskId!);
+    const resumed = await stream(client, run.id, run.steps[0]!.taskId!, "1");
+
+    expect(whole.response.status).toBe(200);
+    expect((await events(whole.data)).map((event) => event.event)).toEqual(["entry", "entry", "entry", "entry", "end"]);
+    expect((await events(resumed.data)).map((event) => event.id)).toEqual(["2", "3", undefined]);
+  });
+
+  it("refuses a Last-Event-ID that is no position, an unknown run and a task that is no step of the run", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+    const taskId = run.steps[0]!.taskId!;
+    const refusedId = await client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
+      params: { path: { runId: run.id, taskId } },
+      headers: { "last-event-id": "latest" },
+    });
+
+    expect(refusedId.response.status).toBe(400);
+    expect((await stream(client, "missing", taskId)).response.status).toBe(404);
+    expect((await stream(client, run.id, "not-a-step-task")).response.status).toBe(404);
+  });
+
+  it("answers 503 for a stream when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const run = await finishedRun(client);
+
+    expect((await stream(client, run.id, run.steps[0]!.taskId!)).response.status).toBe(503);
+  });
 });
 
 describe("agent runtime, called directly", () => {
@@ -191,6 +236,15 @@ describe("agent runtime, called directly", () => {
     const response = await worker().agentRuntime(new Request("http://worker.test/tasks/unknown/transcript"));
 
     expect(response.status).toBe(404);
+  });
+
+  it("refuses to stream a task it does not know or after a Last-Event-ID that is no position", async () => {
+    const { agentRuntime } = worker();
+
+    const unknown = await agentRuntime(new Request("http://worker.test/tasks/unknown/transcript/stream"));
+    const invalid = await agentRuntime(new Request("http://worker.test/tasks/unknown/transcript/stream", { headers: { "last-event-id": "-1" } }));
+
+    expect([unknown.status, invalid.status]).toEqual([404, 400]);
   });
 });
 
@@ -232,6 +286,7 @@ describe("control plane: the API token", () => {
       client.GET("/runs"),
       client.GET("/runs/{runId}", { params: { path: { runId: "r-1" } } }),
       client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
+      client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/agents"),
       client.GET("/triggers"),
       client.GET("/notifications"),
@@ -239,7 +294,7 @@ describe("control plane: the API token", () => {
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {

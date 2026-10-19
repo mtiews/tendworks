@@ -137,7 +137,10 @@ triggerGateway.start();
 
 async function shutdown() {
   await triggerGateway.stop();
-  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.
+  if ("closeAllConnections" in server) server.closeAllConnections();
+  await closed;
   await bus.close();
   await pool.end();
 }

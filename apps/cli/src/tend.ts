@@ -1,6 +1,7 @@
+import { readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Command, CommanderError, Option } from "commander";
-import createClient from "openapi-fetch";
+import createClient, { type Client } from "openapi-fetch";
 import { stringify as stringifyYaml } from "yaml";
 
 type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
@@ -29,7 +30,14 @@ export interface TendIo {
   fetch?: (request: Request) => Promise<Response>;
   stdout: (text: string) => void;
   stderr: (text: string) => void;
+  /** Waiting between polls and reconnects; replaceable in tests. */
+  sleep?: (ms: number) => Promise<void>;
 }
+
+/** How often `--follow` looks for new steps and for the end of the run. */
+const POLL_MS = 1000;
+/** Attempts to reach a transcript stream in a row before `--follow` gives up. */
+const CONNECT_ATTEMPTS = 5;
 
 /** Runs one tend command line and resolves to its exit code. */
 export async function runTend(args: string[], io: TendIo): Promise<number> {
@@ -105,9 +113,14 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .command("logs")
     .description("print the transcript of each agent step of a run, finished or running")
     .argument("<id>", "run id")
+    .option("-f, --follow", "stream new entries of the run's agent steps as they come, until the run ends")
     .addOption(outputOption())
-    .action(async (runId: string, options: { output: OutputFormat }, command: Command) => {
+    .action(async (runId: string, options: { output: OutputFormat; follow?: boolean }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
+      if (options.follow) {
+        await followRun({ runId, client, baseUrl, output: options.output, io });
+        return;
+      }
       const unreachable = (cause: unknown) => {
         throw new UnreachableError(baseUrl, cause);
       };
@@ -349,6 +362,160 @@ function formatRunLogs({ run, steps }: RunLogs): string {
       return [`== ${reference} (${taskId}, ${status})`, ...lines].map((line) => `${line}\n`).join("");
     })
     .join("\n");
+}
+
+type ControlPlaneClient = Client<ControlPlane.paths>;
+
+const TERMINAL_RUN: ReadonlySet<Run["status"]> = new Set(["completed", "failed"]);
+
+/**
+ * `tend run logs --follow`: the agent steps of a run one after another, each streamed
+ * live (ADR 0017) until its task ends, until the run ends. A broken stream is resumed
+ * with `Last-Event-ID`, so no entry is missed or printed twice. Once the run has ended,
+ * what is left of a step is read from its transcript instead of waiting for its stream.
+ */
+async function followRun({ runId, client, baseUrl, output, io }: { runId: string; client: ControlPlaneClient; baseUrl: string; output: OutputFormat; io: TendIo }) {
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const unreachable = (cause: unknown): never => {
+    throw new UnreachableError(baseUrl, cause);
+  };
+  const getRun = async () => {
+    const { data, error, response } = await client.GET("/runs/{runId}", { params: { path: { runId } } }).catch(unreachable);
+    if (response.status === 404) throw new Error(`run ${runId} not found`);
+    if (!data) throw new AnswerError(response, error);
+    return data;
+  };
+  const printer = entryPrinter(io.stdout, output);
+
+  /** Streams a step's transcript after `last` until its task ends or the run ends. */
+  async function followStep(taskId: string, print: (entry: TranscriptEntry) => void, last: () => number): Promise<"ended" | "run-ended" | "missing"> {
+    const stop = new AbortController();
+    const runEnded = new Promise<"run-ended">((resolve) => stop.signal.addEventListener("abort", () => resolve("run-ended"), { once: true }));
+    let following = true;
+    void (async () => {
+      while (following) {
+        await sleep(POLL_MS);
+        if (!following) return;
+        const run = await getRun().catch(() => undefined);
+        if (run && TERMINAL_RUN.has(run.status)) stop.abort();
+      }
+    })();
+    try {
+      for (let failures = 0; ; ) {
+        let answer;
+        try {
+          answer = await client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
+            params: { path: { runId, taskId }, header: last() < 0 ? {} : { "Last-Event-ID": String(last()) } },
+            parseAs: "stream",
+            signal: stop.signal,
+          });
+        } catch (cause) {
+          if (stop.signal.aborted) return "run-ended";
+          if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
+          await sleep(POLL_MS);
+          continue;
+        }
+        const { data, error, response } = answer;
+        if (response.status === 404) return "missing";
+        if (!response.ok || !data) throw new AnswerError(response, error);
+        const events = readServerSentEvents(data);
+        try {
+          for (;;) {
+            const next = await Promise.race([events.next(), runEnded]);
+            if (next === "run-ended") {
+              void events.return(undefined);
+              return next;
+            }
+            if (next.done) break;
+            failures = 0;
+            if (next.value.event === "end") return "ended";
+            if (next.value.event === "entry") print(JSON.parse(next.value.data) as TranscriptEntry);
+          }
+        } catch {
+          // The connection broke; resumed below.
+        }
+        if (stop.signal.aborted) return "run-ended";
+        if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
+        await sleep(POLL_MS);
+      }
+    } finally {
+      following = false;
+    }
+  }
+
+  /** What is left of a step's transcript after `last`; false if it has none. */
+  async function readRest(taskId: string, print: (entry: TranscriptEntry) => void, last: number): Promise<boolean> {
+    const { data, error, response } = await client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } }).catch(unreachable);
+    if (response.status === 404) return false;
+    if (!data) throw new AnswerError(response, error);
+    for (const entry of data.items) if (entry.position > last) print(entry);
+    return true;
+  }
+
+  const followed = new Set<string>();
+  let run = await getRun();
+  for (;;) {
+    const ended = TERMINAL_RUN.has(run.status);
+    const step = run.steps.find((candidate) => candidate.taskId !== undefined && !followed.has(`${candidate.reference} ${candidate.taskId}`));
+    if (!step) {
+      if (ended) return;
+      await sleep(POLL_MS);
+      run = await getRun();
+      continue;
+    }
+    const taskId = step.taskId!;
+    followed.add(`${step.reference} ${taskId}`);
+    printer.step(step.reference, taskId);
+    let last = -1;
+    const print = (entry: TranscriptEntry) => {
+      last = entry.position;
+      printer.entry(entry);
+    };
+    const outcome = ended ? "run-ended" : await followStep(taskId, print, () => last);
+    const found = outcome === "run-ended" ? await readRest(taskId, print, last) : outcome === "ended";
+    if (!found) printer.missing();
+    printer.endStep();
+    if (!ended) run = await getRun();
+  }
+}
+
+/**
+ * Prints entries one at a time as they arrive: as lines like `tend run logs`, where the
+ * chunks of a message continue on the line they started, or as one JSON or YAML
+ * document per entry.
+ */
+function entryPrinter(write: (text: string) => void, format: OutputFormat) {
+  let current = { step: "", taskId: "" };
+  let steps = 0;
+  let open: "message-chunk" | "thought-chunk" | undefined;
+  const indent = (text: string) => text.replaceAll("\n", `\n${" ".repeat(21)}`);
+  const endLine = () => {
+    if (open) write("\n");
+    open = undefined;
+  };
+  return {
+    step(step: string, taskId: string) {
+      current = { step, taskId };
+      if (format === "table") write(`${steps > 0 ? "\n" : ""}== ${step} (${taskId})\n`);
+      steps++;
+    },
+    entry(entry: TranscriptEntry) {
+      if (format === "json") return write(`${JSON.stringify({ ...current, entry })}\n`);
+      if (format === "yaml") return write(`---\n${stringifyYaml({ ...current, entry })}`);
+      if (entry.type === "message-chunk" || entry.type === "thought-chunk") {
+        if (open === entry.type) return write(indent(entry.text));
+        endLine();
+        open = entry.type;
+        return write(`${entry.time.slice(11, 19)}  ${(entry.type === "message-chunk" ? "agent" : "thinking").padEnd(10)} ${indent(entry.text.trimStart())}`);
+      }
+      endLine();
+      write(formatTranscript([entry]).map((line) => `${line}\n`).join(""));
+    },
+    missing() {
+      if (format === "table") write("(no transcript)\n");
+    },
+    endStep: endLine,
+  };
 }
 
 /**
