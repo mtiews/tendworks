@@ -155,3 +155,12 @@ pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
 asks_for_develop_issue() {
   grep -E '^[[:space:]]*workflows:' examples/config/policies/ask-before-merge.yaml | grep -q 'develop-issue'
 }
+
+# Fails early with a hint when the control plane does not answer, e.g. because server or
+# worker refused an invalid configuration (images older than the contracts need a rebuild).
+if ! curl -fsS -o /dev/null "$URL/status" 2>/dev/null && [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/status")" != 503 ]; then
+  echo "The control plane at $URL does not answer." >&2
+  echo "Check: docker compose -f deploy/compose.yaml ps   and   ... logs server --tail 20" >&2
+  echo "After code or contract changes rebuild: docker compose -f deploy/compose.yaml up -d --build --wait" >&2
+  exit 1
+fi
