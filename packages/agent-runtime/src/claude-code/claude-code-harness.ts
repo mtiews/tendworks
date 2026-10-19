@@ -44,6 +44,11 @@ const CONTINUE =
   "The platform restarted while you were working on this task, and your last turn was interrupted. " +
   "Check the state of the workspace, then continue the task where you left off and finish it.";
 
+/** The prompt of a chat's session resumed after a restart interrupted its turn. */
+const CHAT_CONTINUE =
+  "The platform restarted while you were working on the operator's last message, and your turn was interrupted. " +
+  "Check the state of the workspace, then continue where you left off and answer the operator.";
+
 /** The volumes of a task's agent session, mounted into every sandbox it runs in. */
 const volumesOf = (taskId: string): VolumeMount[] => [
   { volume: `${taskId}-workspace`, path: WORKSPACE },
@@ -315,17 +320,32 @@ export function createClaudeCodeHarness({
       }
 
       return {
-        async turn(message) {
+        async turn(message, { interrupted = false } = {}) {
           const prepared = prepare(profile);
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
           try {
             const connected = await connect(prepared);
             if ("failure" in connected) return { state: "TASK_STATE_FAILED", message: connected.failure.message };
-            const turn = await connected.acp.prompt(message.parts.flatMap(toContent), { timeoutMs });
+            // A resumed session holds the interrupted turn's message already; a new one gets it again.
+            const prompt = interrupted && connected.acp.resumed ? [{ type: "text" as const, text: CHAT_CONTINUE }] : message.parts.flatMap(toContent);
+            const turn = await connected.acp.prompt(prompt, { timeoutMs });
             if (turn.outcome === "error") return { state: "TASK_STATE_FAILED", message: turn.error };
             return { state: "TASK_STATE_INPUT_REQUIRED", message: answerOf(turn.stopReason, turn.reply), ...(turn.cost ? { cost: turn.cost } : {}) };
           } catch (error) {
             return { state: "TASK_STATE_FAILED", message: prepared.redact(`the agent session failed: ${error instanceof Error ? error.message : String(error)}`) };
+          }
+        },
+        async suspend() {
+          // Taken at once, so a turn that starts meanwhile connects to a new sandbox.
+          const suspended = current;
+          const sandboxId = suspended?.sandboxId ?? kept?.sandboxId;
+          current = undefined;
+          if (sandboxId === undefined) return;
+          await sandboxes.destroy(sandboxId).catch(() => {});
+          await suspended?.acp.close();
+          if (kept?.sandboxId === sandboxId) {
+            const { sandboxId: _gone, ...rest } = kept;
+            await keep(rest);
           }
         },
         async end() {

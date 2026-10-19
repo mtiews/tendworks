@@ -46,6 +46,7 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
           observer.record({ type: "turn-ended", reason: "completed" });
           return { state: "TASK_STATE_INPUT_REQUIRED", message: text, cost: { amount: 0, currency: "USD" } };
         },
+        async suspend() {},
         async end() {},
       };
     },
