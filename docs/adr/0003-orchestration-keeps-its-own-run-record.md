@@ -2,7 +2,7 @@
 
 Orchestration stores every `Run` and `Step` in its own Postgres schema (`orchestration`), written by short, idempotent activities at each step boundary, instead of reading run state from the durable execution engine. The engine's dev mode forgets finished workflow executions after 24 hours, and its data is product-shaped; our record survives that, stays readable while the worker is down, and is exportable as YAML or JSON. The control plane does not import orchestration: it reaches runs through orchestration's internal API (`contracts/openapi/orchestration.yaml`, served by the worker) and passes the configured workflow definition along when it starts a run, so the run executes a snapshot.
 
-Run and step events (`dev.tendworks.run.*`, `dev.tendworks.step.*`) go through orchestration's `EventPublisher` port, inside the transaction that writes the state they describe. Until the event bus exists, the adapter writes them to orchestration's own outbox table (`orchestration.outbox`); the event bus later provides a publisher with the same `publish(tx, event)` shape, wired in the worker bundle, because the event-bus package is a domain that orchestration may not import.
+Run and step events (`dev.tendworks.run.*`, `dev.tendworks.step.*`) go through orchestration's `EventPublisher` port, inside the transaction that writes the state they describe. Until the event bus exists, the adapter writes them to orchestration's own outbox table (`orchestration.outbox`); the event bus provides a publisher with the same `publish(tx, event)` shape, wired in the worker bundle, because the event-bus package is a domain that orchestration may not import (ADR 0004).
 
 ## Considered Options
 
