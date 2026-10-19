@@ -35,6 +35,8 @@ export default defineConfig({
           name: "e2e",
           include: ["tests/e2e/**/*.test.ts"],
           testTimeout: 30_000,
+          // One stack for all files; the restart test must not pull it away from the others.
+          fileParallelism: false,
         },
       },
     ],

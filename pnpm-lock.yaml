@@ -253,9 +253,16 @@ importers:
       ajv:
         specifier: 8.20.0
         version: 8.20.0
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
       yaml:
         specifier: 2.9.1
         version: 2.9.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/control-plane:
     dependencies:
