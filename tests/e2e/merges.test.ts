@@ -30,6 +30,7 @@ describe("merge step on the compose stack", () => {
       steps: [
         { name: "implement", reference: "/do/0/implement", status: "completed" },
         { name: "merge", reference: "/do/1/merge", status: "completed" },
+        { name: "merged", reference: "/do/2/merged", status: "completed" },
       ],
       output: { pullRequest: "https://git.example/example/playground/pull/1", merged: true, decision: "allow" },
     });
