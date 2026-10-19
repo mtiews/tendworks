@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { isTraceparent } from "@tendworks/platform";
+import { isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
@@ -63,7 +63,7 @@ export function apiTokenProblems({
   const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
   const problems: string[] = [];
   if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
-  const readers = agentProfiles.filter((profile) => profile.spec.mcp?.includes("tendworks")).map((profile) => profile.metadata.name);
+  const readers = agentProfiles.filter(listsPlatformMcpServer).map((profile) => profile.metadata.name);
   if (readToken === undefined && readers.length > 0) {
     const profiles = `agent profile${readers.length > 1 ? "s" : ""} ${readers.join(", ")} list${readers.length > 1 ? "" : "s"}`;
     problems.push(`TEND_API_READ_TOKEN must be set: ${profiles} the platform MCP server (mcp: [tendworks]), which reads with it`);

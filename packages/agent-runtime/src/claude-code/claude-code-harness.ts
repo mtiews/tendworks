@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import type { SecretResolver } from "@tendworks/platform";
+import { listsPlatformMcpServer, PLATFORM_MCP_SERVER, type SecretResolver } from "@tendworks/platform";
 import type { A2A } from "@tendworks/shared";
 import { openAcpSession, runAcpTurn, type AcpSession, type AcpSessionOptions, type AcpTurn } from "../acp/acp-turn.js";
 import type { LoadedAgentProfile } from "../agent-profiles.js";
@@ -123,11 +123,11 @@ export function createClaudeCodeHarness({
 
   /** MCP servers: the platform MCP server, configured for the session only when the profile lists it. */
   function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers } | { failure: HarnessResult } {
-    if (!profile.spec.mcp?.includes("tendworks")) return { mcpServers: [] };
+    if (!listsPlatformMcpServer(profile)) return { mcpServers: [] };
     if (!platformMcp) {
       return { failure: failed(`agent profile ${profile.metadata.name} lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker`) };
     }
-    return { mcpServers: [{ type: "http", name: "tendworks", url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }] };
+    return { mcpServers: [{ type: "http", name: PLATFORM_MCP_SERVER, url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }] };
   }
 
   /**
@@ -253,13 +253,13 @@ export function createClaudeCodeHarness({
         return { state: "TASK_STATE_COMPLETED", message: turn.reply, ...cost, ...(artifacts.length > 0 ? { artifacts } : {}) };
       }
       case "refusal":
-        return { state: "TASK_STATE_REJECTED", message: turn.reply || "the agent refused the task", ...cost };
+        return { state: "TASK_STATE_REJECTED", message: answerOf(turn.stopReason, turn.reply), ...cost };
       case "cancelled":
-        return { state: "TASK_STATE_CANCELED", message: turn.reply || "the session was cancelled", ...cost };
+        return { state: "TASK_STATE_CANCELED", message: answerOf(turn.stopReason, turn.reply), ...cost };
       case "max_tokens":
-        return { state: "TASK_STATE_FAILED", message: `the agent stopped early: it reached its token limit${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
       case "max_turn_requests":
-        return { state: "TASK_STATE_FAILED", message: `the agent stopped early: it reached its limit of model requests per turn${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
+        // The limit is the failure; what the agent wrote before it is context.
+        return { state: "TASK_STATE_FAILED", message: `${STOPPED[turn.stopReason]}${turn.reply ? `: ${turn.reply}` : ""}`, ...cost };
     }
   }
 
@@ -419,21 +419,17 @@ interface Prepared {
   redact: (text: string) => string;
 }
 
+/** How a turn ended that the agent did not finish, in words, for runs and chats alike. */
+const STOPPED: Record<Exclude<acp.StopReason, "end_turn">, string> = {
+  refusal: "the agent refused",
+  cancelled: "the turn was cancelled",
+  max_tokens: "the agent stopped early: it reached its token limit",
+  max_turn_requests: "the agent stopped early: it reached its limit of model requests per turn",
+};
+
 /** What the agent answered in a turn, or how the turn ended when it wrote nothing. */
 function answerOf(stopReason: acp.StopReason, reply: string): string {
-  if (reply) return reply;
-  switch (stopReason) {
-    case "end_turn":
-      return "";
-    case "refusal":
-      return "the agent refused";
-    case "cancelled":
-      return "the turn was cancelled";
-    case "max_tokens":
-      return "the agent stopped early: it reached its token limit";
-    case "max_turn_requests":
-      return "the agent stopped early: it reached its limit of model requests per turn";
-  }
+  return reply || (stopReason === "end_turn" ? "" : STOPPED[stopReason]);
 }
 
 /** The artifacts the agent recorded in its artifacts file; a malformed file is recorded and ignored. */

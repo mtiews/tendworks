@@ -13,7 +13,7 @@ import {
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi } from "@tendworks/health";
-import { createSecretResolver } from "@tendworks/platform";
+import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platform";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -70,7 +70,7 @@ const platformMcpUrl = process.env.TEND_PLATFORM_MCP_URL || undefined;
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
 const platformMcp = platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken } : undefined;
 for (const profile of profiles) {
-  if (profile.spec.mcp?.includes("tendworks") && !platformMcp) {
+  if (listsPlatformMcpServer(profile) && !platformMcp) {
     console.warn(`agent profile ${profile.metadata.name}: lists the platform MCP server, but TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN is not set; its tasks will fail until this is fixed`);
   }
 }
