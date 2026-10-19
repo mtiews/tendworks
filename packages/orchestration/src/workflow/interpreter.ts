@@ -1,6 +1,7 @@
 import type { A2A, Workflow } from "@tendworks/shared";
 import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, type AgentTaskExecutor } from "./agent-task-executor.js";
-import { evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
+import { evaluate, evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
+import type { EventInbox } from "./event-inbox.js";
 import type { HttpExecutor, HttpResponse } from "./http-executor.js";
 
 // Deterministic core: no I/O, no clock, no randomness. All side effects go through
@@ -12,6 +13,8 @@ export interface RunOptions {
   executor: AgentTaskExecutor;
   /** Makes the requests of `call: http` tasks; without it they fail. */
   http?: HttpExecutor;
+  /** Delivers the run's events to `listen` tasks; without it they fail. */
+  events?: EventInbox;
   /** The `$runtime` argument of runtime expressions. */
   runtime?: RuntimeDescriptor;
   /** Called with a snapshot of a step when it starts and when it ends. */
@@ -89,23 +92,46 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
   const runtime = options.runtime ?? { name: "tendworks", metadata: {} };
   const variables = (input: unknown): Variables => ({ context, input, workflow: workflowVariable, runtime });
 
-  async function runTaskList(tasks: Workflow.TaskList, scope: string, input: unknown): Promise<unknown> {
+  /** Runs a task list from its first task, following flow directives; `ended` when a task ended the workflow. */
+  async function runTaskList(tasks: Workflow.TaskList, scope: string, input: unknown): Promise<{ output: unknown; ended: boolean }> {
     let data = input;
-    for (const [index, item] of tasks.entries()) {
-      const [name, task] = Object.entries(item)[0]!;
-      data = await runTask(name, task, `${scope}/do/${index}/${name}`, data);
+    let index = 0;
+    while (index < tasks.length) {
+      const [name, task] = Object.entries(tasks[index]!)[0]!;
+      const result = await runTask(name, task, `${scope}/do/${index}/${name}`, data);
+      data = result.output;
+      const then = result.then ?? "continue";
+      if (then === "end" || result.ended) return { output: data, ended: true };
+      if (then === "exit") break;
+      // Validation guarantees that a named target exists in this list.
+      index = then === "continue" ? index + 1 : tasks.findIndex((item) => Object.keys(item)[0] === then);
     }
-    return data;
+    return { output: data, ended: false };
   }
 
-  async function runTask(name: string, task: Workflow.Task, reference: string, rawInput: unknown): Promise<unknown> {
+  async function runTask(
+    name: string,
+    task: Workflow.Task,
+    reference: string,
+    rawInput: unknown,
+  ): Promise<{ output: unknown; then?: string; ended?: boolean }> {
     const step: Step = { name, reference, status: "running" };
     steps.push(step);
     await record(step);
     try {
       const input = transform(task.input?.from, rawInput, variables(rawInput));
       let rawOutput: unknown;
-      if ("call" in task && task.call === "http") {
+      let then = task.then;
+      let ended = false;
+      if ("switch" in task) {
+        rawOutput = input;
+        const matched = task.switch
+          .map((entry) => Object.values(entry)[0]!)
+          .find((candidate) => candidate.when === undefined || evaluate(candidate.when, input, variables(input)) === true);
+        if (matched) then = matched.then;
+      } else if ("listen" in task) {
+        rawOutput = await listen(task, reference);
+      } else if ("call" in task && task.call === "http") {
         rawOutput = await callHttp(task, reference, input);
       } else if ("call" in task) {
         const result = await call(task, reference, input);
@@ -122,13 +148,13 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
         }
         rawOutput = result;
       } else {
-        rawOutput = await runTaskList(task.do, reference, input);
+        ({ output: rawOutput, ended } = await runTaskList(task.do, reference, input));
       }
       const output = transform(task.output?.as, rawOutput, variables(input));
       if (task.export?.as !== undefined) context = transform(task.export.as, output, variables(input));
       step.status = "completed";
       await record(step);
-      return output;
+      return { output, ...(then === undefined ? {} : { then }), ended };
     } catch (error) {
       const failure = TaskFailure.of(error, reference);
       if (failure instanceof TaskFailure && step.status === "running") {
@@ -175,6 +201,15 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     return response.content ?? null;
   }
 
+  async function listen(task: Workflow.ListenTask, reference: string): Promise<unknown[]> {
+    if (!options.events) {
+      throw new TaskFailure({ type: `${ERROR_TYPES}runtime`, status: 500, instance: reference, title: "This runtime delivers no events" });
+    }
+    const { type } = task.listen.to.one.with;
+    const event = await options.events.receive((candidate) => candidate.type === type);
+    return [task.listen.read === "envelope" ? event : (event.data ?? null)];
+  }
+
   async function call(task: Workflow.CallA2ATask, reference: string, input: unknown): Promise<A2A.Task> {
     const parameters = evaluateTemplate(task.with.parameters, input, variables(input)) as Workflow.WithA2AParameters;
     // The DSL speaks A2A 0.3 (`kind` parts, role `user`); the port speaks A2A 1.0.
@@ -210,7 +245,7 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
   };
   try {
     const input = at("/input/from", () => transform(workflow.input?.from, options.input, variables(options.input)));
-    const data = await runTaskList(workflow.do, "", input);
+    const { output: data } = await runTaskList(workflow.do, "", input);
     const output = at("/output/as", () => transform(workflow.output?.as, data, variables(data)));
     return { status: "completed", output, steps };
   } catch (failure) {

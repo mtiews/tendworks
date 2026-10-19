@@ -172,7 +172,7 @@ function agentCalls(tasks: Workflow.TaskList, scope: string): [string, string][]
     Object.entries(item).flatMap(([name, task]): [string, string][] => {
       const reference = `${scope}/do/${index}/${name}`;
       if ("call" in task) return task.call === "a2a" ? [[reference, task.with.agentCard.endpoint.slice("agent://".length)]] : [];
-      return agentCalls(task.do, reference);
+      return "do" in task ? agentCalls(task.do, reference) : [];
     }),
   );
 }

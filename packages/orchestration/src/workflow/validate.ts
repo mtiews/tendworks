@@ -8,7 +8,7 @@ import { parse } from "yaml";
 
 const SCHEMA = new URL("../../../../contracts/schemas/serverless-workflow.schema.yaml", import.meta.url);
 
-const SUPPORTED_TASKS = ["call", "do"];
+const SUPPORTED_TASKS = ["call", "do", "switch", "listen"];
 const SUPPORTED_CALLS = ["a2a", "http"];
 // Every task type of DSL 1.0.3. `for` also has a `do` list, so it is checked first.
 const DSL_TASKS = ["call", "fork", "emit", "for", "listen", "raise", "run", "set", "switch", "try", "wait", "do"];
@@ -34,6 +34,8 @@ export function validateWorkflow(definition: unknown): Workflow.Workflow {
     .addKeyword({ keyword: "tsType" }) // annotation for the type generator
     .compile(parse(readFileSync(SCHEMA, "utf8")));
   if (!validateSchema(definition)) throw new WorkflowValidationError(describe(validateSchema.errors ?? []));
+  const unreachable = unknownFlowTargets((definition as Workflow.Workflow).do, "");
+  if (unreachable.length > 0) throw new WorkflowValidationError(unreachable);
   return definition as Workflow.Workflow;
 }
 
@@ -60,6 +62,22 @@ function unsupportedTasks(definition: unknown): string[] {
   };
   if (isObject(definition)) visit(definition.do, "");
   return issues;
+}
+
+const DIRECTIVES = ["continue", "exit", "end"];
+
+/** Flow directives must name a task of their own list. */
+function unknownFlowTargets(tasks: Workflow.TaskList, scope: string): string[] {
+  const names = tasks.map((item) => Object.keys(item)[0]!);
+  return tasks.flatMap((item, index) => {
+    const [name, task] = Object.entries(item)[0]!;
+    const reference = `${scope}/do/${index}/${name}`;
+    const targets = [task.then, ..."switch" in task ? task.switch.map((entry) => Object.values(entry)[0]!.then) : []];
+    const issues = targets
+      .filter((target): target is string => target !== undefined && !DIRECTIVES.includes(target) && !names.includes(target))
+      .map((target) => `${reference}: then names no task '${target}' of its list (tasks: ${names.join(", ")})`);
+    return "do" in task ? [...issues, ...unknownFlowTargets(task.do, reference)] : issues;
+  });
 }
 
 function describe(errors: ErrorObject[]): string[] {

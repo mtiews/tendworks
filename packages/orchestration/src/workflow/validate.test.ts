@@ -30,14 +30,11 @@ describe("validateWorkflow", () => {
 do:${implement}
   - review:
       do:
-        - wait:
-            listen:
-              to:
-                one:
-                  with: { type: dev.tendworks.approval.decided }
+        - pause:
+            wait: { minutes: 5 }
 `);
 
-    expect(issues).toEqual(["/do/1/review/do/0/wait: unsupported task type 'listen' (supported: call, do)"]);
+    expect(issues).toEqual(["/do/1/review/do/0/pause: unsupported task type 'wait' (supported: call, do, switch, listen)"]);
   });
 
   it("rejects a call type other than a2a and http", () => {
@@ -86,10 +83,10 @@ do:
   it("names a property the interpreter does not support", () => {
     const issues = issuesOf(`${header}
 do:${implement}
-      then: end
+      timeout: { after: { minutes: 5 } }
 `);
 
-    expect(issues).toEqual(["/do/0/implement: unsupported property 'then'"]);
+    expect(issues).toEqual(["/do/0/implement: unsupported property 'timeout'"]);
   });
 
   it("lists every issue of an invalid call", () => {
