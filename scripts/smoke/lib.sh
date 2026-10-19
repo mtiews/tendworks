@@ -26,7 +26,8 @@ field() {
     });' "$1"
 }
 
-api_get() { curl -fsS "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" || true; }
+# Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.
+api_get() { curl -fsS "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" 2>/dev/null || true; }
 api_post() {
   curl -fsS -X POST "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" \
     -H 'content-type: application/json' -d "$2"
@@ -47,7 +48,17 @@ wait_run() {
 }
 
 # Prints the container path of the first transcript of run $1 (empty while there is none).
-transcript_path() { api_get "/runs/$1" | field 'r.steps?.find((s) => s.transcript)?.transcript' | sed 's|^file://||'; }
+# The run API names a step's transcript only once the step has finished, so while it runs
+# the transcript is found in the worker by the run id in its task message.
+transcript_path() {
+  local path
+  path=$(api_get "/runs/$1" | field 'r.steps?.find((s) => s.transcript)?.transcript' | sed 's|^file://||')
+  if [ -z "$path" ]; then
+    path=$(MSYS_NO_PATHCONV=1 compose exec -T worker sh -c \
+      "grep -l '\"messageId\":\"$1/' \"\$TEND_TRANSCRIPT_DIR\"/*.jsonl 2>/dev/null | head -1" 2>/dev/null || true)
+  fi
+  echo "$path" | tr -d '\r'
+}
 
 # Prints transcript $1; MSYS_NO_PATHCONV keeps Git Bash from rewriting the container path.
 transcript() { [ -n "$1" ] && MSYS_NO_PATHCONV=1 compose exec -T worker cat "$1" 2>/dev/null || true; }
