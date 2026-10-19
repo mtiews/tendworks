@@ -122,6 +122,19 @@ The workspace (`/workspace`) and the harness's home and config directory (`/sess
 6. `docker compose -f deploy/compose.yaml restart worker`.
 7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
+### Smoke test scripts
+
+The manual smoke tests below are automated in `scripts/smoke/` (bash; on Windows Git Bash). Each prints its checks and ends with PASS or FAIL. They need the stack running with `deploy/.env` set up and `TEND_API_TOKEN` exported; the GitHub ones also need `gh` logged in.
+
+| Script | Steps | Acceptance (#18) |
+| --- | --- | --- |
+| `hello-developer.sh` | 3–4 | run status, transcript and cost visible |
+| `restart-developer.sh` | 5–7 | restarting the platform mid-run resumes the run |
+| `pull-request-auto.sh <issue>` | 8–12 | labelled issue → merged pull request with `merge: auto` |
+| `pull-request-ask.sh <issue> [approve|reject]` | 14 | `merge: ask`: waits across a restart, merges after approval (or not after rejection) |
+
+The pull request scripts label the issue `ready-for-agent` themselves and refuse to run while other open playground issues carry the label, since each would start its own run. Configuration changes they need (binding not suspended, `develop-issue` in or out of `ask-before-merge`) stay manual; the scripts check them and say what to change.
+
 ### Pull request smoke test
 
 The `develop-issue` workflow hands an issue to the `developer` agent. The runtime checks the issue's repository out in the workspace on a branch fixed by the run, copies the profile's skills into the sandbox, passes the agent token in as `GH_TOKEN` and appends the role description to the harness's system prompt; the agent pushes the branch, opens the pull request and records it, so the run's output shows it (ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)). The regular suites cover this with the scripted agent and a local bare repository; against the playground repository, after steps 1–3:
