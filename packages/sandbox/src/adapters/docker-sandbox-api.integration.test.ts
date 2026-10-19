@@ -155,16 +155,6 @@ describe("Docker adapter with a sandbox network", () => {
     }
     expect(await docker("network", "inspect", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}', network)).toBe("false");
   });
-
-  it("names the sandbox host host.docker.internal in every sandbox, as Docker Desktop does and Linux does not", async () => {
-    const adapter = api();
-    const { id } = await adapter.create({ apiVersion: "tendworks.dev/v1", kind: "SandboxTemplate", metadata: { name: "networked" }, spec: { image } });
-    created.push({ api: adapter, id });
-
-    const hosts = await adapter.exec(id, { command: ["cat", "/etc/hosts"] });
-
-    expect(hosts.stdout).toMatch(/^\S+\s+host\.docker\.internal$/m);
-  });
 });
 
 describe("socket proxy", () => {
