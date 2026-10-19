@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import type * as acp from "@agentclientprotocol/sdk";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -55,7 +56,8 @@ function idleClock() {
 
 /**
  * An agent runtime on the scripted agent; `platform` shares the store, transcripts and
- * sandboxes of an earlier process, `cancelGraceMs` is how long a cancelled turn gets to stop.
+ * sandboxes of an earlier process, `cancelGraceMs` is how long a cancelled turn gets to stop,
+ * `profiles` the agent profiles of the configuration (assistant and developer by default).
  */
 function setup(
   script: AgentScript = { recall: true },
@@ -66,6 +68,7 @@ function setup(
     sandboxes?: ReturnType<typeof scriptedSandboxes>;
     api?: Sandboxes;
     cancelGraceMs?: number;
+    profiles?: AgentProfile.AgentProfile[];
   } = {},
 ) {
   const { store = createInMemoryTaskStore(), transcripts = createInMemoryTranscriptStore(), sandboxes = scriptedSandboxes(script, platform.exec), api = sandboxes.api } = platform;
@@ -76,7 +79,7 @@ function setup(
     templates: (name) => (name === scriptedTemplate.metadata.name ? scriptedTemplate : undefined),
     credential: { kind: "api-key", value: "test-key" },
   });
-  const runtime = createAgentRuntime({ profiles: [assistant, developer], harnesses: { "claude-code": harness }, store, transcripts, idle: idle.sleep });
+  const runtime = createAgentRuntime({ profiles: platform.profiles ?? [assistant, developer], harnesses: { "claude-code": harness }, store, transcripts, idle: idle.sleep });
   return { runtime, sandboxes, store, transcripts, idle };
 }
 
@@ -193,12 +196,14 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     await waiting(runtime, id);
     await vi.waitFor(() => expect(idle.waiting).toHaveLength(2));
 
-    // The idle time of the first wait passes, the second has just begun.
+    // The idle time of the first wait passes, the second has just begun; the next message
+    // finds the sandbox still there.
     idle.waiting.shift()!.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runtime.sendChatMessage(id, say("Three"));
 
-    expect(sandboxes.sandboxes.size).toBe(1);
+    expect(await waiting(runtime, id)).toMatchObject({ message: "I remember: One | Two | Three" });
     expect(sandboxes.created).toHaveLength(1);
+    expect(sandboxes.destroyed).toEqual([]);
   });
 
   it("continues a turn a restart interrupted in the same agent session in a new sandbox; a follower misses no entry", async () => {
@@ -250,6 +255,43 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.volumes.size).toBe(2);
     await after.runtime.sendChatMessage(id, say("Still there?"));
     expect(await waiting(after.runtime, id)).toMatchObject({ message: "I remember: Hello | Still there?" });
+  });
+
+  /** A chat waiting for a message in a process that dies; the next process's configuration no longer has its profile. */
+  async function chatWhoseProfileWasRemoved() {
+    const sandboxes = scriptedSandboxes({ recall: true });
+    const worker = dyingWorker(sandboxes.api);
+    const before = setup({}, { sandboxes, api: worker.api });
+    const { id } = await before.runtime.startChat("assistant", say("Hello"));
+    await waiting(before.runtime, id);
+    worker.die();
+    const after = setup({}, { sandboxes, store: before.store, transcripts: before.transcripts, profiles: [developer] });
+    return { id, sandboxes, after };
+  }
+
+  it("ends a chat whose profile was removed from the configuration, and removes its sandbox and volumes", async () => {
+    const { id, sandboxes, after } = await chatWhoseProfileWasRemoved();
+
+    const ended = await after.runtime.endChat(id);
+
+    expect(ended).toMatchObject({ id, status: "ended" });
+    expect(sandboxes.sandboxes.size).toBe(0);
+    expect(sandboxes.volumes.size).toBe(0);
+    expect(await after.runtime.listSessions()).toEqual([]);
+  });
+
+  it("fails a chat whose profile was removed from the configuration when it takes up the chats after a restart, and removes its sandbox and volumes", async () => {
+    const { id, sandboxes, after } = await chatWhoseProfileWasRemoved();
+
+    await after.runtime.resumeChats();
+
+    const chat = await after.runtime.getChat(id);
+    expect(chat).toMatchObject({ status: "failed", message: "agent profile assistant is no longer configured; the chat cannot go on" });
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect(sandboxes.sandboxes.size).toBe(0);
+    expect(sandboxes.volumes.size).toBe(0);
+    expect(after.store.published.at(-1)).toMatchObject({ type: "dev.tendworks.chat.ended", data: { agent: "assistant", status: "failed" } });
+    expect(after.idle.waiting).toEqual([]);
   });
 
   it("refuses a message while a turn runs", async () => {
@@ -347,6 +389,18 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.created).toHaveLength(2);
     expect(sandboxes.destroyed).toEqual(["sandbox1"]);
     expect(sandboxes.observed.resumed.map((resumed) => resumed.sessionId)).toEqual(["session-1"]);
+  });
+
+  it("never reveals a secret in what an agent that does not stop when cancelled wrote so far", async () => {
+    const leak: acp.SessionUpdate = { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "the key is test-key" } };
+    const { runtime, sandboxes } = setup({ hang: "first", ignoreCancel: true, updates: [leak] }, { cancelGraceMs: 10 });
+    const { id } = await runtime.startChat("assistant", say("Work forever"));
+    await vi.waitFor(() => expect(sandboxes.observed.prompts).toHaveLength(1));
+
+    const cancelled = await runtime.cancelChatTurn(id);
+
+    expect(cancelled).toMatchObject({ status: "input-required", message: "the key is ***" });
+    expect(JSON.stringify(await runtime.transcript(id))).not.toContain("test-key");
   });
 
   it("changes nothing when cancelling while no turn runs, and refuses to cancel in an ended chat", async () => {

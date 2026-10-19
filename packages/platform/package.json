@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, and Server-Sent Events streams.",
+  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams, and the platform MCP server's name.",
   "exports": {
     ".": {
       "source": "./src/index.ts",

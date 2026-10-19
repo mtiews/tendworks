@@ -27,10 +27,7 @@ export function createPlatformMcpServer({ controlPlane }: PlatformMcpServerOptio
         headers: { authorization: `Bearer ${token}` },
         ...(controlPlane.fetch ? { fetch: controlPlane.fetch } : {}),
       });
-      // The control plane decides whether the token may read; a caller it refuses gets nothing,
-      // not even the list of tools. Its token check comes before any other answer.
-      const { response: probe } = await client.GET("/triggers");
-      if (probe.status === 401) return unauthorized();
+      if (!(await authorize(client))) return unauthorized();
       // Stateless (no session id generator): every request gets its own server and transport,
       // which answers with JSON and is closed once the answer is complete.
       const server = toolsOn(client);
@@ -43,6 +40,20 @@ export function createPlatformMcpServer({ controlPlane }: PlatformMcpServerOptio
       }
     },
   };
+}
+
+/**
+ * Whether the control plane accepts the caller's token for reading. The control plane, not
+ * this server, decides who may read (ADR 0016), and a caller it refuses gets nothing, not even
+ * the list of tools; so every request (the server is stateless) asks it first. It has no
+ * endpoint that only checks a token, so this reads `GET /triggers`: it needs a token, and it
+ * is the cheapest reading operation, answered in the server process from the configuration and
+ * one small query, without the worker. The token check comes before any other answer, so a
+ * failure other than 401 (e.g. 503) still means the token was accepted.
+ */
+async function authorize(client: ControlPlaneClient): Promise<boolean> {
+  const { response } = await client.GET("/triggers");
+  return response.status !== 401;
 }
 
 function toolsOn(client: ControlPlaneClient): McpServer {
@@ -83,7 +94,7 @@ function toolsOn(client: ControlPlaneClient): McpServer {
     {
       title: "List agents",
       description:
-        "Lists the configured agent profiles with the agent sessions working right now: steps of runs (with run and step) and chats. An agent is running when it has a session.",
+        "Lists the configured agent profiles with the agent sessions working right now: steps of runs (with run and step) and chats. An agent is running when it has a session; a profile without `sessions` means the platform cannot tell right now.",
       annotations: readOnly,
     },
     async () => {

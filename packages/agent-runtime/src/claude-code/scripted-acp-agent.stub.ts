@@ -11,7 +11,7 @@ import type { ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplat
 export interface AgentScript {
   /** Text chunks the agent sends before it ends its turn. */
   reply?: string[];
-  /** Further session updates the agent sends after its tool call, before the reply. */
+  /** Further session updates the agent sends after its tool call, before it hangs or replies. */
   updates?: acp.SessionUpdate[];
   cost?: number;
   stopReason?: acp.StopReason;
@@ -124,12 +124,12 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
         });
       }
       await update(ctx, { sessionUpdate: "tool_call", toolCallId: "tool-1", title: "Write hello.txt", status: "completed" });
+      for (const extra of script.updates ?? []) await update(ctx, extra);
       if (hang) {
         await cancelled;
         return { stopReason: "cancelled" };
       }
       if (script.delayMs) await new Promise((resolve) => setTimeout(resolve, script.delayMs));
-      for (const extra of script.updates ?? []) await update(ctx, extra);
       const prompts = remembered
         .split("\n")
         .filter((line) => line.includes('"prompt"'))

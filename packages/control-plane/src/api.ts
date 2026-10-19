@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { isTraceparent } from "@tendworks/platform";
+import { isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
@@ -63,7 +63,7 @@ export function apiTokenProblems({
   const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
   const problems: string[] = [];
   if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
-  const readers = agentProfiles.filter((profile) => profile.spec.mcp?.includes("tendworks")).map((profile) => profile.metadata.name);
+  const readers = agentProfiles.filter(listsPlatformMcpServer).map((profile) => profile.metadata.name);
   if (readToken === undefined && readers.length > 0) {
     const profiles = `agent profile${readers.length > 1 ? "s" : ""} ${readers.join(", ")} list${readers.length > 1 ? "" : "s"}`;
     problems.push(`TEND_API_READ_TOKEN must be set: ${profiles} the platform MCP server (mcp: [tendworks]), which reads with it`);
@@ -305,26 +305,25 @@ export function createControlPlaneApi({
     });
   });
 
-  app.get("/agents", async (c) =>
-    throughRuntime(async (runtime) => {
-      // Who works right now lives in the agent runtime; the profiles come from the configuration.
-      const sessions = await runtime.listSessions();
-      const items = configuration.agentProfiles
-        .map(({ metadata, spec }): Schemas["Agent"] => {
-          const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
-          return {
-            name: metadata.name,
-            harness: spec.harness,
-            ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
-            ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
-            ...(secrets.length > 0 ? { secrets } : {}),
-            sessions: sessions.filter((session) => session.agent === metadata.name),
-          };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name));
-      return c.json({ items } satisfies Schemas["AgentList"], 200);
-    }),
-  );
+  app.get("/agents", async (c) => {
+    // Who works right now lives in the agent runtime; the profiles come from the configuration,
+    // so they are listed also when the agent runtime cannot be reached, without sessions then.
+    const sessions = await agentRuntime?.listSessions().catch(() => undefined);
+    const items = configuration.agentProfiles
+      .map(({ metadata, spec }): Schemas["Agent"] => {
+        const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
+        return {
+          name: metadata.name,
+          harness: spec.harness,
+          ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
+          ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
+          ...(secrets.length > 0 ? { secrets } : {}),
+          ...(sessions ? { sessions: sessions.filter((session) => session.agent === metadata.name) } : {}),
+        };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return c.json({ items } satisfies Schemas["AgentList"], 200);
+  });
 
   app.get("/triggers", async (c) => {
     let items;

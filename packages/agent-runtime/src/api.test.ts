@@ -25,19 +25,31 @@ const developer: AgentProfile.AgentProfile = {
 const request = (): A2A.SendMessageRequest => ({ message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "work" }] } });
 
 describe("agent runtime API", () => {
+  /** The slow agent works until `finish()`; `working` resolves once it does. */
   function setup() {
     let finish!: () => void;
-    const runtime = createAgentRuntime({ profiles: [slow], sleep: () => new Promise<void>((resolve) => (finish = resolve)) });
+    let started!: () => void;
+    const working = new Promise<void>((resolve) => (started = resolve));
+    const sleep = () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+        started();
+      });
+    const runtime = createAgentRuntime({ profiles: [slow], sleep });
     const api = createAgentRuntimeApi({ runtime });
     const get = (path: string) => api.fetch(new Request(`http://worker.test${path}`));
-    return { runtime, get, finish: () => finish() };
+    return { runtime, get, working, finish: () => finish() };
   }
 
   it("serves the transcript of a task while its agent still works, and all of it once the task ended", async () => {
-    const { runtime, get, finish } = setup();
+    const { runtime, get, working: agentWorks, finish } = setup();
     let taskId!: string;
     const done = runtime.sendMessage("slow", request(), { onTask: (task) => void (taskId = task.id) });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await agentWorks;
+    // Once a follower sees the first entry, it is kept.
+    const following = (await runtime.follow(taskId))!;
+    await following.next();
+    await following.return?.();
 
     const working = await get(`/tasks/${taskId}/transcript`);
     finish();
@@ -57,12 +69,12 @@ describe("agent runtime API", () => {
   });
 
   it("lists the active agent sessions while the agent works, and none once its task ended", async () => {
-    const { runtime, get, finish } = setup();
+    const { runtime, get, working: agentWorks, finish } = setup();
     const done = runtime.sendMessage("slow", {
       message: { messageId: "run-1/do/0/work", role: "ROLE_USER", parts: [{ text: "work" }] },
       metadata: { "dev.tendworks/runId": "run-1", "dev.tendworks/stepReference": "/do/0/work" },
     });
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await agentWorks;
 
     const working = await get("/sessions");
     finish();

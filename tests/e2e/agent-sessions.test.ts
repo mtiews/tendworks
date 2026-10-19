@@ -4,7 +4,7 @@ import { client } from "./support/control-plane.js";
 
 type Agent = ControlPlane.components["schemas"]["Agent"];
 
-const sessionsOf = async (name: string): Promise<Agent["sessions"]> => {
+const sessionsOf = async (name: string): Promise<NonNullable<Agent["sessions"]>> => {
   const { data, response } = await client.GET("/agents");
   if (!data) throw new Error(`GET /agents answered HTTP ${response.status}`);
   return data.items.find((agent) => agent.name === name)?.sessions ?? [];

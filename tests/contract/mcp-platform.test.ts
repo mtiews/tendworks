@@ -2,7 +2,15 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, createInMemoryTriggers, loadConfiguration } from "@tendworks/control-plane";
+import {
+  createAgentRuntimeClient,
+  createControlPlaneApi,
+  createInMemoryAgentRuntime,
+  createInMemoryRuns,
+  createInMemoryTriggers,
+  loadConfiguration,
+  type AgentRuntimePort,
+} from "@tendworks/control-plane";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
@@ -18,10 +26,10 @@ const contracts = guardedContracts("control-plane");
 const API_TOKEN = "contract-test-token";
 const READ_TOKEN = "contract-test-read-token";
 
-function platform() {
+/** The platform MCP server on a control plane whose agent runtime is `agentRuntime` (in memory by default). */
+function platform(agentRuntime: AgentRuntimePort = createInMemoryAgentRuntime()) {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const runs = createInMemoryRuns();
-  const agentRuntime = createInMemoryAgentRuntime();
   const triggers = createInMemoryTriggers([
     { name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" },
   ]);
@@ -53,7 +61,7 @@ function platform() {
     return (await response.json()) as { id: string };
   }
 
-  return { connect, startRun, runs, agentRuntime };
+  return { connect, startRun, runs };
 }
 
 /** The JSON a tool answered with. */
@@ -128,7 +136,8 @@ describe("the platform MCP server", () => {
   });
 
   it("lists the agent profiles with the agent sessions working right now", async () => {
-    const { connect, agentRuntime } = platform();
+    const agentRuntime = createInMemoryAgentRuntime();
+    const { connect } = platform(agentRuntime);
     const step = agentRuntime.startStep({ agent: "developer", run: "run-1", step: "implement" });
     const client = await connect(READ_TOKEN);
 
@@ -138,6 +147,21 @@ describe("the platform MCP server", () => {
       { kind: "run-step", agent: "developer", taskId: step.taskId, status: "working", startedAt: step.startedAt, run: "run-1", step: "implement" },
     ]);
     expect(result.items.find((agent) => agent.name === "assistant")?.sessions).toEqual([]);
+  });
+
+  it("lists the agent profiles without sessions while the agent runtime cannot be reached", async () => {
+    const unreachable = createAgentRuntimeClient({
+      baseUrl: "http://worker.test",
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    const client = await platform(unreachable).connect(READ_TOKEN);
+
+    const result = answer(await client.callTool({ name: "list_agents", arguments: {} })) as { items: { name: string; sessions?: unknown[] }[] };
+
+    expect(result.items.map((agent) => agent.name)).toContain("developer");
+    expect(result.items.filter((agent) => agent.sessions !== undefined)).toEqual([]);
   });
 
   it("offers only the four tools, all of them read-only", async () => {

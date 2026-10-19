@@ -430,10 +430,14 @@ describe("control plane: agents", () => {
     expect([await sessionsOf("fake-slow-developer"), await sessionsOf("fake-assistant")]).toEqual([[], []]);
   });
 
-  it("answers 503 when the agent runtime cannot be reached", async () => {
+  it("lists the agent profiles without sessions when the agent runtime cannot be reached", async () => {
     const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
 
-    expect((await client.GET("/agents")).response.status).toBe(503);
+    const { data, response } = await client.GET("/agents");
+
+    expect(response.status).toBe(200);
+    expect(data?.items.find((agent) => agent.name === "developer")).toEqual(expect.objectContaining({ name: "developer", harness: "claude-code" }));
+    expect(data?.items.some((agent) => "sessions" in agent)).toBe(false);
   });
 });
 

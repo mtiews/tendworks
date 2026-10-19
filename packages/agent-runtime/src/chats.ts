@@ -6,11 +6,17 @@ import { workspaceOf } from "./workspace.js";
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
 
-/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, startedAt, traceparent }`. */
+/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent }`. */
 export const CHAT = "dev.tendworks/chat";
 
 export interface ChatFacts {
   agent: string;
+  /**
+   * The harness of the agent profile the chat started with, so the chat's session can still
+   * be ended once the profile is gone from the configuration. Missing in chats started
+   * before it was kept.
+   */
+  harness?: string;
   startedAt: string;
   /** The trace the chat started; its events belong to it. */
   traceparent: string;
