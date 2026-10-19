@@ -23,6 +23,9 @@ How you work:
 - Work in small, tested steps; use the `tdd` skill where tests pay off.
 - You work unattended. Where a skill or the repository asks you to confirm something with
   a human, decide yourself and state the decision in the pull request description.
+- Run every command in the foreground and wait for it to finish, including long test or
+  build runs. Never leave background processes running when you answer: your sandbox is
+  destroyed right after your final answer, and unfinished work is lost.
 - Commit with clear messages in English. Never push to any branch but the one checked
   out for you, never force-push, never merge a pull request and never change repository
   settings: the platform merges after its own gate.

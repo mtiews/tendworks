@@ -21,7 +21,9 @@ do:
               - kind: text
                 text: >-
                   Create the file before.txt in the current directory with the single line
-                  "before". Then run the shell command `sleep 90`. Then create after.txt with
+                  "before". Then run the shell command `for i in $(seq 1 18); do echo "tick $i"; sleep 5; done`
+                  in the foreground (never in the background) and wait until it has printed
+                  "tick 18"; it takes about 90 seconds. Then create after.txt with
                   the single line "after". Finally answer with the names of all .txt files in
                   the current directory, one per line, and nothing else.
       output:
