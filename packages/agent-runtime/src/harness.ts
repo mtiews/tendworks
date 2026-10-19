@@ -65,9 +65,17 @@ export interface HarnessTurn {
 export interface OpenSession {
   /**
    * Runs one prompt turn with `message`. The first turn starts the session; a session
-   * whose sandbox is gone (e.g. after a restart) is resumed first.
+   * whose sandbox is gone (e.g. after idle time or a restart) is resumed first.
+   * `interrupted`: the turn on `message` had begun before and was interrupted (e.g. by a
+   * restart); a resumed session is told to continue it rather than given the message again.
    */
-  turn(message: A2A.Message): Promise<HarnessTurn>;
+  turn(message: A2A.Message, options?: { interrupted?: boolean }): Promise<HarnessTurn>;
+  /**
+   * Lets go of the session's sandbox between turns, e.g. when a chat is idle (ADR 0015):
+   * the sandbox goes, its volumes and what is kept to resume the session stay, so the
+   * next turn resumes the session in a new sandbox.
+   */
+  suspend(): Promise<void>;
   /** Ends the session for good, also during a turn: removes its sandbox and its volumes. */
   end(): Promise<void>;
 }
