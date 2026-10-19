@@ -46,6 +46,11 @@ $defs:
         description: >-
           Reference to the transcript of the chat's agent session; read it through the
           chat's transcript endpoints.
+      repository:
+        $ref: '#/$defs/repository'
+        description: >-
+          The repository checked out as the chat's workspace; absent when the chat
+          started with an empty workspace.
   chatStatus:
     title: ChatStatus
     description: >-
@@ -79,6 +84,13 @@ $defs:
         type: string
         minLength: 1
         description: The first message to the agent.
+      repository:
+        $ref: '#/$defs/repository'
+        description: >-
+          A public Git repository to check out as the chat's workspace before the first
+          turn, on its default branch; without it the workspace starts empty. A chat's
+          agent profile holds no repository credential, so the agent can change files in
+          its workspace but cannot push.
   chatMessageRequest:
     title: ChatMessageRequest
     type: object
@@ -89,3 +101,11 @@ $defs:
         type: string
         minLength: 1
         description: The next message to the agent.
+  repository:
+    title: ChatRepository
+    description: >-
+      Clone URL of a Git repository reachable without credentials: an `https` or `http`
+      URL without user name or password, e.g. `https://github.com/acme/playground.git`.
+    type: string
+    maxLength: 2048
+    pattern: ^https?://[^\s/@]+(/\S*)?$

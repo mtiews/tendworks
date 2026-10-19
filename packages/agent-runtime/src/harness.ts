@@ -81,7 +81,10 @@ export interface OpenSession {
 }
 
 /** A task without its message, for a session whose messages arrive turn by turn. */
-export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs">;
+export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs"> & {
+  /** The workspace the session works in, checked out before its first turn; without it the workspace starts empty. */
+  workspace?: A2A.Workspace;
+};
 
 /**
  * The harness port: runs one agent session for a task, e.g. Claude Code over ACP in a
