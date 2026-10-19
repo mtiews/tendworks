@@ -14,7 +14,16 @@ paths:
       description: >-
         Validates the definition, records the run and hands it to the durable execution
         engine. The definition is a snapshot: later configuration changes do not affect
-        the run.
+        the run. With a `traceparent` the run belongs to the caller's trace; without one
+        it starts a new trace.
+      parameters:
+        - name: traceparent
+          in: header
+          required: false
+          description: W3C trace context of the caller (version 00).
+          schema:
+            type: string
+            pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
       requestBody:
         required: true
         content:
@@ -29,7 +38,7 @@ paths:
               schema:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
         "400":
-          description: The definition is not a workflow orchestration can run.
+          description: The definition is not a workflow orchestration can run, or the traceparent is malformed.
           content:
             application/json:
               schema:
@@ -91,6 +100,9 @@ components:
           type: object
           additionalProperties: true
           description: Workflow input; defaults to an empty object.
+        startedBy:
+          $ref: "../schemas/run.schema.yaml#/$defs/runOrigin"
+          description: What starts the run, e.g. a trigger binding for an issue; defaults to `manual`.
     RunList:
       type: object
       required: [items]

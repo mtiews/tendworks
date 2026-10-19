@@ -15,6 +15,8 @@ interface GithubPull {
   state?: "open" | "closed";
   merged?: boolean;
   merge_commit_sha?: string | null;
+  base?: { repo?: { full_name?: string } | null };
+  head?: { ref?: string; repo?: { full_name?: string } | null };
 }
 
 /**
@@ -50,11 +52,26 @@ export function createGithubPullRequests({ token, fetch = globalThis.fetch, time
   const answered = (status: number, body: Record<string, unknown>, url: string) =>
     `GitHub answered ${status}${typeof body.message === "string" ? `: ${body.message}` : ""} while merging ${url}`;
 
+  const pathOf = (url: string) => {
+    const match = PULL_REQUEST_URL.exec(url);
+    if (!match) throw new MergeRefusedError(`not a GitHub pull request URL: ${url}`);
+    return `/repos/${match[1]}/${match[2]}/pulls/${match[3]}`;
+  };
+
   return {
+    async describe(url) {
+      const read = await call("GET", pathOf(url), url);
+      if (read.status === 404) throw new MergeRefusedError(`no pull request at ${url}, or the platform token cannot see it`);
+      if (read.status !== 200) throw new Error(answered(read.status, read.body, url));
+      const { base, head } = read.body as GithubPull;
+      const repository = base?.repo?.full_name;
+      const headBranch = head?.ref;
+      if (!repository || !headBranch) throw new Error(`GitHub described ${url} without its repository or head branch`);
+      // A deleted fork has no head repository; it is never the pull request's own.
+      return { repository, headRepository: head?.repo?.full_name ?? "(deleted fork)", headBranch };
+    },
     async merge(url) {
-      const match = PULL_REQUEST_URL.exec(url);
-      if (!match) throw new MergeRefusedError(`not a GitHub pull request URL: ${url}`);
-      const path = `/repos/${match[1]}/${match[2]}/pulls/${match[3]}`;
+      const path = pathOf(url);
 
       const merge = await call("PUT", `${path}/merge`, url);
       if (merge.status === 200 && typeof merge.body.sha === "string") return { commit: merge.body.sha };

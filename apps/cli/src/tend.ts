@@ -12,6 +12,7 @@ type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
+type AgentList = ControlPlane.components["schemas"]["AgentList"];
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -31,12 +32,20 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .addOption(
       new Option("--url <url>", "control plane URL").env("TEND_URL").default("http://localhost:8080"),
     )
+    .addOption(new Option("--token <token>", "the platform's API token, needed by commands that change state").env("TEND_API_TOKEN"))
     .exitOverride()
     .configureOutput({ writeOut: io.stdout, writeErr: io.stderr });
 
   const controlPlane = (command: Command) => {
-    const baseUrl: string = command.optsWithGlobals().url;
-    return { baseUrl, client: createClient<ControlPlane.paths>({ baseUrl, ...(io.fetch ? { fetch: io.fetch } : {}) }) };
+    const { url: baseUrl, token } = command.optsWithGlobals<{ url: string; token?: string }>();
+    return {
+      baseUrl,
+      client: createClient<ControlPlane.paths>({
+        baseUrl,
+        ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+        ...(io.fetch ? { fetch: io.fetch } : {}),
+      }),
+    };
   };
 
   program
@@ -83,6 +92,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       if (response.status === 404) throw new Error(`run ${runId} not found`);
       if (!data) throw new AnswerError(response, error);
       io.stdout(render(data, options.output, formatRun));
+    });
+
+  program
+    .command("agent")
+    .description("inspect agent profiles")
+    .command("list")
+    .description("list the configured agent profiles")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/agents").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatAgentList));
     });
 
   program
@@ -173,6 +197,10 @@ class UnreachableError extends Error {
 
 class AnswerError extends Error {
   constructor(response: Response, problem?: { title?: string; detail?: string }) {
+    if (response.status === 401) {
+      super("the control plane refused the API token (HTTP 401); set TEND_API_TOKEN or pass --token");
+      return;
+    }
     const reason = problem?.title ? `: ${problem.title}${problem.detail ? ` (${problem.detail})` : ""}` : "";
     super(`unexpected answer from the control plane (HTTP ${response.status})${reason}`);
   }
@@ -199,18 +227,40 @@ function formatTable(report: PlatformStatus): string {
 
 function formatRunList(list: RunList): string {
   const rows = [
-    ["ID", "WORKFLOW", "STATUS", "CREATED", "FINISHED"],
-    ...list.items.map((run) => [run.id, run.workflow, run.status, run.createdAt, run.finishedAt ?? ""]),
+    ["ID", "WORKFLOW", "STATUS", "STARTED BY", "CREATED", "FINISHED"],
+    ...list.items.map((run) => [run.id, run.workflow, run.status, formatOrigin(run.startedBy), run.createdAt, run.finishedAt ?? ""]),
+  ];
+  return table(rows);
+}
+
+/** `manual`, or `trigger <binding>: <owner>/<name>#<n>`; empty for runs recorded without an origin. */
+function formatOrigin(origin: Run["startedBy"], { url = false }: { url?: boolean } = {}): string {
+  if (!origin) return "";
+  if (origin.kind === "manual") return "manual";
+  return `trigger ${origin.binding}: ${origin.issue.repository}#${origin.issue.number}${url ? ` (${origin.issue.url})` : ""}`;
+}
+
+function formatAgentList(list: AgentList): string {
+  const rows = [
+    ["NAME", "HARNESS", "SANDBOX", "SKILLS"],
+    ...list.items.map((agent) => [agent.name, agent.harness, agent.sandbox ?? "", (agent.skills ?? []).join(", ")]),
   ];
   return table(rows);
 }
 
 function formatTriggerList(list: TriggerList): string {
   const rows = [
-    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION"],
-    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.nextExecutionAt]),
+    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION", "LAST CHECK"],
+    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.suspended ? "suspended" : trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
   ];
   return table(rows);
+}
+
+/** `succeeded <at>, <n> runs started` or `failed <at>: <why>`; empty before the first check. */
+function formatEvaluation(evaluation: TriggerList["items"][number]["lastEvaluation"]): string {
+  if (!evaluation) return "";
+  if (evaluation.status === "failed") return `failed ${evaluation.at}${evaluation.message ? `: ${evaluation.message}` : ""}`;
+  return `succeeded ${evaluation.at}, ${evaluation.startedRuns} ${evaluation.startedRuns === 1 ? "run" : "runs"} started`;
 }
 
 /** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
@@ -225,6 +275,7 @@ function formatRun(run: Run): string {
     ["RUN", run.id],
     ["WORKFLOW", run.workflow],
     ["STATUS", run.status],
+    ...(run.startedBy ? [["STARTED BY", formatOrigin(run.startedBy, { url: true })]] : []),
     ["CREATED", run.createdAt],
     ["STARTED", run.startedAt ?? ""],
     ["FINISHED", run.finishedAt ?? ""],

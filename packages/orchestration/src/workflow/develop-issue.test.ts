@@ -94,6 +94,16 @@ describe("example workflow develop-issue", () => {
     expect(workspace(other)).not.toEqual(workspace(first));
   });
 
+  it("records the workspace the run handed to the agent on the step that reported the pull request", async () => {
+    const run = await runWorkflow(definition, { runId, input: { issue }, http: controlPlane(), runtime, executor: developer(PR), events: new EventQueue() });
+
+    expect(run.steps[0]).toMatchObject({
+      name: "implement",
+      workspace: { repository: "https://github.com/acme/playground.git", branch: "tendworks/issue-12-0b6c4c1e" },
+      artifacts: [{ name: "pull-request", url: PR }],
+    });
+  });
+
   it("asks the control plane to merge the run's reported pull request, naming only the run and the pull request", async () => {
     const http = controlPlane();
 

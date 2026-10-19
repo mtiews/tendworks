@@ -30,6 +30,7 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
         runId,
         issue: { repository: "acme/playground", number: 7, url: "https://issues.example/7" },
         time: "2026-10-18T10:00:00.000Z",
+        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       });
 
     it("lets a key be claimed once", async () => {
@@ -75,6 +76,28 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
       await context.store.fired(key, "run-1", fired);
 
       expect((await context.events()).filter((known) => known.data.binding === key.binding)).toEqual([fired]);
+    });
+
+    it("keeps the last evaluation of each binding", async () => {
+      const other = `binding-${crypto.randomUUID()}`;
+      await context.store.recordEvaluation(key.binding, { at: "2026-10-18T10:00:00.000Z", status: "succeeded", startedRuns: 2 });
+      await context.store.recordEvaluation(other, { at: "2026-10-18T10:00:00.000Z", status: "succeeded", startedRuns: 0 });
+      await context.store.recordEvaluation(key.binding, {
+        at: "2026-10-18T10:00:10.000Z",
+        status: "failed",
+        startedRuns: 0,
+        message: "secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set",
+      });
+
+      const evaluations = await context.store.lastEvaluations();
+
+      expect(evaluations.get(key.binding)).toEqual({
+        at: "2026-10-18T10:00:10.000Z",
+        status: "failed",
+        startedRuns: 0,
+        message: "secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set",
+      });
+      expect(evaluations.get(other)).toEqual({ at: "2026-10-18T10:00:00.000Z", status: "succeeded", startedRuns: 0 });
     });
   });
 }

@@ -11,8 +11,11 @@ export type StartRunRequest = Orchestration.components["schemas"]["StartRunReque
  * @port
  */
 export interface RunsPort {
-  /** Starts a run; rejects with {@link RunRejectedError} when orchestration refuses it. */
-  start(request: StartRunRequest): Promise<Run>;
+  /**
+   * Starts a run, in the caller's trace when `traceparent` is given; rejects with
+   * {@link RunRejectedError} when orchestration refuses it.
+   */
+  start(request: StartRunRequest, options?: { traceparent?: string }): Promise<Run>;
   list(): Promise<Run[]>;
   get(runId: string): Promise<Run | undefined>;
 }
@@ -38,8 +41,8 @@ export function createOrchestrationClient(options: {
     new Error(`orchestration answered HTTP ${response.status}${problem?.detail ? `: ${problem.detail}` : ""}`);
 
   return {
-    async start(request) {
-      const { data, error, response } = await client.POST("/runs", { body: request });
+    async start(request, { traceparent } = {}) {
+      const { data, error, response } = await client.POST("/runs", { body: request, ...(traceparent ? { params: { header: { traceparent } } } : {}) });
       if (data) return data;
       if (response.status === 400 && error) throw new RunRejectedError(error.title, error.detail);
       throw failed(response, error);
@@ -59,20 +62,21 @@ export function createOrchestrationClient(options: {
 }
 
 /** Runs in memory: started runs stay pending. For tests of clients of the control plane. */
-export function createInMemoryRuns(): RunsPort & { started: StartRunRequest[]; runs: Map<string, Run> } {
+export function createInMemoryRuns(): RunsPort & { started: (StartRunRequest & { traceparent?: string })[]; runs: Map<string, Run> } {
   const runs = new Map<string, Run>();
-  const started: StartRunRequest[] = [];
+  const started: (StartRunRequest & { traceparent?: string })[] = [];
   return {
     started,
     runs,
-    async start(request) {
-      started.push(request);
+    async start(request, { traceparent } = {}) {
+      started.push({ ...request, ...(traceparent ? { traceparent } : {}) });
       const document = request.workflow.document as { name?: string } | undefined;
       const run: Run = {
         id: crypto.randomUUID(),
         workflow: document?.name ?? "unknown",
         status: "pending",
         input: request.input ?? {},
+        startedBy: request.startedBy ?? { kind: "manual" },
         steps: [],
         createdAt: new Date().toISOString(),
       };

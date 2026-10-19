@@ -4,12 +4,8 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": [
-    "src"
-  ],
-  "exclude": [
-    "src/**/*.test.ts"
-  ],
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"],
   "references": [
     {
       "path": "../../packages/control-plane"
@@ -19,6 +15,9 @@
     },
     {
       "path": "../../packages/human-interaction"
+    },
+    {
+      "path": "../../packages/platform"
     },
     {
       "path": "../../packages/trigger-gateway"

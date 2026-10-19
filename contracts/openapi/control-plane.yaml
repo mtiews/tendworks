@@ -4,7 +4,10 @@ info:
   version: 0.1.0
   description: >-
     Public API of the Tendworks control plane. The web UI, the tend CLI, the
-    meta-agent and any script use only this API.
+    meta-agent and any script use only this API. Operations that change state (start a
+    run, merge a pull request, decide an approval request) need the platform's API token
+    as a bearer token; reading does not. This is an interim scheme until identity (OIDC)
+    arrives.
 paths:
   /status:
     get:
@@ -30,10 +33,17 @@ paths:
   /runs:
     post:
       operationId: startRun
+      security:
+        - apiToken: []
       summary: Start a run of a configured workflow
       description: >-
         Starts a run of the workflow named `workflow` (its `document.name`) from the
         configuration. The run executes in the background; poll `GET /runs/{runId}`.
+        A caller that traces its work (e.g. the trigger gateway) passes its W3C
+        `traceparent`; the run and all its events then belong to that trace. Without
+        one the run starts a new trace.
+      parameters:
+        - $ref: "#/components/parameters/Traceparent"
       requestBody:
         required: true
         content:
@@ -53,7 +63,20 @@ paths:
               schema:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
         "400":
-          description: The request is invalid, e.g. no workflow with this name is configured.
+          description: >-
+            The request is invalid, e.g. no workflow with this name is configured or the
+            traceparent is malformed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -109,6 +132,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /agents:
+    get:
+      operationId: listAgents
+      summary: List the configured agent profiles, ordered by name
+      description: >-
+        The agent profiles workflows can hand tasks to (`agent://<name>`), as the
+        configuration defines them.
+      responses:
+        "200":
+          description: Agent profiles.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentList"
   /triggers:
     get:
       operationId: listTriggers
@@ -149,13 +186,17 @@ paths:
   /pull-requests/merge:
     post:
       operationId: mergePullRequest
+      security:
+        - apiToken: []
       summary: Merge a run's pull request behind the gate of its policies
       description: >-
         Merges the pull request with the platform's credentials, never an agent's.
         The caller names the run and the pull request; everything else comes from the
         platform's own records: the run must be running and must have reported the pull
-        request (an artifact of one of its steps), and the policies that apply to the
-        run's workflow decide (the strictest wins). With `allow` the pull request is
+        request (an artifact of one of its steps), the repository host must confirm that
+        the pull request belongs to the repository of the workspace that step handed to
+        its agent and merges from exactly the workspace's branch (not from a fork), and
+        the policies that apply to the run's workflow decide (the strictest wins). With `allow` the pull request is
         merged right away. With `ask` the merge needs an approved approval request for
         this run and pull request: the first request creates one (202), later requests
         answer 202 while it is pending, merge once it is approved and are refused (403)
@@ -186,8 +227,20 @@ paths:
         "400":
           description: >-
             The request is invalid: no pull request given (e.g. the agent reported none),
-            an unknown run, a pull request the run did not report, no policy that
+            an unknown run, a pull request the run did not report, a pull request that is
+            not from the repository and branch of the run's workspace, no policy that
             applies to the run's workflow, or no integration for the pull request's host.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -251,6 +304,8 @@ paths:
   /approval-requests/{approvalRequestId}/decision:
     post:
       operationId: decideApprovalRequest
+      security:
+        - apiToken: []
       summary: Approve or reject an approval request
       description: >-
         Records the decision and emits `approval.decided`, which the waiting run
@@ -281,6 +336,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No approval request with this id.
           content:
@@ -300,6 +366,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
 components:
+  securitySchemes:
+    apiToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The platform's API token (`TEND_API_TOKEN`), shared by the operator's clients and
+        the worker's merge step. Interim until OIDC; never handed to sandboxes.
+  parameters:
+    Traceparent:
+      name: traceparent
+      in: header
+      required: false
+      description: W3C trace context of the caller (version 00).
+      schema:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
   schemas:
     ApprovalRequestList:
       type: object
@@ -360,6 +442,83 @@ components:
         approvalRequest:
           $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
           description: With decision `ask`, the approval request the merge waits for or merged after.
+    MergeRefusal:
+      type: object
+      description: >-
+        Why the merge gate did not merge, as human interaction answers the control plane;
+        `POST /pull-requests/merge` maps the reason to its status. `invalid` (400): the
+        request cannot be served (no or unreported pull request, not from the run's
+        workspace, unknown run, no applicable policy, unknown host). `rejected` (403): the
+        approval request was rejected. `conflict` (409): the run is not running.
+        `refused` (409): the repository refused. `unavailable` (502): the repository could
+        not be asked.
+      required: [reason, title, detail]
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          enum: [invalid, rejected, conflict, refused, unavailable]
+        title:
+          type: string
+        detail:
+          type: string
+    MergeOutcome:
+      description: >-
+        What the merge gate did: `merged`, `pending` (the policy asks and the approval
+        request is not decided yet; nothing is merged) or `refused`.
+      oneOf:
+        - type: object
+          required: [merged]
+          additionalProperties: false
+          properties:
+            merged:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [pending]
+          additionalProperties: false
+          properties:
+            pending:
+              $ref: "#/components/schemas/PullRequestMerge"
+        - type: object
+          required: [refused]
+          additionalProperties: false
+          properties:
+            refused:
+              $ref: "#/components/schemas/MergeRefusal"
+    AgentList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Agent"
+    Agent:
+      type: object
+      description: An agent profile of the configuration.
+      required: [name, harness]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Name workflows address it by, as `agent://<name>`.
+        harness:
+          type: string
+          description: What answers its tasks, as the profile's `spec.harness` names it.
+        sandbox:
+          type: string
+          description: Sandbox template its sandboxes are created from, if it runs in one.
+        skills:
+          type: array
+          items:
+            type: string
+          description: Skills copied into its sandbox.
+        secrets:
+          type: array
+          items:
+            type: string
+          description: Names of the secrets the profile passes into its sandbox (never their values).
     StartRunRequest:
       type: object
       required: [workflow]
@@ -372,6 +531,9 @@ components:
           type: object
           additionalProperties: true
           description: Workflow input; defaults to an empty object.
+        startedBy:
+          $ref: "../schemas/run.schema.yaml#/$defs/runOrigin"
+          description: What starts the run, e.g. a trigger binding for an issue; defaults to `manual`.
     RunList:
       type: object
       required: [items]

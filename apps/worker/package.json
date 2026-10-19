@@ -13,6 +13,7 @@
     "@tendworks/event-bus": "workspace:*",
     "@tendworks/health": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
+    "@tendworks/platform": "workspace:*",
     "@tendworks/sandbox": "workspace:*",
     "pg": "8.23.1"
   },

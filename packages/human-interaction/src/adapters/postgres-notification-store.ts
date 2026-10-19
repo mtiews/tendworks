@@ -30,6 +30,7 @@ create table if not exists human_interaction.approval_requests (
   decided_at   timestamptz,
   unique (run_id, action, pull_request)
 );
+alter table human_interaction.approval_requests add column if not exists traceparent text;
 `;
 
 /** Creates human interaction's tables if they do not exist yet. */

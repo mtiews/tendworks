@@ -1,10 +1,9 @@
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 const BINDING = "issue-ready-for-agent"; // examples/config/triggers, fake integration
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -37,6 +36,8 @@ describe("time trigger on the compose stack", () => {
     const trigger = data?.items.find((item) => item.name === BINDING);
     expect(trigger).toMatchObject({ workflow: "hello-agent", schedule: { every: { seconds: 10 } } });
     const next = new Date(trigger!.nextExecutionAt).getTime();
+    // The fake integration answers every check.
+    expect(trigger?.lastEvaluation === undefined || trigger.lastEvaluation.status === "succeeded").toBe(true);
     expect(next).toBeGreaterThan(Date.now() - 1_000);
     expect(next).toBeLessThanOrEqual(Date.now() + 11_000);
   });

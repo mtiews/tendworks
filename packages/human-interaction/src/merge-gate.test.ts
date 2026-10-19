@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { approvalDecided } from "./approvals/approval-events.js";
 import { createInMemoryApprovalStore } from "./approvals/approval-store.js";
+import { createApprovals } from "./approvals/approvals.js";
 import { createMergeGate, type GatedRun } from "./merge-gate.js";
 import type { Policy } from "./policy.js";
 import { createFakePullRequests, type PullRequests } from "./pull-requests/pull-requests.js";
@@ -13,19 +14,21 @@ const policy = (name: string, merge: "auto" | "ask", workflows?: [string, ...str
 });
 const PR = "https://git.example/acme/app/pull/7";
 const NOW = "2026-10-19T10:00:00.000Z";
+const BRANCH = "tendworks/issue-7-0b6c4c1e";
+const WORKSPACE = { repository: "https://git.example/acme/app.git", branch: BRANCH };
 
 const running = (overrides: Partial<GatedRun> = {}): GatedRun => ({
   id: "run-1",
   workflow: "develop-issue",
   status: "running",
-  artifacts: [{ name: "pull-request", url: PR }],
+  artifacts: [{ name: "pull-request", url: PR, workspace: WORKSPACE }],
   ...overrides,
 });
 
 function setup({
   policies = [policy("merge-gate", "auto", ["develop-issue"]), policy("careful", "ask", ["careful-issue"])],
   runs = [running(), running({ id: "run-2", workflow: "careful-issue" })],
-  pullRequests = createFakePullRequests([{ url: PR, state: "open" }]),
+  pullRequests = createFakePullRequests([{ url: PR, headBranch: BRANCH, state: "open" }]),
 }: { policies?: Policy[]; runs?: GatedRun[]; pullRequests?: PullRequests & { merged?(): string[] } } = {}) {
   const approvals = createInMemoryApprovalStore();
   const gate = createMergeGate({
@@ -79,6 +82,19 @@ describe("merge gate", () => {
           subject: "approval-requests/approval-1",
           data: approvalRequest,
         }),
+      ]);
+    });
+
+    it("announces the approval request and its decision in the trace of the run", async () => {
+      const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+      const { gate, approvals } = setup({ runs: [running({ id: "run-2", workflow: "careful-issue", traceparent })] });
+
+      await gate.merge({ run: "run-2", pullRequest: PR });
+      await createApprovals({ store: approvals }).decide("approval-1", "approve");
+
+      expect(approvals.published.map((event) => [event.type, event.traceparent])).toEqual([
+        ["dev.tendworks.approval.requested", traceparent],
+        ["dev.tendworks.approval.decided", traceparent],
       ]);
     });
 
@@ -155,7 +171,7 @@ describe("merge gate", () => {
 
   it("refuses to merge a pull request the run did not report", async () => {
     const other = "https://git.example/acme/app/pull/8";
-    const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: other, state: "open" }]) });
+    const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: other, headBranch: BRANCH, state: "open" }]) });
 
     expect(await gate.merge({ run: "run-1", pullRequest: other })).toEqual({
       refused: {
@@ -181,9 +197,64 @@ describe("merge gate", () => {
     });
   });
 
+  describe("checks with the repository host that the pull request is the run's own", () => {
+    const refusedAs = (detail: string) => ({ refused: { reason: "invalid", title: "Pull request is not from the run's workspace", detail } });
+
+    it("refuses a pull request from another branch than the one the run gave its agent", async () => {
+      const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: PR, headBranch: "main" }]) });
+
+      expect(await gate.merge({ run: "run-1", pullRequest: PR })).toEqual(
+        refusedAs(`${PR} merges from branch main of acme/app, but run run-1 gave its agent branch ${BRANCH} of https://git.example/acme/app.git`),
+      );
+      expect(merged()).toEqual([]);
+    });
+
+    it("refuses a pull request of another repository than the run's workspace", async () => {
+      const other = "https://git.example/acme/other/pull/7";
+      const { gate, merged } = setup({
+        runs: [running({ artifacts: [{ name: "pull-request", url: other, workspace: WORKSPACE }] })],
+        pullRequests: createFakePullRequests([{ url: other, headBranch: BRANCH }]),
+      });
+
+      expect(await gate.merge({ run: "run-1", pullRequest: other })).toEqual(
+        refusedAs(`${other} merges from branch ${BRANCH} of acme/other, but run run-1 gave its agent branch ${BRANCH} of https://git.example/acme/app.git`),
+      );
+      expect(merged()).toEqual([]);
+    });
+
+    it("refuses a pull request from a fork, even on a branch of the same name", async () => {
+      const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: PR, headBranch: BRANCH, headRepository: "mallory/app" }]) });
+
+      expect(await gate.merge({ run: "run-1", pullRequest: PR })).toEqual(
+        refusedAs(`${PR} merges from branch ${BRANCH} of mallory/app, but run run-1 gave its agent branch ${BRANCH} of https://git.example/acme/app.git`),
+      );
+      expect(merged()).toEqual([]);
+    });
+
+    it("refuses a pull request reported by a step that gave its agent no workspace", async () => {
+      const { gate, merged } = setup({ runs: [running({ artifacts: [{ name: "pull-request", url: PR }] })] });
+
+      expect(await gate.merge({ run: "run-1", pullRequest: PR })).toEqual(
+        refusedAs(`run run-1 reported ${PR} from a step without a workspace, so nothing ties it to a branch of the run`),
+      );
+      expect(merged()).toEqual([]);
+    });
+
+    it("opens no approval request for a pull request that is not the run's own", async () => {
+      const { gate, approvals } = setup({
+        runs: [running({ id: "run-2", workflow: "careful-issue" })],
+        pullRequests: createFakePullRequests([{ url: PR, headBranch: "main" }]),
+      });
+
+      await gate.merge({ run: "run-2", pullRequest: PR });
+
+      expect(await approvals.list()).toEqual([]);
+    });
+  });
+
   it("refuses a pull request on a host no integration serves", async () => {
     const pr = "https://forge.test/acme/app/pull/1";
-    const { gate } = setup({ runs: [running({ artifacts: [{ name: "pull-request", url: pr }] })] });
+    const { gate } = setup({ runs: [running({ artifacts: [{ name: "pull-request", url: pr, workspace: WORKSPACE }] })] });
 
     const outcome = await gate.merge({ run: "run-1", pullRequest: pr });
 
@@ -193,7 +264,7 @@ describe("merge gate", () => {
   });
 
   it("passes on why the repository refused the merge", async () => {
-    const { gate } = setup({ pullRequests: createFakePullRequests([{ url: PR, state: "open", mergeable: false }]) });
+    const { gate } = setup({ pullRequests: createFakePullRequests([{ url: PR, headBranch: BRANCH, state: "open", mergeable: false }]) });
 
     const outcome = await gate.merge({ run: "run-1", pullRequest: PR });
 
@@ -206,6 +277,9 @@ describe("merge gate", () => {
     const { gate } = setup({
       pullRequests: {
         merge: async () => {
+          throw new Error("secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set");
+        },
+        describe: async () => {
           throw new Error("secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set");
         },
       },

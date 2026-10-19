@@ -4,6 +4,10 @@ export interface StubPullRequest {
   state: "open" | "closed";
   merged?: boolean;
   mergeable: boolean;
+  /** The branch it merges from; defaults to `feature`. */
+  headBranch?: string;
+  /** Repository of the head branch (`<owner>/<name>`), e.g. a fork; defaults to the pull request's repository. */
+  headRepository?: string;
 }
 
 export interface StubGithubApiOptions {
@@ -50,6 +54,8 @@ export function stubGithubApi({ repositories, token }: StubGithubApiOptions): ty
         mergeable: pull.mergeable,
         merge_commit_sha: pull.merged ? sha(repository, pull.number) : null,
         html_url: `https://github.com/${repository}/pull/${pull.number}`,
+        base: { ref: "main", repo: { full_name: repository } },
+        head: { ref: pull.headBranch ?? "feature", repo: { full_name: pull.headRepository ?? repository } },
       });
     }
     return json(404, { message: "Not Found" });

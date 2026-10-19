@@ -1,28 +1,22 @@
+import { eventEnvelope, newTraceparent } from "@tendworks/platform";
 import type { ApprovalEvents } from "@tendworks/shared";
 import type { ApprovalRequest } from "./approval-store.js";
 
 /** The CloudEvent source of human interaction's events. */
 export const HUMAN_INTERACTION_SOURCE = "/tendworks/human-interaction";
 
-// Human interaction does not know the trace of the run it serves yet, so each approval
-// request starts its own trace.
-function traceparent(): string {
-  const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (b) => b.toString(16).padStart(2, "0")).join("");
-  return `00-${hex(16)}-${hex(8)}-01`;
-}
-
+// An approval request belongs to the trace of the run that waits for it; a request
+// recorded without one (before runs had a trace) starts its own.
 function envelope(request: ApprovalRequest, kind: "requested" | "decided", time: string) {
-  return {
-    specversion: "1.0" as const,
+  return eventEnvelope({
     // Deterministic, so a repeated write is recognisable.
     id: `${request.id}:approval.${kind}`,
     source: HUMAN_INTERACTION_SOURCE,
     subject: `approval-requests/${request.id}`,
     time,
-    datacontenttype: "application/json" as const,
-    runid: request.runId,
-    traceparent: traceparent(),
-  };
+    runId: request.runId,
+    traceparent: request.traceparent ?? newTraceparent(),
+  });
 }
 
 export function approvalRequested(request: ApprovalRequest, time: string): ApprovalEvents.ApprovalRequestedEvent {

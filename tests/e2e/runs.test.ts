@@ -1,10 +1,8 @@
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { anonymous, client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
-
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 
 async function waitForEnd(runId: string, timeoutMs = 45_000): Promise<Run> {
   const deadline = Date.now() + timeoutMs;
@@ -37,6 +35,14 @@ describe("runs on the compose stack", () => {
     expect(run.steps[0]?.cost).toEqual({ amount: 0, currency: "USD" });
     const { data: list } = await client.GET("/runs");
     expect(list?.items.map((item) => item.id)).toContain(run.id);
+  });
+
+  it("starts no run without the API token, but lets anyone read", async () => {
+    const { response } = await anonymous.POST("/runs", { body: { workflow: "hello-agent" } });
+
+    expect(response.status).toBe(401);
+    expect(response.headers.get("www-authenticate")).toBe("Bearer");
+    expect((await anonymous.GET("/runs")).response.status).toBe(200);
   });
 
   it("rejects a workflow that is not configured", async () => {

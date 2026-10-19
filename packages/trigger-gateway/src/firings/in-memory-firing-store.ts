@@ -1,5 +1,5 @@
 import type { EventPublisher, TriggerFiredEvent } from "../trigger-events.js";
-import type { FiringKey, FiringStore } from "./firing-store.js";
+import type { Evaluation, FiringKey, FiringStore } from "./firing-store.js";
 
 /** Event publisher that keeps events in memory; the fake's transaction is a list of pending events. */
 export class InMemoryEventPublisher implements EventPublisher<TriggerFiredEvent[]> {
@@ -23,6 +23,7 @@ export class InMemoryEventPublisher implements EventPublisher<TriggerFiredEvent[
 /** Firing store in memory, for tests. */
 export function createInMemoryFiringStore(publisher = new InMemoryEventPublisher()): FiringStore & { publisher: InMemoryEventPublisher } {
   const firings = new Map<string, { runId?: string }>();
+  const evaluations = new Map<string, Evaluation>();
   const id = ({ binding, item }: FiringKey) => JSON.stringify([binding, item]);
   return {
     publisher,
@@ -41,6 +42,12 @@ export function createInMemoryFiringStore(publisher = new InMemoryEventPublisher
       await publisher.publish(tx, event);
       firings.set(id(key), { runId });
       publisher.commit(tx);
+    },
+    async recordEvaluation(binding, evaluation) {
+      evaluations.set(binding, structuredClone(evaluation));
+    },
+    async lastEvaluations() {
+      return structuredClone(evaluations);
     },
   };
 }

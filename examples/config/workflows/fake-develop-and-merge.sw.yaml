@@ -1,7 +1,7 @@
-# The shape of develop-issue with fakes: the fake agent reports a pull request on a
-# reserved .example host, and the platform merges it in its fake pull request
-# integration behind the policies of this workflow (merge-gate: merge: auto). Runs
-# without a model or a repository.
+# The shape of develop-issue with fakes: the fake agent reports a pull request on the
+# reserved git.example host, and the platform merges it in the fake pull request
+# integration (integrations/pull-requests/fake.yaml) behind the policies of this
+# workflow (merge-gate: merge: auto). Runs without a model or a repository.
 # Start it with: POST /runs {"workflow": "fake-develop-and-merge", "input": {"issue": {"number": 1, "title": "Say hello"}}}
 document:
   dsl: '1.0.3'
@@ -21,6 +21,12 @@ do:
             parts:
               - kind: text
                 text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+            # The workspace the run hands to the agent. The fake agent checks nothing out, but
+            # the merge gate only merges a pull request of this repository from this branch.
+            metadata:
+              dev.tendworks/workspace:
+                repository: https://git.example/example/playground.git
+                branch: tendworks/fake
       output:
         as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
   # From here on as in develop-issue: merge behind the gate, or wait for the approval.

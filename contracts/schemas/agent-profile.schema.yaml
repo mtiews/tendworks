@@ -78,7 +78,9 @@ $defs:
     title: AgentSecretRef
     description: >-
       Reference to a secret the platform holds; in the laptop profile an environment
-      variable of the worker, set from `deploy/.env` (ADR 0008).
+      variable of the worker, set from `deploy/.env` (ADR 0008). Agents may only
+      reference agent secrets (`TENDWORKS_AGENT_*`), so a platform secret can never be
+      handed into a sandbox.
     type: object
     required: [secretRef]
     additionalProperties: false
@@ -90,7 +92,7 @@ $defs:
         properties:
           name:
             type: string
-            pattern: ^[A-Z_][A-Z0-9_]*$
+            pattern: ^TENDWORKS_AGENT_[A-Z0-9_]+$
   fakeAgent:
     title: FakeAgent
     description: How the fake agent answers every task.

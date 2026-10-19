@@ -34,11 +34,12 @@ function setup(
   const store = createInMemoryRunStore();
   const engine = createInProcessRunEngine(createRunActivities({ store, agents, http }));
   const api = createOrchestrationApi({ store, engine, ...(runtime ? { runtime } : {}) });
-  const request = async (method: string, path: string, body?: unknown) => {
+  const request = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
     const response = await api.fetch(
       new Request(`http://orchestration.test${path}`, {
         method,
-        ...(body === undefined ? {} : { body: JSON.stringify(body), headers: { "content-type": "application/json" } }),
+        headers: { ...(body === undefined ? {} : { "content-type": "application/json" }), ...headers },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       }),
     );
     return { status: response.status, body: (await response.json()) as never };
@@ -115,6 +116,51 @@ describe("orchestration API", () => {
     expect(new Set(events.map((event) => event.traceparent)).size).toBe(1);
     expect(new Set(events.map((event) => event.id)).size).toBe(4);
     expect(events[2]).toMatchObject({ data: { name: "greet", reference: "/do/0/greet", taskId: "task-1" } });
+  });
+
+  it("runs in the caller's trace when the caller passes its traceparent", async () => {
+    const { request, store } = setup();
+    const traceparent = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+
+    const run = (await request("POST", "/runs", { workflow }, { traceparent })).body as Run;
+    await until(async () => (await request("GET", `/runs/${run.id}`)).body, finished);
+
+    expect(run.traceparent).toBe(traceparent);
+    expect(new Set((await store.publisher.events(run.id)).map((event) => event.traceparent))).toEqual(new Set([traceparent]));
+  });
+
+  it("starts a new trace for a run without a caller's traceparent and records it", async () => {
+    const { request, store } = setup();
+
+    const run = (await request("POST", "/runs", { workflow })).body as Run;
+    await until(async () => (await request("GET", `/runs/${run.id}`)).body, finished);
+
+    expect(run.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    expect((await store.publisher.events(run.id))[0]!.traceparent).toBe(run.traceparent);
+  });
+
+  it("records what started the run, and a run nobody declares as started by hand", async () => {
+    const { request } = setup();
+    const startedBy = {
+      kind: "trigger",
+      binding: "ready-issues",
+      issue: { repository: "acme/playground", number: 7, title: "Fix it", url: "https://issues.example/acme/playground/7" },
+    };
+
+    const triggered = (await request("POST", "/runs", { workflow, startedBy })).body as Run;
+    const manual = (await request("POST", "/runs", { workflow })).body as Run;
+
+    expect((await request("GET", `/runs/${triggered.id}`)).body).toMatchObject({ startedBy });
+    expect((await request("GET", `/runs/${manual.id}`)).body).toMatchObject({ startedBy: { kind: "manual" } });
+  });
+
+  it("refuses a malformed traceparent", async () => {
+    const { request } = setup();
+
+    const { status, body } = await request("POST", "/runs", { workflow }, { traceparent: "not-a-trace" });
+
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ title: "Invalid request" });
   });
 
   it("lists runs newest first", async () => {

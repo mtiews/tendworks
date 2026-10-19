@@ -8,13 +8,19 @@ export interface FetchHttpExecutorOptions {
    * to the control plane API keeps a workflow from calling anything else from there.
    */
   allowedOrigin: string;
+  /**
+   * The platform's API token, sent as bearer token with every request (the control
+   * plane needs it for operations that change state). The executor sets it, so it never
+   * appears in a workflow and a workflow cannot replace it.
+   */
+  apiToken?: string;
   fetch?: (request: Request) => Promise<Response>;
   /** How long one request may take. Defaults to 60 s. */
   timeoutMs?: number;
 }
 
 /** HTTP executor on fetch, limited to one origin. */
-export function createFetchHttpExecutor({ allowedOrigin, fetch = globalThis.fetch, timeoutMs = 60_000 }: FetchHttpExecutorOptions): HttpExecutor {
+export function createFetchHttpExecutor({ allowedOrigin, apiToken, fetch = globalThis.fetch, timeoutMs = 60_000 }: FetchHttpExecutorOptions): HttpExecutor {
   const allowed = new URL(allowedOrigin).origin;
   return {
     async request(request) {
@@ -27,7 +33,9 @@ export function createFetchHttpExecutor({ allowedOrigin, fetch = globalThis.fetc
       if (origin !== allowed) {
         throw new Error(`call: http may only reach the control plane API (${allowed}), not ${origin}`);
       }
-      const response = await fetch(new Request(toRequest(request), { signal: AbortSignal.timeout(timeoutMs) }));
+      const outgoing = new Request(toRequest(request), { signal: AbortSignal.timeout(timeoutMs) });
+      if (apiToken) outgoing.headers.set("authorization", `Bearer ${apiToken}`);
+      const response = await fetch(outgoing);
       return fromResponse(response);
     },
   };

@@ -7,13 +7,14 @@ describePullRequests("fake", async (fixtures) => {
   return {
     pullRequests: createFakePullRequests(fixtures.map((fixture, index) => ({ url: urls[index]!, ...fixture }))),
     urls,
+    repository: "acme/app",
     missing: "https://git.example/acme/app/pull/99",
   };
 });
 
 describe("fake pull requests", () => {
-  it("treats unlisted pull requests as open and mergeable when asked to, and records merges", async () => {
-    const pullRequests = createFakePullRequests([], { openByDefault: true });
+  it("treats listed pull requests as open unless they say otherwise, and records merges once", async () => {
+    const pullRequests = createFakePullRequests([{ url: "https://git.example/acme/app/pull/5", headBranch: "feature" }]);
 
     await pullRequests.merge("https://git.example/acme/app/pull/5");
     await pullRequests.merge("https://git.example/acme/app/pull/5");

@@ -1,10 +1,8 @@
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
-
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 
 async function runToEnd(workflow: string, timeoutMs = 45_000): Promise<Run> {
   const { data: started, response } = await client.POST("/runs", { body: { workflow, input: { issue: { number: 14, title: "Merge it" } } } });
@@ -18,8 +16,8 @@ async function runToEnd(workflow: string, timeoutMs = 45_000): Promise<Run> {
   }
 }
 
-// Fakes only: the fake agent reports a pull request on a reserved .example host, which
-// the server merges in its fake pull request integration behind the example policy
+// Fakes only: the fake agent reports a pull request on the reserved git.example host, which
+// the server merges in the configured fake pull request integration behind the example policy
 // merge-gate (merge: auto). No real repository is touched.
 describe("merge step on the compose stack", () => {
   it("merges the pull request the agent reported, as a platform step, and completes the run", { timeout: 60_000 }, async () => {

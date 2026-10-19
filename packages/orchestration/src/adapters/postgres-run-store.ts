@@ -37,6 +37,9 @@ create table if not exists orchestration.steps (
 alter table orchestration.steps add column if not exists transcript text;
 alter table orchestration.steps add column if not exists cost jsonb;
 alter table orchestration.steps add column if not exists artifacts jsonb;
+alter table orchestration.runs add column if not exists traceparent text;
+alter table orchestration.steps add column if not exists workspace jsonb;
+alter table orchestration.runs add column if not exists started_by jsonb;
 create table if not exists orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
@@ -87,6 +90,8 @@ interface RunRow {
   workflow: string;
   status: Run["status"];
   input: unknown;
+  started_by: NonNullable<Run["startedBy"]> | null;
+  traceparent: string | null;
   output: unknown;
   error: NonNullable<Run["error"]> | null;
   created_at: Date;
@@ -102,6 +107,7 @@ interface StepRow {
   task_id: string | null;
   transcript: string | null;
   cost: NonNullable<StepRecord["cost"]> | null;
+  workspace: NonNullable<StepRecord["workspace"]> | null;
   artifacts: NonNullable<StepRecord["artifacts"]> | null;
   error: NonNullable<StepRecord["error"]> | null;
   started_at: Date;
@@ -149,9 +155,12 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
   return {
     async create(run) {
       await pool.query(
-        `insert into orchestration.runs (id, workflow, status, input, output, error, created_at, started_at, finished_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-        [run.id, run.workflow, run.status, json(run.input), json(run.output), json(run.error), run.createdAt, run.startedAt ?? null, run.finishedAt ?? null],
+        `insert into orchestration.runs (id, workflow, status, input, started_by, traceparent, output, error, created_at, started_at, finished_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          run.id, run.workflow, run.status, json(run.input), json(run.startedBy), run.traceparent ?? null, json(run.output), json(run.error),
+          run.createdAt, run.startedAt ?? null, run.finishedAt ?? null,
+        ],
       );
     },
     async updateRun(runId: string, patch: RunPatch, events) {
@@ -174,15 +183,15 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
     async saveStep(runId, step, events) {
       await transaction(async (tx) => {
         await tx.query(
-          `insert into orchestration.steps (run_id, reference, name, status, task_id, transcript, cost, artifacts, error, started_at, finished_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          `insert into orchestration.steps (run_id, reference, name, status, task_id, transcript, cost, workspace, artifacts, error, started_at, finished_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            on conflict (run_id, reference) do update set
              name = excluded.name, status = excluded.status, task_id = excluded.task_id,
-             transcript = excluded.transcript, cost = excluded.cost, artifacts = excluded.artifacts,
+             transcript = excluded.transcript, cost = excluded.cost, workspace = excluded.workspace, artifacts = excluded.artifacts,
              error = excluded.error, finished_at = excluded.finished_at`,
           [
-            runId, step.reference, step.name, step.status, step.taskId ?? null, step.transcript ?? null, json(step.cost), json(step.artifacts),
-            json(step.error), step.startedAt, step.finishedAt ?? null,
+            runId, step.reference, step.name, step.status, step.taskId ?? null, step.transcript ?? null, json(step.cost), json(step.workspace),
+            json(step.artifacts), json(step.error), step.startedAt, step.finishedAt ?? null,
           ],
         );
       }, events);
@@ -202,6 +211,8 @@ function toRun(row: RunRow, steps: StepRow[]): Run {
     workflow: row.workflow,
     status: row.status,
     input: row.input,
+    ...(row.started_by === null ? {} : { startedBy: row.started_by }),
+    ...(row.traceparent === null ? {} : { traceparent: row.traceparent }),
     ...(row.output === null ? {} : { output: row.output }),
     ...(row.error === null ? {} : { error: row.error }),
     steps: steps.map(toStep),
@@ -219,6 +230,7 @@ function toStep(row: StepRow): StepRecord {
     ...(row.task_id === null ? {} : { taskId: row.task_id }),
     ...(row.transcript === null ? {} : { transcript: row.transcript }),
     ...(row.cost === null ? {} : { cost: row.cost }),
+    ...(row.workspace === null ? {} : { workspace: row.workspace }),
     ...(row.artifacts === null ? {} : { artifacts: row.artifacts }),
     ...(row.error === null ? {} : { error: row.error }),
     startedAt: row.started_at.toISOString(),

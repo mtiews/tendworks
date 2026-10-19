@@ -16,7 +16,6 @@ import {
   createPostgresApprovalStore,
   toGatedRun,
   createPullRequestIntegrations,
-  PLATFORM_GITHUB_TOKEN,
   createPostgresNotificationStore,
   createNotifier,
   migrateHumanInteractionStore,
@@ -28,6 +27,7 @@ import {
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
 } from "@tendworks/trigger-gateway";
+import { createSecretResolver } from "@tendworks/platform";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -48,6 +48,17 @@ try {
 console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
 console.log(`configuration: trigger bindings ${configuration.triggerBindings.map((binding) => binding.metadata.name).join(", ") || "none"}`);
 
+// Secret references of the platform's integrations (trigger bindings, merging pull
+// requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
+const platformSecrets = createSecretResolver("platform", process.env);
+
+// Operations that change state need this token (ADR XXXX (interim-bearer-token-on-the-control-plane-api)).
+const apiToken = env("TEND_API_TOKEN");
+if (apiToken.length < 16) {
+  console.error("TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`");
+  process.exit(1);
+}
+
 const databaseUrl = env("TEND_DATABASE_URL");
 const pool = new pg.Pool({ connectionString: databaseUrl });
 await migrateEventBus(pool);
@@ -67,8 +78,8 @@ const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
 // Human interaction: the merge gate. It decides by orchestration's record of the run and
 // the policies of its workflow, never by what the caller claims; with `ask` it opens an
 // approval request (approval.requested goes onto the bus with it) and merges only once
-// that is approved. Merges go through the pull request integration with the platform
-// token, which only this bundle holds (ADR 0008).
+// that is approved. Merges go through the pull request integration configured for the
+// pull request's host, with the platform token only this bundle holds (ADR 0008).
 const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
 const merges = createMergeGate({
   policies: configuration.policies,
@@ -76,11 +87,14 @@ const merges = createMergeGate({
     const run = await orchestration.get(runId);
     return run && toGatedRun(run);
   },
-  pullRequests: createPullRequestIntegrations({ githubToken: () => process.env[PLATFORM_GITHUB_TOKEN] }),
+  pullRequests: createPullRequestIntegrations({ integrations: configuration.pullRequestIntegrations, secrets: platformSecrets }),
   approvals: approvalStore,
 });
 const approvals = createApprovals({ store: approvalStore });
 console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
+console.log(
+  `configuration: pull request integrations ${configuration.pullRequestIntegrations.map(({ metadata, spec }) => `${metadata.name} (${spec.integration} on ${spec.host})`).join(", ") || "none"}`,
+);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control
@@ -91,7 +105,8 @@ const triggerGateway = createTriggerGateway({
   bindings: configuration.triggerBindings,
   // trigger.fired goes onto the event bus in the transaction that records the firing.
   store: createPostgresFiringStore({ pool, publisher: bus }),
-  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) }),
+  secrets: platformSecrets,
+  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
 });
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 const api = createControlPlaneApi({
@@ -103,6 +118,7 @@ const api = createControlPlaneApi({
   merges,
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
+  apiToken,
 });
 
 const port = Number(env("PORT", "8080"));

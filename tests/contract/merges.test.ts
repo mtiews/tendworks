@@ -31,16 +31,17 @@ import { guardedContracts } from "./support/guarded-contracts.js";
  */
 
 const contracts = guardedContracts("orchestration", "control-plane");
+const API_TOKEN = "contract-test-token";
 
 type Run = ControlPlane.components["schemas"]["run"];
 const PR = "https://git.example/example/playground/pull/1"; // examples/config/agents/fake-pr-developer.md
 
-function platform({ pullRequests = [{ url: PR, state: "open" }] }: { pullRequests?: FakePullRequest[] } = {}) {
+function platform({ pullRequests = [{ url: PR, headBranch: "tendworks/fake", state: "open" }] }: { pullRequests?: FakePullRequest[] } = {}) {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const repository = createFakePullRequests(pullRequests);
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
-  const http = createFetchHttpExecutor({ allowedOrigin: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
+  const http = createFetchHttpExecutor({ allowedOrigin: "http://tend.test", apiToken: API_TOKEN, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
   const engine = createInProcessRunEngine(createRunActivities({ store, agents, http }));
   const orchestration = createOrchestrationApi({ store, engine, runtime: { name: "tendworks", metadata: { controlPlaneUrl: "http://tend.test" } } });
   const runs = createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) });
@@ -59,8 +60,9 @@ function platform({ pullRequests = [{ url: PR, state: "open" }] }: { pullRequest
       approvals: approvalStore,
     }),
     approvals: createApprovals({ store: approvalStore }),
+    apiToken: API_TOKEN,
   });
-  const client = createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
+  const client = createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${API_TOKEN}` }, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
   const forwarder = createRunEventForwarder(engine);
   let forwarded = 0;
 
@@ -122,7 +124,7 @@ describe("merge step through the control plane's merge gate", () => {
   });
 
   it("fails the merge step with the repository's reason when the merge is refused", async () => {
-    const { run } = platform({ pullRequests: [{ url: PR, state: "open", mergeable: false }] });
+    const { run } = platform({ pullRequests: [{ url: PR, headBranch: "tendworks/fake", state: "open", mergeable: false }] });
 
     const done = await run("fake-develop-and-merge");
 

@@ -130,8 +130,35 @@ describe.concurrent("Docker adapter", () => {
   });
 });
 
+describe("Docker adapter with a sandbox network", () => {
+  const network = `tendworks-test-sandboxes-${crypto.randomUUID().slice(0, 8)}`;
+  const api = () => createDockerSandboxApi({ url: proxyUrl, network, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
+  const created: { api: SandboxApi; id: string }[] = [];
+
+  afterAll(async () => {
+    await Promise.all(created.map(({ api, id }) => api.destroy(id)));
+    await docker("network", "rm", network).catch(() => {});
+  });
+
+  it("creates the network once, without traffic between sandboxes, and starts every sandbox on it", async () => {
+    // Two adapters, as after a restart: the second finds the network the first created.
+    const first = api();
+    const second = api();
+    const sandboxes = await Promise.all([first, second].map(async (adapter) => {
+      const sandbox = await adapter.create({ apiVersion: "tendworks.dev/v1", kind: "SandboxTemplate", metadata: { name: "networked" }, spec: { image } });
+      created.push({ api: adapter, id: sandbox.id });
+      return sandbox;
+    }));
+
+    for (const { id } of sandboxes) {
+      expect(await docker("inspect", "--format", "{{.HostConfig.NetworkMode}}", `tendworks-sandbox-${id}`)).toBe(network);
+    }
+    expect(await docker("network", "inspect", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}', network)).toBe("false");
+  });
+});
+
 describe("socket proxy", () => {
-  it.each(["/images/json", "/info", "/events", "/networks", "/system/df"])("refuses %s, which the adapter does not need", async (path) => {
+  it.each(["/images/json", "/info", "/events", "/system/df"])("refuses %s, which the adapter does not need", async (path) => {
     const response = await fetch(new URL(path, proxyUrl), { signal: AbortSignal.timeout(2_000) });
     await response.body?.cancel();
 

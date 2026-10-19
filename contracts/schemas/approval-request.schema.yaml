@@ -34,6 +34,10 @@ $defs:
         description: The question in one line, e.g. "Merge https://…/pull/7 for run 1f3c… of develop-issue?".
       status:
         $ref: '#/$defs/approvalStatus'
+      traceparent:
+        type: string
+        pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+        description: W3C trace context of the run that waits; the request's events carry it.
       createdAt:
         type: string
         format: date-time

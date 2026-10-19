@@ -1,10 +1,17 @@
 import type { ControlPlane } from "@tendworks/shared";
+
+/** What started a run, as the control plane records it. */
+export type RunOrigin = ControlPlane.components["schemas"]["runOrigin"];
 import createClient from "openapi-fetch";
 
 export interface StartRun {
   /** Name of a configured workflow. */
   workflow: string;
   input: Record<string, unknown>;
+  /** W3C trace context the run joins: the trace of the trigger that fired. */
+  traceparent?: string;
+  /** The binding and the issue that start the run. */
+  startedBy?: RunOrigin;
 }
 
 /**
@@ -18,12 +25,16 @@ export interface RunStarter {
   start(request: StartRun): Promise<{ id: string }>;
 }
 
-/** Starts runs through the public control plane API (`POST /runs`). */
-export function createControlPlaneRunStarter(options: { baseUrl: string; fetch?: (request: Request) => Promise<Response> }): RunStarter {
-  const client = createClient<ControlPlane.paths>({ baseUrl: options.baseUrl, ...(options.fetch ? { fetch: options.fetch } : {}) });
+/** Starts runs through the public control plane API (`POST /runs`), with the platform's API token. */
+export function createControlPlaneRunStarter(options: { baseUrl: string; apiToken: string; fetch?: (request: Request) => Promise<Response> }): RunStarter {
+  const client = createClient<ControlPlane.paths>({
+    baseUrl: options.baseUrl,
+    headers: { authorization: `Bearer ${options.apiToken}` },
+    ...(options.fetch ? { fetch: options.fetch } : {}),
+  });
   return {
-    async start(request) {
-      const { data, error, response } = await client.POST("/runs", { body: request });
+    async start({ traceparent, ...request }) {
+      const { data, error, response } = await client.POST("/runs", { body: request, ...(traceparent ? { params: { header: { traceparent } } } : {}) });
       if (data) return { id: data.id };
       const reason = error?.title ? `: ${error.title}${error.detail ? ` (${error.detail})` : ""}` : "";
       throw new Error(`control plane answered HTTP ${response.status}${reason}`);

@@ -221,6 +221,9 @@ importers:
       '@tendworks/human-interaction':
         specifier: workspace:*
         version: link:../../packages/human-interaction
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/trigger-gateway':
         specifier: workspace:*
         version: link:../../packages/trigger-gateway
@@ -249,6 +252,9 @@ importers:
       '@tendworks/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox
@@ -265,6 +271,9 @@ importers:
       '@agentclientprotocol/sdk':
         specifier: 1.7.0
         version: 1.7.0(zod@4.6.5)
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -290,6 +299,9 @@ importers:
       '@tendworks/health':
         specifier: workspace:*
         version: link:../health
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -334,6 +346,9 @@ importers:
 
   packages/human-interaction:
     dependencies:
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -370,6 +385,9 @@ importers:
       '@tendworks/health':
         specifier: workspace:*
         version: link:../health
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -389,6 +407,8 @@ importers:
       '@types/pg':
         specifier: 8.23.1
         version: 8.23.1
+
+  packages/platform: {}
 
   packages/sandbox:
     dependencies:
@@ -419,6 +439,9 @@ importers:
       '@gabrielbryk/jq-ts':
         specifier: 1.7.0
         version: 1.7.0(typescript@6.0.3)
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared
@@ -456,6 +479,9 @@ importers:
       '@tendworks/orchestration':
         specifier: workspace:*
         version: link:../../packages/orchestration
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../../packages/platform
       '@tendworks/sandbox':
         specifier: workspace:*
         version: link:../../packages/sandbox

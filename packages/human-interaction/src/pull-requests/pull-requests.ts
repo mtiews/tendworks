@@ -1,3 +1,5 @@
+import type { PullRequestIntegration } from "@tendworks/shared";
+
 /**
  * Integration port to the repository host's pull requests. The platform merges through
  * it with its own credentials, never an agent's.
@@ -12,6 +14,20 @@ export interface PullRequests {
    * found) and with any other error when it cannot be asked (unreachable, credentials).
    */
   merge(url: string): Promise<MergeResult>;
+  /**
+   * What the repository host says about the pull request at `url`: the repository it
+   * belongs to and the branch it merges from. Rejects with a {@link MergeRefusedError}
+   * when there is no such pull request and with any other error when it cannot be asked.
+   */
+  describe(url: string): Promise<PullRequestDetails>;
+}
+
+/** A pull request as its repository host reports it; repositories as `<owner>/<name>`. */
+export interface PullRequestDetails {
+  repository: string;
+  /** Where the head branch lives; differs from `repository` for a pull request from a fork. */
+  headRepository: string;
+  headBranch: string;
 }
 
 export interface MergeResult {
@@ -27,29 +43,26 @@ export class MergeRefusedError extends Error {
   }
 }
 
-/** A pull request as the fake serves it. */
-export interface FakePullRequest {
-  url: string;
-  state: "open" | "closed" | "merged";
-  /** Whether an open pull request merges cleanly. Defaults to true. */
-  mergeable?: boolean;
-}
+/** A pull request as the fake serves it (`kind: PullRequestIntegration`, `integration: fake`). */
+export type FakePullRequest = PullRequestIntegration.FakePullRequest;
 
 /**
- * Pull requests in memory, for tests and demos. Pull requests not listed count as open
- * and mergeable when `openByDefault` is set (the fake the server uses for `.example`
- * hosts), otherwise as not found. Merge commits are derived from the URL.
+ * Pull requests in memory, for tests and demos: those listed, open unless they say
+ * otherwise; others are not found. Merge commits are derived from the URL.
  */
-export function createFakePullRequests(
-  pullRequests: FakePullRequest[] = [],
-  { openByDefault = false }: { openByDefault?: boolean } = {},
-): PullRequests & { merged(): string[] } {
-  const known = new Map(pullRequests.map((pullRequest) => [pullRequest.url, { ...pullRequest }]));
+export function createFakePullRequests(pullRequests: FakePullRequest[] = []): PullRequests & { merged(): string[] } {
+  const known = new Map(pullRequests.map((pullRequest) => [pullRequest.url, { ...pullRequest, state: pullRequest.state ?? "open" }]));
   const merged: string[] = [];
   return {
+    async describe(url) {
+      const pullRequest = known.get(url);
+      if (!pullRequest) throw new MergeRefusedError(`no pull request at ${url}`);
+      // The schema fixes the URL as https://<host>/<owner>/<name>/pull/<number>.
+      const repository = new URL(url).pathname.split("/").slice(1, 3).join("/");
+      return { repository, headRepository: pullRequest.headRepository ?? repository, headBranch: pullRequest.headBranch };
+    },
     async merge(url) {
-      let pullRequest = known.get(url);
-      if (!pullRequest && openByDefault) known.set(url, (pullRequest = { url, state: "open" }));
+      const pullRequest = known.get(url);
       if (!pullRequest) throw new MergeRefusedError(`no pull request at ${url}`);
       if (pullRequest.state === "closed") throw new MergeRefusedError(`pull request ${url} is closed`);
       if (pullRequest.state === "open") {

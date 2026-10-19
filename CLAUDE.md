@@ -51,7 +51,7 @@ Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision chang
 contracts/   openapi/, events/ (CloudEvent JSON Schemas), schemas/ (per kind)
 packages/    control-plane, trigger-gateway, orchestration, agent-runtime, sandbox,
              human-interaction, event-bus, mcp-platform, shared (generated types only),
-             health (platform library, not a domain)
+             health, platform (platform libraries, not domains)
 apps/        server, worker, web, cli   (bundles only, no domain logic)
 images/      sandbox-claude-code
 deploy/      compose.yaml, profiles/

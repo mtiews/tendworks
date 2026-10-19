@@ -8,6 +8,7 @@ const completed: Run = {
   workflow: "hello-agent",
   status: "completed",
   input: { issue: { number: 1 } },
+  startedBy: { kind: "manual" },
   output: { state: "TASK_STATE_COMPLETED" },
   steps: [
     {
@@ -39,6 +40,7 @@ const failed: Run = {
   id: "7f1d2a9e-run-failed",
   status: "failed",
   error,
+  startedBy: { kind: "trigger", binding: "ready-issues", issue: { repository: "acme/playground", number: 7, url: "https://github.com/acme/playground/issues/7" } },
   steps: [{ ...completed.steps[0]!, status: "failed", error }],
   createdAt: "2026-10-18T11:00:00.000Z",
 };
@@ -48,7 +50,8 @@ async function tend(args: string[], extra: Run[] = []) {
   for (const run of [completed, failed, ...extra]) runs.runs.set(run.id, run);
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs,
   });
   let stdout = "";
@@ -67,9 +70,11 @@ describe("tend run list", () => {
 
     expect(exitCode).toBe(0);
     const lines = stdout.trimEnd().split("\n");
-    expect(lines[0]).toMatch(/^ID\s+WORKFLOW\s+STATUS\s+CREATED\s+FINISHED$/);
-    expect(lines[1]).toMatch(/^7f1d2a9e-run-failed\s+hello-agent\s+failed\s+2026-10-18T11:00:00.000Z\s+2026-10-18T10:00:02.000Z$/);
-    expect(lines[2]).toMatch(/^0b6c4c1e-run-completed\s+hello-agent\s+completed\s+2026-10-18T10:00:00.000Z/);
+    expect(lines[0]).toMatch(/^ID\s+WORKFLOW\s+STATUS\s+STARTED BY\s+CREATED\s+FINISHED$/);
+    expect(lines[1]).toMatch(
+      /^7f1d2a9e-run-failed\s+hello-agent\s+failed\s+trigger ready-issues: acme\/playground#7\s+2026-10-18T11:00:00.000Z\s+2026-10-18T10:00:02.000Z$/,
+    );
+    expect(lines[2]).toMatch(/^0b6c4c1e-run-completed\s+hello-agent\s+completed\s+manual\s+2026-10-18T10:00:00.000Z/);
   });
 
   it("prints the runs as a document with -o json and -o yaml", async () => {
@@ -129,6 +134,7 @@ describe("tend run get", () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(/^STATUS\s+failed$/m);
+    expect(stdout).toMatch(/^STARTED BY\s+trigger ready-issues: acme\/playground#7 \(https:\/\/github.com\/acme\/playground\/issues\/7\)$/m);
     expect(stdout).toMatch(/^ERROR\s+\/do\/0\/implement: Agent task ended in state TASK_STATE_FAILED: not today$/m);
   });
 

@@ -1,8 +1,6 @@
 import { serve } from "@hono/node-server";
 import {
-  AGENT_SECRET_PREFIX,
   AgentProfileError,
-  agentSecretsFromEnv,
   claudeCodeCredentialFromEnv,
   createAgentRuntime,
   createClaudeCodeHarness,
@@ -14,6 +12,7 @@ import {
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi } from "@tendworks/health";
+import { createSecretResolver } from "@tendworks/platform";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -54,18 +53,17 @@ if ("problem" in selected && profiles.some((profile) => profile.spec.harness ===
   console.warn(`harness claude-code: ${selected.problem}; its tasks will fail until this is fixed`);
 }
 // Secrets agent profiles pass into sandboxes (spec.env): only TENDWORKS_AGENT_* variables
-// resolve, so platform secrets never reach an agent. Never log their values.
-const secrets = agentSecretsFromEnv(process.env);
+// resolve, so platform secrets never reach an agent (ADR 0008). Never log their values.
+const secrets = createSecretResolver("agent", process.env);
 for (const profile of profiles) {
   for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
-    if (secrets(secretRef.name) === undefined) {
-      console.warn(`agent profile ${profile.metadata.name}: ${variable} needs ${secretRef.name}, which is not set or not an agent secret (${AGENT_SECRET_PREFIX}*); its tasks will fail until it is set`);
-    }
+    const problem = secrets.problem(secretRef.name);
+    if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl }),
+  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
@@ -98,8 +96,10 @@ bus.subscribe("orchestration.run-events", createRunEventForwarder(engine).handle
 // `call: http` tasks may only reach the control plane API; workflows find it as
 // `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
 // repository token lives in the server bundle, never in this one.
+// They authenticate with the platform's API token, which the executor adds; it never
+// reaches a workflow definition or a sandbox.
 const controlPlaneUrl = env("TEND_CONTROL_PLANE_URL");
-const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl });
+const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl, apiToken: env("TEND_API_TOKEN") });
 const runtime = { name: "tendworks", metadata: { controlPlaneUrl: controlPlaneUrl.replace(/\/+$/, "") } };
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents, http }) });
 

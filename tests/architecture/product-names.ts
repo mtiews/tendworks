@@ -70,6 +70,18 @@ export const ADAPTER_SELECTORS: readonly AdapterSelector[] = [
     reason: "settings of the `github` issue tracker adapter",
   },
   {
+    file: "schemas/pull-request-integration.schema.yaml",
+    under: "/$defs/pullRequestIntegrationSpec",
+    product: "github",
+    reason: "`integration: github` selects the pull request adapter, configured under `github`",
+  },
+  {
+    file: "schemas/pull-request-integration.schema.yaml",
+    under: "/$defs/githubPullRequests",
+    product: "github",
+    reason: "settings of the `github` pull request adapter",
+  },
+  {
     file: "schemas/sandbox-template.schema.json",
     under: "/properties/spec/properties/isolationClass",
     product: "gvisor",

@@ -25,7 +25,8 @@ const delivered: Notification = {
 async function tend(args: string[]) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs: createInMemoryRuns(),
     notifications: { list: async () => [failed, delivered] },
   });

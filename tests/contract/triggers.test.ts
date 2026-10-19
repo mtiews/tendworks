@@ -21,6 +21,8 @@ import { guardedContracts } from "./support/guarded-contracts.js";
 
 const contracts = guardedContracts("orchestration", "control-plane", "trigger-gateway");
 
+const API_TOKEN = "contract-test-token";
+
 function platform() {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
@@ -29,7 +31,7 @@ function platform() {
   const gateway = createTriggerGateway({
     bindings: configuration.triggerBindings,
     store: createInMemoryFiringStore(),
-    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }),
+    runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", apiToken: API_TOKEN, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }),
     now: () => new Date("2026-10-18T10:00:05.000Z"),
   });
   const gatewayApi = createTriggerGatewayApi(gateway);
@@ -38,6 +40,7 @@ function platform() {
     configuration,
     runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: contracts["orchestration"].guard((request) => orchestration.fetch(request)) }),
     triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: contracts["trigger-gateway"].guard((request) => gatewayApi.fetch(request)) }),
+    apiToken: API_TOKEN,
   });
   return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
 }
@@ -48,8 +51,11 @@ describe("triggers through the control plane and the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data).toEqual({
-      items: [{ name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-18T10:00:10.000Z" }],
+    expect(data?.items.find((trigger) => trigger.name === "issue-ready-for-agent")).toEqual({
+      name: "issue-ready-for-agent",
+      workflow: "hello-agent",
+      schedule: { every: { seconds: 10 } },
+      nextExecutionAt: "2026-10-18T10:00:10.000Z",
     });
   });
 
@@ -69,5 +75,11 @@ describe("triggers through the control plane and the trigger gateway", () => {
         [first.fired[1]!.runId, "hello-agent", { issue: { number: 102, title: "Fix the typo", url: "https://issues.example/example/playground/102" } }],
       ].sort(),
     );
+    const run = runs.find((candidate) => candidate.id === first.fired[0]!.runId);
+    expect(run?.startedBy).toEqual({
+      kind: "trigger",
+      binding: "issue-ready-for-agent",
+      issue: { repository: "example/playground", number: 101, title: "Add a greeting", url: "https://issues.example/example/playground/101" },
+    });
   });
 });

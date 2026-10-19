@@ -5,6 +5,9 @@ import { MergeRefusedError, type PullRequests } from "./pull-requests.js";
 export interface PullRequestFixture {
   state: "open" | "closed";
   mergeable: boolean;
+  headBranch: string;
+  /** Repository of the head branch as `<owner>/<name>` when it is a fork; else the pull request's repository. */
+  headRepository?: string;
 }
 
 export interface PullRequestsSuiteContext {
@@ -12,12 +15,14 @@ export interface PullRequestsSuiteContext {
   urls: string[];
   /** A URL of the integration's host where no pull request exists. */
   missing: string;
+  /** The repository (`<owner>/<name>`) the fixtures' pull requests belong to. */
+  repository: string;
 }
 
 const FIXTURES: PullRequestFixture[] = [
-  { state: "open", mergeable: true },
-  { state: "open", mergeable: false },
-  { state: "closed", mergeable: true },
+  { state: "open", mergeable: true, headBranch: "tendworks/issue-1-0b6c4c1e" },
+  { state: "open", mergeable: false, headBranch: "feature" },
+  { state: "closed", mergeable: true, headBranch: "main", headRepository: "someone/fork" },
 ];
 
 /**
@@ -59,6 +64,22 @@ export function describePullRequests(name: string, setup: (fixtures: PullRequest
 
     it("refuses a pull request that does not exist", async () => {
       await expect(context.pullRequests.merge(context.missing)).rejects.toBeInstanceOf(MergeRefusedError);
+    });
+
+    it("describes which repository a pull request belongs to and which branch it merges from", async () => {
+      expect(await context.pullRequests.describe(context.urls[0]!)).toEqual({
+        repository: context.repository,
+        headRepository: context.repository,
+        headBranch: "tendworks/issue-1-0b6c4c1e",
+      });
+    });
+
+    it("describes the head of a pull request from a fork as the fork's", async () => {
+      expect(await context.pullRequests.describe(context.urls[2]!)).toEqual({ repository: context.repository, headRepository: "someone/fork", headBranch: "main" });
+    });
+
+    it("refuses to describe a pull request that does not exist", async () => {
+      await expect(context.pullRequests.describe(context.missing)).rejects.toBeInstanceOf(MergeRefusedError);
     });
   });
 }

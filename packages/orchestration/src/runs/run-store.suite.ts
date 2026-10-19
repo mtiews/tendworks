@@ -25,6 +25,8 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       workflow: "hello",
       status: "pending",
       input: { issue: { number: 7 } },
+      startedBy: { kind: "trigger", binding: "ready-issues", issue: { repository: "acme/app", number: 7, url: "https://issues.example/7" } },
+      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       steps: [],
       createdAt: "2026-10-18T10:00:00.000Z",
       ...overrides,
@@ -94,13 +96,14 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       ]);
     });
 
-    it("keeps the links a step's agent reported", async () => {
+    it("keeps the workspace a step handed to its agent and the links the agent reported", async () => {
       const run = newRun();
       await context.store.create(run);
       const step = {
         name: "implement",
         reference: "/do/0/implement",
         status: "completed" as const,
+        workspace: { repository: "https://git.example/acme/app.git", branch: "tendworks/issue-7" },
         artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "The change" }],
         startedAt: "2026-10-18T10:00:01.000Z",
         finishedAt: "2026-10-18T10:00:02.000Z",

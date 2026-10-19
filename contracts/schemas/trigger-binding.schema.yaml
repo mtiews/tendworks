@@ -35,6 +35,11 @@ properties:
       workflow:
         type: string
         description: Name (`document.name`) of the configured workflow each match starts.
+      suspend:
+        type: boolean
+        description: >-
+          When true, the binding is never checked on its schedule, e.g. because it needs a
+          secret that is not set yet. Defaults to false.
       input:
         type: object
         additionalProperties: true
@@ -152,7 +157,9 @@ $defs:
     description: >-
       Reference to a secret the platform holds, so the secret itself never appears in
       configuration. In the laptop profile secrets are environment variables of the
-      platform, set from `deploy/.env`.
+      platform, set from `deploy/.env`. Platform integrations may only reference
+      platform secrets (`TENDWORKS_PLATFORM_*`), never the agents' or any other variable
+      of the platform (ADR 0008).
     type: object
     required: [secretRef]
     additionalProperties: false
@@ -164,7 +171,7 @@ $defs:
         properties:
           name:
             type: string
-            pattern: ^[A-Z_][A-Z0-9_]*$
+            pattern: ^TENDWORKS_PLATFORM_[A-Z0-9_]+$
             description: Name of the secret, e.g. `TENDWORKS_PLATFORM_GITHUB_TOKEN`.
   issue:
     title: Issue

@@ -10,7 +10,8 @@ const probe = (name: string, status: "healthy" | "unhealthy", message?: string):
 async function tend(args: string[], probes: HealthProbe[]) {
   const api = createControlPlaneApi({
     probes,
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    apiToken: "test-token",
     runs: createInMemoryRuns(),
   });
   let stdout = "";

@@ -2,12 +2,11 @@ import { execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import type { ControlPlane } from "@tendworks/shared";
-import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
+import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 
-const client = createClient<ControlPlane.paths>({ baseUrl: process.env.TEND_URL ?? "http://localhost:8080" });
 const compose = (...args: string[]) =>
   promisify(execFile)("docker", ["compose", "-f", fileURLToPath(new URL("../../deploy/compose.yaml", import.meta.url)), ...args], {
     timeout: 120_000,
