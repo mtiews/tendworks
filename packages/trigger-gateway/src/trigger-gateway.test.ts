@@ -74,6 +74,34 @@ describe("trigger gateway schedule", () => {
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(runs.started).toHaveLength(2);
   });
+
+  it("reports a check whose issue tracker fails and keeps checking at the next executions", async () => {
+    const runs = createInMemoryRunStarter();
+    const lines: string[] = [];
+    let rateLimited = true;
+    const gateway = createTriggerGateway({
+      bindings: [binding([])],
+      store: createInMemoryFiringStore(),
+      runs,
+      issueTrackers: () => ({
+        findIssues: async () => {
+          if (rateLimited) throw new Error("GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z");
+          return [issue(1)];
+        },
+      }),
+      log: (line) => lines.push(line),
+    });
+
+    gateway.start();
+    await vi.advanceTimersByTimeAsync(2.5 * 60_000); // 10:05:00
+    expect(lines).toEqual(["trigger ready-issues: check failed: GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z"]);
+    expect(runs.started).toHaveLength(0);
+
+    rateLimited = false;
+    await vi.advanceTimersByTimeAsync(5 * 60_000); // 10:10:00
+    expect(runs.started).toHaveLength(1);
+    await gateway.stop();
+  });
 });
 
 describe("trigger gateway", () => {

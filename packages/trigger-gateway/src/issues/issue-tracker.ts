@@ -29,11 +29,3 @@ export function createFakeIssueTracker(issues: Issue[] = []): IssueTracker {
     },
   };
 }
-
-/** The issue tracker a binding's source names. */
-export function issueTrackerFor(source: IssueSource): IssueTracker {
-  switch (source.integration) {
-    case "fake":
-      return createFakeIssueTracker(source.fake?.issues);
-  }
-}

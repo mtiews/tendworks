@@ -69,6 +69,8 @@ services:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend
       TEND_WORKER_URL: http://worker:8081
       TEND_CONFIG_DIR: /config
+      # Secret that trigger bindings reference (secretRef) to poll GitHub; never in a sandbox.
+      TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
