@@ -9,6 +9,10 @@ export default defineConfig({
   resolve: { conditions },
   ssr: { resolve: { conditions } },
   test: {
+    // A dependency that exports TypeScript sources under "source" too (the MCP client's SSE
+    // parser) is transformed by Vite, since Node cannot strip types under node_modules; so
+    // are the MCP client transports that import it.
+    server: { deps: { inline: [/@modelcontextprotocol[\\/]sdk[\\/]dist[\\/]esm[\\/]client[\\/](sse|streamableHttp)\.js/, /eventsource-parser/] } },
     // Measured over unit + integration tests together (`pnpm coverage`), because adapters are
     // only exercised against their real products. Thresholds sit just below the measured
     // baseline (2026-10-19: lines 94.7 %, statements 91.7 %, functions 90.2 %, branches 81.1 %)

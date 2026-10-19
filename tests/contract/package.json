@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Both sides of internal APIs and boundaries in one process.",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "@tendworks/agent-runtime": "workspace:*",
     "@tendworks/control-plane": "workspace:*",
     "@tendworks/health": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
+    "@tendworks/mcp-platform": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
     "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",

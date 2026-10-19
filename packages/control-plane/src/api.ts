@@ -51,12 +51,23 @@ const MINIMUM_TOKEN_LENGTH = 16;
 
 /**
  * Why the server must not start with these tokens (empty when it may): each must be long
- * enough to resist guessing, and the read-only token must not be the API token.
+ * enough to resist guessing, and the read-only token must not be the API token. Agent
+ * profiles that list the platform MCP server need the read-only token (ADR 0016), so it
+ * must be set when any of `agentProfiles` does.
  */
-export function apiTokenProblems({ apiToken, readToken }: Pick<ControlPlaneApiOptions, "apiToken" | "readToken">): string[] {
+export function apiTokenProblems({
+  apiToken,
+  readToken,
+  agentProfiles = [],
+}: Pick<ControlPlaneApiOptions, "apiToken" | "readToken"> & { agentProfiles?: Configuration["agentProfiles"] }): string[] {
   const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
   const problems: string[] = [];
   if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
+  const readers = agentProfiles.filter((profile) => profile.spec.mcp?.includes("tendworks")).map((profile) => profile.metadata.name);
+  if (readToken === undefined && readers.length > 0) {
+    const profiles = `agent profile${readers.length > 1 ? "s" : ""} ${readers.join(", ")} list${readers.length > 1 ? "" : "s"}`;
+    problems.push(`TEND_API_READ_TOKEN must be set: ${profiles} the platform MCP server (mcp: [tendworks]), which reads with it`);
+  }
   if (readToken !== undefined) {
     if (readToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_READ_TOKEN"));
     else if (readToken === apiToken) problems.push("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state");

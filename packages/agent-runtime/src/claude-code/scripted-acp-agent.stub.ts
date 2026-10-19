@@ -25,6 +25,8 @@ export interface AgentScript {
   hang?: boolean | "first";
   /** Does not advertise the ACP resume capability. */
   noResume?: boolean;
+  /** Does not advertise that it connects to MCP servers over HTTP. */
+  noMcp?: boolean;
   /** Written to the file named by TENDWORKS_ARTIFACTS before the turn ends. */
   artifacts?: string;
   /**
@@ -86,7 +88,7 @@ function startScriptedAgent(script: AgentScript, observed: Observed, disk: Disk,
       return {
         protocolVersion: acp.PROTOCOL_VERSION,
         agentInfo: { name: "scripted-agent", version: "1.0.0" },
-        agentCapabilities: { sessionCapabilities: script.noResume ? {} : { resume: {} } },
+        agentCapabilities: { sessionCapabilities: script.noResume ? {} : { resume: {} }, ...(script.noMcp ? {} : { mcpCapabilities: { http: true } }) },
       };
     })
     .onRequest(acp.methods.agent.session.new, (ctx) => {

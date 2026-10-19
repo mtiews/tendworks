@@ -131,6 +131,25 @@ describe("checking the tokens before the server starts", () => {
     ]);
     expect(apiTokenProblems({ apiToken: long, readToken: long })).toEqual(["TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state"]);
   });
+
+  it("requires the read-only token when an agent profile lists the platform MCP server", () => {
+    const profile = (name: string, mcp?: "tendworks"[]) => ({
+      apiVersion: "tendworks.dev/v1" as const,
+      kind: "AgentProfile" as const,
+      metadata: { name },
+      spec: { harness: "fake" as const, ...(mcp ? { mcp } : {}) },
+    });
+    const agentProfiles = [profile("developer"), profile("assistant", ["tendworks"])];
+
+    expect(apiTokenProblems({ apiToken: long, agentProfiles })).toEqual([
+      "TEND_API_READ_TOKEN must be set: agent profile assistant lists the platform MCP server (mcp: [tendworks]), which reads with it",
+    ]);
+    expect(apiTokenProblems({ apiToken: long, readToken: "short", agentProfiles })).toEqual([
+      "TEND_API_READ_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`",
+    ]);
+    expect(apiTokenProblems({ apiToken: long, readToken: "fedcba9876543210", agentProfiles })).toEqual([]);
+    expect(apiTokenProblems({ apiToken: long, agentProfiles: [profile("developer")] })).toEqual([]);
+  });
 });
 
 describe("the read-only token", () => {

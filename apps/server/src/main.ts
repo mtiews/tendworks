@@ -29,6 +29,7 @@ import {
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
 } from "@tendworks/trigger-gateway";
+import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
 import pg from "pg";
 
@@ -59,7 +60,8 @@ const platformSecrets = createSecretResolver("platform", process.env);
 // ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
 const apiToken = env("TEND_API_TOKEN");
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
-const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }) });
+// Profiles that list the platform MCP server read with the read-only token, so it must be set then.
+const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }), agentProfiles: configuration.agentProfiles });
 if (tokenProblems.length > 0) {
   for (const problem of tokenProblems) console.error(problem);
   process.exit(1);
@@ -131,8 +133,13 @@ const api = createControlPlaneApi({
   ...(readToken === undefined ? {} : { readToken }),
 });
 
+// The platform MCP server (ADR 0016) at /mcp, for chat agents: a client of the public API
+// above with the token its caller presents, so it can read no more than that token may.
+const mcp = createPlatformMcpServer({ controlPlane: { baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) } });
+const MCP_PATH = "/mcp";
+
 const port = Number(env("PORT", "8080"));
-const server = serve({ fetch: (request) => api.fetch(request), port }, () => console.log(`control plane listening on :${port}`));
+const server = serve({ fetch: (request) => (new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : api.fetch(request)), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
 async function shutdown() {
