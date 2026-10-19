@@ -1,4 +1,4 @@
-$id: https://tendworks.dev/schemas/v1/run.schema.yaml
+$id: https://tendworks.dev/schemas/v1/schemas/run.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Run
 description: >-

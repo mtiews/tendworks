@@ -7,10 +7,14 @@
   "dependencies": {
     "@tendworks/agent-runtime": "workspace:*",
     "@tendworks/control-plane": "workspace:*",
+    "@tendworks/health": "workspace:*",
     "@tendworks/human-interaction": "workspace:*",
     "@tendworks/orchestration": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",
-    "openapi-fetch": "0.17.0"
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
+    "openapi-fetch": "0.17.0",
+    "yaml": "2.9.1"
   }
 }

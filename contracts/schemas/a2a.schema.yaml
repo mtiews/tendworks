@@ -1,4 +1,4 @@
-$id: https://tendworks.dev/schemas/v1/a2a.schema.yaml
+$id: https://tendworks.dev/schemas/v1/schemas/a2a.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: A2A
 description: >-

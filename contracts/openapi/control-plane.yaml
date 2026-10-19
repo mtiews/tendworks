@@ -212,6 +212,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: The merge gate is not available.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /approval-requests:
     get:
       operationId: listApprovalRequests
@@ -230,6 +236,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApprovalRequestList"
+        "400":
+          description: The status filter is not an approval status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Approval requests cannot be read.
           content:

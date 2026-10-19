@@ -11,6 +11,11 @@ export interface HealthProbe {
   check(): Promise<Omit<ComponentStatus, "name">>;
 }
 
+/** A probe that always reports `result`; for tests and demos. */
+export function createStaticHealthProbe(name: string, result: Omit<ComponentStatus, "name">): HealthProbe {
+  return { name, check: async () => ({ ...result }) };
+}
+
 export interface HealthOptions {
   probes: HealthProbe[];
   /** How long a single probe may take before its component counts as unhealthy. */
