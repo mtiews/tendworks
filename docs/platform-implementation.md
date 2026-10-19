@@ -118,7 +118,7 @@ Agent profiles with `harness: claude-code` run Claude Code through `@agentclient
 
 The workspace (`/workspace`) and the harness's home and config directory (`/session`) are volumes of the agent session, and the ACP session id is kept with the task, so after a platform restart the harness resumes the session with `session/resume` in a new sandbox (ADR 0009 (agent-sessions-resume-on-their-volumes)). Manual restart smoke test with the real harness, after steps 1–3:
 
-5. Start `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
+5. Run steps 5–7 automatically with `scripts/smoke/restart-developer.sh` (Git Bash; prints PASS or FAIL), or by hand: start `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"restart-developer"}'` and wait until `tend run get <id>` shows the step running and the transcript has an `acp-session` entry (the agent created `before.txt` and sleeps).
 6. `docker compose -f deploy/compose.yaml restart worker`.
 7. Within about a minute (the engine's heartbeat timeout) the transcript shows `task-resumed` and `acp-session-resumed` with the same session id, not `acp-resume-failed`. The run completes with `resumed: 1` and a reply listing `after.txt` and `before.txt`; no sandbox or volume is left over.
 
