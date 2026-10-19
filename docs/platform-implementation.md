@@ -98,7 +98,7 @@ Rules for the skeleton:
 - **Fakes first.** Each seam gets its fake before its real adapter; the fake stays as the second implementation of the port.
 - **Contracts only as far as used.** OpenAPI and JSON Schemas cover only what the current slice uses; types are always generated from them, never written by hand. Contract tests follow in S5.
 - **Interpreter grows with demand.** `listen` and `switch` are added when the merge gate needs them, test-driven.
-- **Event bus with its first consumer.** Until S4 the control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker); run and step events wait in orchestration's outbox (ADR 0003).
+- **Event bus with its first consumer.** The control plane reads runs synchronously through the orchestration API (`contracts/openapi/orchestration.yaml`, served by the worker). Run and step events go onto the event bus in the transaction of the run state (ADR 0003, ADR 0005); the first consumer is human interaction, which records a notification for every completed or failed run before delivering it.
 - **Resume is tested from S1 on**, not at the end.
 
 ## Open items

@@ -209,6 +209,19 @@ importers:
       '@tendworks/control-plane':
         specifier: workspace:*
         version: link:../../packages/control-plane
+      '@tendworks/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
+      '@tendworks/human-interaction':
+        specifier: workspace:*
+        version: link:../../packages/human-interaction
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   apps/worker:
     dependencies:
@@ -218,6 +231,9 @@ importers:
       '@tendworks/agent-runtime':
         specifier: workspace:*
         version: link:../../packages/agent-runtime
+      '@tendworks/event-bus':
+        specifier: workspace:*
+        version: link:../../packages/event-bus
       '@tendworks/health':
         specifier: workspace:*
         version: link:../../packages/health
@@ -282,7 +298,15 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
-  packages/event-bus: {}
+  packages/event-bus:
+    dependencies:
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/health:
     dependencies:
@@ -293,7 +317,18 @@ importers:
         specifier: 4.13.13
         version: 4.13.13
 
-  packages/human-interaction: {}
+  packages/human-interaction:
+    dependencies:
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/mcp-platform: {}
 
