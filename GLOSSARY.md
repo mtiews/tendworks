@@ -7,8 +7,16 @@ Self-hosted, use-case-neutral agent platform: agents are started by triggers, ru
 ### Execution
 
 **Task**:
-A unit of work the orchestration hands to an agent, following the A2A task model.
+A unit of work handed to an agent, by a run's step or by a human in a chat, following the A2A task model.
 _Avoid_: job; also never use it for something a human has to do (that is an approval request or a notification)
+
+**Agent session**:
+One conversation of a harness with its agent, running in a sandbox on behalf of exactly one task. It survives the loss of its sandbox and can be resumed in a new one.
+_Avoid_: conversation, harness session
+
+**Chat**:
+An agent session a human starts and leads directly, without a run, workflow or trigger. Any client can attach to it, leave and come back until the human ends it.
+_Avoid_: conversation, interactive run, chat run
 
 **Sandbox**:
 An isolated, short-lived environment in which exactly one agent session's harness runs.
