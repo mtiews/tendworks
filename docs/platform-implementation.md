@@ -103,7 +103,7 @@ Rules for the skeleton:
 
 ## Claude Code harness
 
-Agent profiles with `harness: claude-code` run Claude Code through `@agentclientprotocol/claude-agent-acp` (pinned in `images/sandbox-claude-code/package-lock.json`) in a sandbox from the profile's sandbox template. The agent runtime attaches to the adapter's stdio through the sandbox API, marks the harness onboarding complete and sets `bypassPermissions` in the session's config before it starts, records the ACP stream as the transcript and destroys the sandbox when the session ends (ADR XXXX (agent-runtime-records-transcripts-and-cost-from-acp)). The regular test suites use a scripted ACP agent behind the fake sandbox; the real harness is a manual smoke test:
+Agent profiles with `harness: claude-code` run Claude Code through `@agentclientprotocol/claude-agent-acp` (pinned in `images/sandbox-claude-code/package-lock.json`) in a sandbox from the profile's sandbox template. The agent runtime attaches to the adapter's stdio through the sandbox API, marks the harness onboarding complete and sets `bypassPermissions` in the session's config before it starts, records the ACP stream as the transcript and destroys the sandbox when the session ends (ADR 0007 (agent-runtime-records-transcripts-and-cost-from-acp)). The regular test suites use a scripted ACP agent behind the fake sandbox; the real harness is a manual smoke test:
 
 1. Build the sandbox image: `docker compose -f deploy/compose.yaml --profile sandbox-images build`.
 2. In `deploy/.env` set `TEND_CLAUDE_CODE_CREDENTIAL=oauth-token` with `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), or `TEND_CLAUDE_CODE_CREDENTIAL=api-key` with `ANTHROPIC_API_KEY`. Only the selected one enters the sandbox.
