@@ -13,6 +13,13 @@ type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
 type AgentList = ControlPlane.components["schemas"]["AgentList"];
+type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
+
+/** What `tend run logs` prints: the transcript of each agent step, absent where none was found. */
+interface RunLogs {
+  run: string;
+  steps: { reference: string; status: Run["steps"][number]["status"]; taskId: string; entries?: TranscriptEntry[] }[];
+}
 
 /** Stable exit codes, so scripts and CI can rely on them. */
 export const ExitCode = { ok: 0, error: 1, unhealthy: 2 } as const;
@@ -92,6 +99,29 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       if (response.status === 404) throw new Error(`run ${runId} not found`);
       if (!data) throw new AnswerError(response, error);
       io.stdout(render(data, options.output, formatRun));
+    });
+
+  run
+    .command("logs")
+    .description("print the transcript of each agent step of a run, finished or running")
+    .argument("<id>", "run id")
+    .addOption(outputOption())
+    .action(async (runId: string, options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const unreachable = (cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      };
+      const { data: found, error, response } = await client.GET("/runs/{runId}", { params: { path: { runId } } }).catch(unreachable);
+      if (response.status === 404) throw new Error(`run ${runId} not found`);
+      if (!found) throw new AnswerError(response, error);
+      const steps: RunLogs["steps"] = [];
+      for (const { reference, status, taskId } of found.steps) {
+        if (taskId === undefined) continue;
+        const read = await client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } }).catch(unreachable);
+        if (!read.data && read.response.status !== 404) throw new AnswerError(read.response, read.error);
+        steps.push({ reference, status, taskId, ...(read.data ? { entries: read.data.items } : {}) });
+      }
+      io.stdout(render({ run: runId, steps }, options.output, formatRunLogs));
     });
 
   program
@@ -309,6 +339,93 @@ function formatOutput(output: unknown): string {
   if (entries.length === 0) return "";
   const rows = entries.map(([key, value]) => [key, typeof value === "string" && !/[\r\n]/.test(value) ? value : JSON.stringify(value)]);
   return `\n${table([["OUTPUT", "VALUE"], ...rows])}`;
+}
+
+function formatRunLogs({ run, steps }: RunLogs): string {
+  if (steps.length === 0) return `run ${run} has no agent steps yet\n`;
+  return steps
+    .map(({ reference, status, taskId, entries }) => {
+      const lines = entries ? formatTranscript(entries) : ["(no transcript)"];
+      return [`== ${reference} (${taskId}, ${status})`, ...lines].map((line) => `${line}\n`).join("");
+    })
+    .join("\n");
+}
+
+/**
+ * One line per entry: time, what happened, details; consecutive message and thought
+ * chunks are joined, and text over several lines continues under the details.
+ */
+function formatTranscript(entries: TranscriptEntry[]): string[] {
+  const lines: string[] = [];
+  const line = (time: string, label: string, text: string) => {
+    const [first = "", ...rest] = text.split("\n");
+    lines.push(`${time.slice(11, 19)}  ${label.padEnd(10)} ${first}`.trimEnd(), ...rest.map((more) => `${" ".repeat(21)}${more}`.trimEnd()));
+  };
+  const harness = (info?: { name: string; version?: string }) => (info ? ` (${[info.name, info.version].filter(Boolean).join(" ")})` : "");
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index]!;
+    switch (entry.type) {
+      case "message-chunk":
+      case "thought-chunk": {
+        let text = entry.text;
+        while (entries[index + 1]?.type === entry.type) text += (entries[++index] as typeof entry).text;
+        line(entry.time, entry.type === "message-chunk" ? "agent" : "thinking", text.trim());
+        break;
+      }
+      case "task-started":
+        line(entry.time, "task", `${entry.agent}: ${entry.message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join(" ")}`);
+        break;
+      case "task-resumed":
+        line(entry.time, "resumed", "task after an interruption");
+        break;
+      case "task-ended":
+        line(entry.time, "ended", `${entry.state}: ${entry.message}${entry.cost ? ` (${formatCost(entry.cost)})` : ""}`);
+        break;
+      case "session-started":
+        line(entry.time, "session", `started ${entry.sessionId}${harness(entry.harness)}`);
+        break;
+      case "session-resumed":
+        line(entry.time, "session", `resumed ${entry.sessionId}${harness(entry.harness)}`);
+        break;
+      case "session-resume-failed":
+        line(entry.time, "session", `could not resume ${entry.sessionId}: ${entry.reason}`);
+        break;
+      case "tool-call":
+        line(entry.time, "tool", `${entry.title}${entry.kind ? ` [${entry.kind}]` : ""}`);
+        break;
+      case "tool-result":
+        line(entry.time, "result", `${entry.status}${entry.output ? `: ${entry.output}` : ""}`);
+        break;
+      case "permission":
+        line(entry.time, "permission", `${entry.granted ? "granted" : "refused"}: ${entry.tool}`);
+        break;
+      case "plan":
+        line(entry.time, "plan", entry.steps.map((step) => `[${step.status}] ${step.content}`).join("\n"));
+        break;
+      case "usage":
+        line(entry.time, "usage", `${formatCost(entry.cost)} so far`);
+        break;
+      case "turn-ended":
+        line(entry.time, "turn", entry.reason);
+        break;
+      case "workspace-checkout":
+        line(entry.time, "checkout", `${entry.workspace.repository} ${entry.workspace.branch} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
+        break;
+      case "artifacts":
+        for (const artifact of entry.artifacts) line(entry.time, "artifact", `${artifact.name} ${artifact.url}`);
+        break;
+      case "artifacts-ignored":
+        line(entry.time, "ignored", entry.problem);
+        break;
+      case "harness-output":
+        line(entry.time, "harness", entry.text);
+        break;
+      case "error":
+        line(entry.time, "error", entry.message);
+        break;
+    }
+  }
+  return lines;
 }
 
 const formatCost = ({ amount, currency }: Cost) => `${Number(amount.toFixed(4))} ${currency}`;

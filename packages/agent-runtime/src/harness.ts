@@ -1,6 +1,6 @@
 import type { A2A } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
-import type { TranscriptEntry } from "./transcripts/transcript-store.js";
+import type { TranscriptRecord } from "./transcripts/transcript-store.js";
 
 /** One task as a harness gets it. */
 export interface HarnessTask {
@@ -39,8 +39,8 @@ export interface HarnessResult {
 
 /** What a harness reports while it works. */
 export interface HarnessObserver {
-  /** Appends an entry to the task's transcript. */
-  record(entry: TranscriptEntry): void;
+  /** Appends an entry to the task's transcript; the runtime stamps its time and position. */
+  record(entry: TranscriptRecord): void;
   /** The agent's progress so far, shown as the working task's status message. */
   progress(text: string): void;
   /** Keeps the agent session with the task, durably once the promise resolves; replaces what was kept before. */

@@ -1,10 +1,10 @@
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
-import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks } from "./agent-tasks.js";
+import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Harness, HarnessResult } from "./harness.js";
 import { createInMemoryTaskStore, type TaskStore } from "./task-store.js";
-import { createInMemoryTranscriptStore, type TranscriptEntry, type TranscriptStore } from "./transcripts/transcript-store.js";
+import { createInMemoryTranscriptStore, type TranscriptEntry, type TranscriptRecord, type TranscriptStore } from "./transcripts/transcript-store.js";
 
 /** Task metadata key: how often the runtime resumed the task after an interruption. */
 export const RESUMED = "dev.tendworks/resumed";
@@ -31,6 +31,12 @@ const TERMINAL: ReadonlySet<A2A.TaskState> = new Set([
   "TASK_STATE_REJECTED",
 ]);
 
+/** The agent runtime: the A2A boundary, and the transcripts of its tasks' agent sessions. */
+export interface AgentRuntime extends AgentTasks {
+  /** The transcript of a task's agent session so far, or undefined for a task without one. */
+  transcript(taskId: string): Promise<TranscriptEntry[] | undefined>;
+}
+
 /**
  * Accepts A2A tasks and hands each to the harness its agent profile names, recording
  * the session's transcript and cost. A message whose task exists already returns that
@@ -44,7 +50,7 @@ export function createAgentRuntime({
   transcripts = createInMemoryTranscriptStore(),
   sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   now = () => new Date(),
-}: AgentRuntimeOptions): AgentTasks {
+}: AgentRuntimeOptions): AgentRuntime {
   const byName = new Map(profiles.map((profile) => [profile.metadata.name, profile]));
   const available: Partial<Record<HarnessName, Harness>> = { fake: createFakeHarness({ sleep }), ...harnesses };
   // Tasks this process is working on, so a repeated message joins the running work.
@@ -52,7 +58,7 @@ export function createAgentRuntime({
   // Progress of running tasks; only the start and the end are written to the store.
   const working = new Map<string, A2A.Task>();
 
-  async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest): Promise<A2A.Task> {
+  async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest, { onTask }: SendMessageOptions = {}): Promise<A2A.Task> {
     const startedAt = now();
     const taskId = crypto.randomUUID();
     const claimed = await store.claim({
@@ -76,11 +82,16 @@ export function createAgentRuntime({
       metadata = { ...metadata, [RESUMED]: Number(metadata[RESUMED] ?? 0) + 1 };
     }
     await store.update({ ...claimed.task, metadata });
+    try {
+      await onTask?.({ ...claimed.task, metadata });
+    } catch {
+      // Taking note of the task is the sender's concern; the task goes on regardless.
+    }
 
     let writes = Promise.resolve();
-    const record = (entry: TranscriptEntry) => {
+    const record = (entry: TranscriptRecord) => {
       const stamped = { time: now().toISOString(), ...entry };
-      writes = writes.then(() => transcript.append(stamped));
+      writes = writes.then(async () => void (await transcript.append(stamped)));
     };
     const withStatus = (state: A2A.TaskState, text: string): A2A.Task => ({
       ...claimed.task,
@@ -93,7 +104,7 @@ export function createAgentRuntime({
       metadata,
     });
 
-    record({ type: id === taskId ? "task" : "task-resumed", profile: profile.metadata.name, message: request.message });
+    record({ type: id === taskId ? "task-started" : "task-resumed", agent: profile.metadata.name, message: request.message });
     const harness = available[profile.spec.harness];
     let result: HarnessResult;
     if (!harness) {
@@ -119,7 +130,7 @@ export function createAgentRuntime({
       }
     }
 
-    record({ type: "result", state: result.state, message: result.message, ...(result.cost ? { cost: result.cost } : {}) });
+    record({ type: "task-ended", state: result.state, message: result.message, ...(result.cost ? { cost: result.cost } : {}) });
     await writes;
     if (result.cost) metadata = { ...metadata, [COST]: { ...result.cost } };
     const done: A2A.Task = { ...withStatus(result.state, result.message), ...(result.artifacts ? { artifacts: result.artifacts } : {}) };
@@ -128,12 +139,12 @@ export function createAgentRuntime({
   }
 
   return {
-    sendMessage(agent, request) {
+    sendMessage(agent, request, options) {
       const profile = byName.get(agent);
       if (!profile) return Promise.reject(new AgentNotFoundError(agent));
       const known = inProgress.get(request.message.messageId);
       if (known) return known;
-      const task = work(profile, request);
+      const task = work(profile, request, options);
       inProgress.set(request.message.messageId, task);
       // Settled tasks are found in the store; a failed delivery may be retried.
       void task.finally(() => inProgress.delete(request.message.messageId)).catch(() => {});
@@ -144,6 +155,10 @@ export function createAgentRuntime({
       const stored = await store.get(taskId);
       if (stored && TERMINAL.has(stored.status.state)) return stored;
       return working.get(taskId) ?? stored;
+    },
+    async transcript(taskId) {
+      const ref = (await store.get(taskId))?.metadata?.[TRANSCRIPT];
+      return typeof ref === "string" ? transcripts.read(ref) : undefined;
     },
   };
 }

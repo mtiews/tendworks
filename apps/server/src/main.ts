@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import {
   apiTokenProblems,
   ConfigurationError,
+  createAgentRuntimeClient,
   createControlPlaneApi,
   createOrchestrationClient,
   createStoreProbe,
@@ -79,6 +80,8 @@ bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier),
 
 const workerUrl = env("TEND_WORKER_URL");
 const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
+// The agent runtime runs in the worker too; transcripts are read through its internal API.
+const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
 // Human interaction: the merge gate. It decides by orchestration's record of the run and
 // the policies of its workflow, never by what the caller claims; with `ask` it opens an
@@ -119,6 +122,7 @@ const api = createControlPlaneApi({
   bundles: [{ name: "worker", baseUrl: workerUrl }],
   configuration,
   runs: orchestration,
+  agentRuntime,
   notifications,
   merges,
   approvals,

@@ -6,7 +6,7 @@
 # Usage: scripts/smoke/restart-developer.sh
 source "$(dirname "$0")/lib.sh"
 
-session_of() { { transcript "$TRANSCRIPT" | grep "\"type\":\"$1\"" || true; } | head -1 | field 'r.sessionId'; }
+session_of() { transcript "$TRANSCRIPT" | field "r.items.find((e) => e.type === '$1')?.sessionId"; }
 
 echo "Starting restart-developer ..."
 RUN_ID=$(start_run restart-developer)
@@ -19,7 +19,7 @@ deadline=$((SECONDS + 180))
 while [ $SECONDS -lt $deadline ]; do
   [ -n "$TRANSCRIPT" ] || TRANSCRIPT=$(transcript_path "$RUN_ID")
   if [ -n "$TRANSCRIPT" ]; then
-    SESSION=$(session_of acp-session)
+    SESSION=$(session_of session-started)
     [ -n "$SESSION" ] && break
   fi
   sleep 2
@@ -33,7 +33,7 @@ compose restart worker >/dev/null
 
 echo "Waiting for the run to finish (up to 6 minutes) ..."
 STATUS=$(wait_run "$RUN_ID" 360)
-RESUMED_SESSION=$(session_of acp-session-resumed)
+RESUMED_SESSION=$(session_of session-resumed)
 OUTPUT=$(api_get "/runs/$RUN_ID" | field 'r.output')
 
 echo
@@ -44,7 +44,7 @@ echo
 check "run completed" test "$STATUS" = completed
 check "task was resumed after the restart" test "$(count_entries "$TRANSCRIPT" task-resumed)" -ge 1
 check "the same ACP session was resumed" test "$RESUMED_SESSION" = "$SESSION"
-check "no failed resume" test "$(count_entries "$TRANSCRIPT" acp-resume-failed)" -eq 0
+check "no failed resume" test "$(count_entries "$TRANSCRIPT" session-resume-failed)" -eq 0
 check "output counts one resumption" test "$(field 'r.resumed' <<<"$OUTPUT")" = 1
 check "agent finished both files" grep -q "after.txt" <<<"$OUTPUT"
 check_no_tokens "$TRANSCRIPT" "$RUN_ID"

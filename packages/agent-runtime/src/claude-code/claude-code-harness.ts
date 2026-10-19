@@ -7,6 +7,7 @@ import { parseReportedArtifacts, toArtifact } from "../artifacts.js";
 import type { Harness, HarnessObserver, HarnessResult, HarnessSession } from "../harness.js";
 import type { Sandboxes, SandboxTemplate, VolumeMount } from "../sandboxes.js";
 import type { SkillFile } from "../skills.js";
+import type { TranscriptRecord } from "../transcripts/transcript-store.js";
 import { checkoutCommand, workspaceOf, type Workspace } from "../workspace.js";
 import { CREDENTIAL_VARIABLES, type ClaudeCodeCredential } from "./credentials.js";
 
@@ -253,7 +254,7 @@ async function reportedArtifacts(
   sandboxes: Sandboxes,
   sandboxId: string,
   taskId: string,
-  record: (entry: { type: string; [key: string]: unknown }) => void,
+  record: (entry: TranscriptRecord) => void,
 ): Promise<A2A.Artifact[]> {
   let text: string;
   try {
@@ -264,7 +265,7 @@ async function reportedArtifacts(
   }
   const parsed = parseReportedArtifacts(text);
   if ("problem" in parsed) {
-    record({ type: "artifacts-ignored", file: ARTIFACTS, problem: parsed.problem });
+    record({ type: "artifacts-ignored", problem: `${ARTIFACTS}: ${parsed.problem}` });
     return [];
   }
   record({ type: "artifacts", artifacts: parsed.artifacts });

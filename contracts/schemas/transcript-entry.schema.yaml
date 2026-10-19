@@ -1,0 +1,341 @@
+$id: https://tendworks.dev/schemas/v1/schemas/transcript-entry.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: TranscriptEntry
+description: >-
+  One entry of the transcript of an agent session (ADR 0017): what the agent runtime
+  and the harness observed while an agent worked on a task, independent of the harness
+  and its protocol. History and live stream carry the same entries. Every entry has a
+  position in its transcript; positions start at 0, increase by one per entry and never
+  change, so a client that has seen position `n` continues after it (e.g. as the event
+  id of a stream).
+$ref: '#/$defs/transcriptEntry'
+$defs:
+  transcriptEntry:
+    title: TranscriptEntry
+    oneOf:
+      - $ref: '#/$defs/taskStarted'
+      - $ref: '#/$defs/taskResumed'
+      - $ref: '#/$defs/taskEnded'
+      - $ref: '#/$defs/sessionStarted'
+      - $ref: '#/$defs/sessionResumed'
+      - $ref: '#/$defs/sessionResumeFailed'
+      - $ref: '#/$defs/messageChunk'
+      - $ref: '#/$defs/thoughtChunk'
+      - $ref: '#/$defs/toolCall'
+      - $ref: '#/$defs/toolResult'
+      - $ref: '#/$defs/permission'
+      - $ref: '#/$defs/plan'
+      - $ref: '#/$defs/usage'
+      - $ref: '#/$defs/turnEnded'
+      - $ref: '#/$defs/workspaceCheckout'
+      - $ref: '#/$defs/artifactsReported'
+      - $ref: '#/$defs/artifactsIgnored'
+      - $ref: '#/$defs/harnessOutput'
+      - $ref: '#/$defs/error'
+  position:
+    description: Index of the entry in its transcript, from 0.
+    type: integer
+    minimum: 0
+  time:
+    description: When the agent runtime recorded the entry.
+    type: string
+    format: date-time
+  harnessInfo:
+    title: HarnessInfo
+    description: What the harness said about itself when the session started.
+    type: object
+    additionalProperties: false
+    required: [name]
+    properties:
+      name:
+        type: string
+      version:
+        type: string
+  taskStarted:
+    title: TaskStartedEntry
+    description: The agent runtime handed a new task to the agent profile `agent`; always the first entry.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, agent, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: task-started }
+      agent:
+        type: string
+        description: Name of the agent profile.
+      message:
+        $ref: './a2a.schema.yaml#/$defs/message'
+  taskResumed:
+    title: TaskResumedEntry
+    description: >-
+      The agent runtime took up a task that was interrupted, e.g. by a restart of the
+      platform, instead of starting it again.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, agent, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: task-resumed }
+      agent:
+        type: string
+      message:
+        $ref: './a2a.schema.yaml#/$defs/message'
+  taskEnded:
+    title: TaskEndedEntry
+    description: The task reached a terminal state; the last entry of a finished task.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, state, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: task-ended }
+      state:
+        $ref: './a2a.schema.yaml#/$defs/taskState'
+      message:
+        type: string
+        description: The agent's final answer, or why the task failed.
+      cost:
+        $ref: './run.schema.yaml#/$defs/cost'
+  sessionStarted:
+    title: SessionStartedEntry
+    description: The harness started a new agent session.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, sessionId]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: session-started }
+      sessionId:
+        type: string
+        description: The harness's id of the agent session.
+      harness:
+        $ref: '#/$defs/harnessInfo'
+  sessionResumed:
+    title: SessionResumedEntry
+    description: >-
+      The harness resumed an earlier agent session in a new sandbox; processes the agent
+      had started in the old sandbox are gone.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, sessionId]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: session-resumed }
+      sessionId:
+        type: string
+      harness:
+        $ref: '#/$defs/harnessInfo'
+  sessionResumeFailed:
+    title: SessionResumeFailedEntry
+    description: >-
+      The harness could not resume the earlier agent session and starts a new one on the
+      kept workspace.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, sessionId, reason]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: session-resume-failed }
+      sessionId:
+        type: string
+      reason:
+        type: string
+  messageChunk:
+    title: MessageChunkEntry
+    description: A piece of text the agent wrote to the human; consecutive chunks form one message.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, text]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: message-chunk }
+      text:
+        type: string
+  thoughtChunk:
+    title: ThoughtChunkEntry
+    description: A piece of the agent's reasoning, as far as the harness reveals it.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, text]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: thought-chunk }
+      text:
+        type: string
+  toolCall:
+    title: ToolCallEntry
+    description: The agent called a tool, e.g. ran a command or edited a file.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, toolCallId, title]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: tool-call }
+      toolCallId:
+        type: string
+        description: Identifies the call within the session; its result carries the same id.
+      title:
+        type: string
+        description: What the call does, in the harness's words.
+      kind:
+        type: string
+        enum: [read, edit, delete, move, search, execute, think, fetch, other]
+  toolResult:
+    title: ToolResultEntry
+    description: A tool call ended.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, toolCallId, status]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: tool-result }
+      toolCallId:
+        type: string
+      status:
+        type: string
+        enum: [completed, failed]
+      output:
+        type: string
+        description: What the tool returned as text, e.g. a command's output or the files it changed.
+  permission:
+    title: PermissionEntry
+    description: >-
+      The agent asked for permission to use a tool and the runtime answered; the sandbox is
+      the boundary, so it allows what it can.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, tool, granted]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: permission }
+      tool:
+        type: string
+      granted:
+        type: boolean
+  plan:
+    title: PlanEntry
+    description: The agent's current plan, as a whole.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, steps]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: plan }
+      steps:
+        type: array
+        items:
+          title: PlanStep
+          type: object
+          additionalProperties: false
+          required: [content, status]
+          properties:
+            content:
+              type: string
+            status:
+              type: string
+              enum: [pending, in-progress, completed]
+  usage:
+    title: UsageEntry
+    description: What the agent session has cost so far.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, cost]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: usage }
+      cost:
+        $ref: './run.schema.yaml#/$defs/cost'
+  turnEnded:
+    title: TurnEndedEntry
+    description: >-
+      The agent ended its turn: `completed` (it answered), `cancelled`, `refused`, or it
+      stopped early at a limit (`token-limit`, `request-limit`).
+    type: object
+    additionalProperties: false
+    required: [position, time, type, reason]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: turn-ended }
+      reason:
+        type: string
+        enum: [completed, cancelled, refused, token-limit, request-limit]
+  workspaceCheckout:
+    title: WorkspaceCheckoutEntry
+    description: The agent runtime checked out the workspace the task asked for, before the agent started.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, workspace, exitCode, output]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: workspace-checkout }
+      workspace:
+        $ref: './a2a.schema.yaml#/$defs/workspace'
+      exitCode:
+        type: integer
+      output:
+        type: string
+  artifactsReported:
+    title: ArtifactsReportedEntry
+    description: The links the agent reported as results of its task when it finished.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, artifacts]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: artifacts }
+      artifacts:
+        type: array
+        items:
+          $ref: './run.schema.yaml#/$defs/stepArtifact'
+  artifactsIgnored:
+    title: ArtifactsIgnoredEntry
+    description: The agent reported results in a form the runtime cannot read; they are ignored.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, problem]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: artifacts-ignored }
+      problem:
+        type: string
+  harnessOutput:
+    title: HarnessOutputEntry
+    description: A line of the harness's own diagnostic output, e.g. a warning or the reason it stopped.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, text]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: harness-output }
+      text:
+        type: string
+  error:
+    title: ErrorEntry
+    description: The agent session failed, e.g. the harness ended unexpectedly or the turn timed out.
+    type: object
+    additionalProperties: false
+    required: [position, time, type, message]
+    properties:
+      position: { $ref: '#/$defs/position' }
+      time: { $ref: '#/$defs/time' }
+      type: { const: error }
+      message:
+        type: string

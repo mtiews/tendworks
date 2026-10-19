@@ -13,7 +13,16 @@ export interface AgentTaskExecutor {
    * task could not be delivered. The message id is stable per step, so a repeated
    * request for the same message must return the existing task.
    */
-  sendMessage(agent: string, request: A2A.SendMessageRequest): Promise<A2A.Task>;
+  sendMessage(agent: string, request: A2A.SendMessageRequest, options?: SendMessageOptions): Promise<A2A.Task>;
+}
+
+export interface SendMessageOptions {
+  /**
+   * Called with the working task as soon as the agent runtime created it (id and
+   * transcript reference known), before the agent finishes. A failure here does not
+   * stop the task.
+   */
+  onTask?: (task: A2A.Task) => void | Promise<void>;
 }
 
 /** Keys the interpreter sets in `SendMessageRequest.metadata`. */

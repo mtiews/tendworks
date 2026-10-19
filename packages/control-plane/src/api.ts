@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
+import type { AgentRuntimePort } from "./agent-runtime.js";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
 import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
@@ -24,6 +25,8 @@ export interface ControlPlaneApiOptions {
   configuration: Configuration;
   /** Orchestration, which owns runs. */
   runs: RunsPort;
+  /** The agent runtime, which owns transcripts of agent sessions; their endpoints answer 503 without it. */
+  agentRuntime?: AgentRuntimePort;
   /** The trigger gateway, which owns the schedule; without it no triggers are listed. */
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
@@ -68,6 +71,7 @@ export function createControlPlaneApi({
   probeTimeoutMs,
   configuration,
   runs,
+  agentRuntime,
   triggers = createInMemoryTriggers(),
   notifications,
   merges,
@@ -152,6 +156,23 @@ export function createControlPlaneApi({
   app.get("/runs/:runId", async (c) => {
     const run = await runs.get(c.req.param("runId"));
     return run ? c.json(run satisfies Schemas["run"], 200) : problem(404, "Run not found");
+  });
+
+  app.get("/runs/:runId/tasks/:taskId/transcript", async (c) => {
+    const runId = c.req.param("runId");
+    const taskId = c.req.param("taskId");
+    const run = await runs.get(runId);
+    if (!run) return problem(404, "Run not found");
+    if (!run.steps.some((step) => step.taskId === taskId)) return problem(404, "Task not found", `no step of run ${runId} handed task ${taskId} to an agent`);
+    if (!agentRuntime) return problem(503, "Agent runtime unavailable", "no agent runtime is configured");
+    let items;
+    try {
+      items = await agentRuntime.transcript(taskId);
+    } catch (error) {
+      return problem(503, "Agent runtime unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!items) return problem(404, "Transcript not found", `task ${taskId} has no transcript`);
+    return c.json({ items } satisfies Schemas["TranscriptEntryList"], 200);
   });
 
   app.get("/agents", (c) => {

@@ -11,8 +11,17 @@ export interface AgentTasks {
    * already known returns the existing task instead of starting a new one. Rejects
    * when the message cannot be delivered, e.g. the profile does not exist.
    */
-  sendMessage(agent: string, request: A2A.SendMessageRequest): Promise<A2A.Task>;
+  sendMessage(agent: string, request: A2A.SendMessageRequest, options?: SendMessageOptions): Promise<A2A.Task>;
   getTask(taskId: string): Promise<A2A.Task | undefined>;
+}
+
+export interface SendMessageOptions {
+  /**
+   * Called once the runtime keeps the task, before the agent starts working on it (also
+   * when an interrupted task is resumed): the working task with its id and transcript
+   * reference. A failure here does not stop the task.
+   */
+  onTask?: (task: A2A.Task) => void | Promise<void>;
 }
 
 /** `Task.metadata` key: reference to the transcript of the agent session (string). */

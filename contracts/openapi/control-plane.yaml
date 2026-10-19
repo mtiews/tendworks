@@ -167,6 +167,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /runs/{runId}/tasks/{taskId}/transcript:
+    get:
+      operationId: getRunTaskTranscript
+      summary: Read the transcript of a step's agent session
+      description: >-
+        The transcript entries of the agent session behind task `taskId`, which a step of
+        run `runId` handed to an agent (the step's `taskId`), in order of their position.
+        Readable as soon as the step names its task, also while the agent still works.
+        Secrets the session was given are redacted.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The transcript so far.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptEntryList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id, no step of the run with this task, or the task has no transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, or the agent runtime, which owns transcripts, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /agents:
     get:
       operationId: listAgents
@@ -479,6 +529,15 @@ components:
         type: string
         pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
   schemas:
+    TranscriptEntryList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/transcript-entry.schema.yaml#/$defs/transcriptEntry"
     ApprovalRequestList:
       type: object
       required: [items]

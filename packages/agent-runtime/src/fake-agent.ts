@@ -17,11 +17,12 @@ export function createFakeHarness({ sleep }: { sleep: (ms: number) => Promise<vo
       const cost = { amount: 0, currency: "USD" };
       if (outcome === "failed") {
         const text = reply ?? "the fake agent failed as configured";
-        observer.record({ type: "agent-message", text });
+        observer.record({ type: "error", message: text });
         return { state: "TASK_STATE_FAILED", message: text, cost };
       }
       const text = reply ?? "done";
-      observer.record({ type: "agent-message", text });
+      observer.record({ type: "message-chunk", text });
+      observer.record({ type: "turn-ended", reason: "completed" });
       return {
         state: "TASK_STATE_COMPLETED",
         message: text,

@@ -1,4 +1,5 @@
 export { createStoreProbe } from "./adapters/postgres-store-probe.js";
+export { createAgentRuntimeClient, createInMemoryAgentRuntime, type AgentRuntimePort, type TranscriptEntry } from "./agent-runtime.js";
 export { apiTokenProblems, createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
 export { createInMemoryApprovals, type ApprovalDecision, type ApprovalRequest, type ApprovalsPort, type ApprovalStatus } from "./approvals.js";
 export { ConfigurationError, loadConfiguration, type Configuration } from "./configuration.js";

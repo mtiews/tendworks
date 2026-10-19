@@ -115,12 +115,15 @@ $defs:
         $ref: '#/$defs/stepStatus'
       taskId:
         type: string
-        description: Id of the A2A task the step handed to an agent, if any.
+        description: >-
+          Id of the A2A task the step handed to an agent, if any. Set as soon as the agent
+          runtime created the task, while the step is still running.
       transcript:
         type: string
         description: >-
           Where the transcript of the step's agent session is kept, outside the sandbox
-          (e.g. a `file://` URL on the worker's transcript volume).
+          (e.g. a `file://` URL on the worker's transcript volume). Set together with
+          `taskId`. Clients read the transcript's entries through the API by the task id.
       cost:
         $ref: '#/$defs/cost'
       workspace:

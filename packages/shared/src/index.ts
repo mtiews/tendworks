@@ -1,5 +1,6 @@
 export type * as A2A from "./generated/a2a.js";
 export type * as AgentProfile from "./generated/agent-profile.js";
+export type * as AgentRuntime from "./generated/agent-runtime.js";
 export type * as ApprovalEvents from "./generated/approval-events.js";
 export type * as ApprovalRequest from "./generated/approval-request.js";
 export type * as ControlPlane from "./generated/control-plane.js";
@@ -9,6 +10,7 @@ export type * as Policy from "./generated/policy.js";
 export type * as PullRequestIntegration from "./generated/pull-request-integration.js";
 export type * as RunEvents from "./generated/run-events.js";
 export type * as Sandbox from "./generated/sandbox.js";
+export type * as TranscriptEntry from "./generated/transcript-entry.js";
 export type * as TriggerBinding from "./generated/trigger-binding.js";
 export type * as TriggerEvents from "./generated/trigger-events.js";
 export type * as TriggerGateway from "./generated/trigger-gateway.js";
