@@ -1,6 +1,6 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
-import { anonymous, client } from "./support/control-plane.js";
+import { anonymous, client, reader } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 
@@ -37,12 +37,15 @@ describe("runs on the compose stack", () => {
     expect(list?.items.map((item) => item.id)).toContain(run.id);
   });
 
-  it("starts no run without the API token, but lets anyone read", async () => {
+  it("neither starts nor lists runs without a token, and lets the read-only token only read", async () => {
     const { response } = await anonymous.POST("/runs", { body: { workflow: "hello-agent" } });
 
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toBe("Bearer");
-    expect((await anonymous.GET("/runs")).response.status).toBe(200);
+    expect((await anonymous.GET("/runs")).response.status).toBe(401);
+    expect((await anonymous.GET("/status")).response.status).toBe(200);
+    expect((await reader.GET("/runs")).response.status).toBe(200);
+    expect((await reader.POST("/runs", { body: { workflow: "hello-agent" } })).response.status).toBe(403);
   });
 
   it("rejects a workflow that is not configured", async () => {

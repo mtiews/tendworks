@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import {
+  apiTokenProblems,
   ConfigurationError,
   createControlPlaneApi,
   createOrchestrationClient,
@@ -52,10 +53,14 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 // requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
-// Operations that change state need this token (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
+// Every operation but GET /status needs a token: the API token for anything, the
+// optional read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
+// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
 const apiToken = env("TEND_API_TOKEN");
-if (apiToken.length < 16) {
-  console.error("TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`");
+const readToken = process.env.TEND_API_READ_TOKEN || undefined;
+const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }) });
+if (tokenProblems.length > 0) {
+  for (const problem of tokenProblems) console.error(problem);
   process.exit(1);
 }
 
@@ -119,6 +124,7 @@ const api = createControlPlaneApi({
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
+  ...(readToken === undefined ? {} : { readToken }),
 });
 
 const port = Number(env("PORT", "8080"));
