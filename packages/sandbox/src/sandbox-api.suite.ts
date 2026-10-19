@@ -156,6 +156,55 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       await expect(context.api.writeFile(id, "notes.md", new Uint8Array())).rejects.toMatchObject({ code: "invalid-request" });
     });
 
+    it("attaches to a running process: stdin goes in, stdout comes out while it runs", async () => {
+      const { id } = await create();
+      const process = await context.api.attach(id, { command: ["cat"] });
+      const stdin = process.stdin.getWriter();
+      const stdout = lines(process.stdout);
+
+      await stdin.write(encode("first line\n"));
+      expect(await stdout.next()).toBe("first line");
+      await stdin.write(encode("second line\n"));
+      expect(await stdout.next()).toBe("second line");
+      await stdin.close();
+
+      expect(await process.exited).toBe(0);
+      expect(await stdout.next()).toBeUndefined();
+    });
+
+    it("hands an attached process its environment and working directory", async () => {
+      const { id } = await create();
+
+      const env = await context.api.attach(id, { command: ["printenv", "GREETING"], env: { GREETING: "moin" } });
+      const pwd = await context.api.attach(id, { command: ["pwd"], workingDirectory: "/tmp" });
+
+      expect(await text(env.stdout)).toBe("moin\n");
+      expect(await text(pwd.stdout)).toBe("/tmp\n");
+      expect(await env.exited).toBe(0);
+    });
+
+    it("reports stderr and the exit code of an attached process", async () => {
+      const { id } = await create();
+
+      const process = await context.api.attach(id, { command: ["cat", "/no/such/file"] });
+
+      expect(await text(process.stderr)).toContain("/no/such/file");
+      expect(await process.exited).toBe(1);
+    });
+
+    it("reports an attached program that does not exist with exit code 127", async () => {
+      const { id } = await create();
+
+      const process = await context.api.attach(id, { command: ["no-such-program"] });
+      await process.stdout.cancel();
+
+      expect(await process.exited).toBe(127);
+    });
+
+    it("rejects attaching to an unknown sandbox", async () => {
+      await expect(context.api.attach("doesnotexist", { command: ["cat"] })).rejects.toMatchObject({ code: "sandbox-not-found" });
+    });
+
     it("keeps files of different sandboxes apart", async () => {
       const first = await create();
       const second = await create();
@@ -165,4 +214,34 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       await expect(context.api.readFile(second.id, "/tmp/only-here.txt")).rejects.toMatchObject({ code: "file-not-found" });
     });
   });
+}
+
+const encode = (value: string) => new TextEncoder().encode(value);
+
+/** Reads a whole stream as UTF-8. */
+async function text(stream: ReadableStream<Uint8Array>): Promise<string> {
+  let result = "";
+  for await (const chunk of stream.pipeThrough(new TextDecoderStream())) result += chunk;
+  return result;
+}
+
+/** Reads a stream line by line; `next()` resolves with undefined at its end. */
+function lines(stream: ReadableStream<Uint8Array>) {
+  const reader = stream.pipeThrough(new TextDecoderStream()).getReader();
+  let buffer = "";
+  return {
+    async next(): Promise<string | undefined> {
+      for (;;) {
+        const newline = buffer.indexOf("\n");
+        if (newline >= 0) {
+          const line = buffer.slice(0, newline);
+          buffer = buffer.slice(newline + 1);
+          return line;
+        }
+        const { value, done } = await reader.read();
+        if (done) return buffer === "" ? undefined : buffer;
+        buffer += value;
+      }
+    },
+  };
 }

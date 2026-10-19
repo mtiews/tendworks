@@ -3,6 +3,7 @@ export { createDockerSandboxApi, type DockerSandboxApiOptions } from "./adapters
 export { createFakeSandboxApi } from "./fake-sandbox-api.js";
 export {
   SandboxError,
+  type AttachedProcess,
   type ExecRequest,
   type ExecResult,
   type IsolationClass,
