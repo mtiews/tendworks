@@ -16,7 +16,6 @@ import {
   createPostgresApprovalStore,
   toGatedRun,
   createPullRequestIntegrations,
-  PLATFORM_GITHUB_TOKEN,
   createPostgresNotificationStore,
   createNotifier,
   migrateHumanInteractionStore,
@@ -72,8 +71,8 @@ const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
 // Human interaction: the merge gate. It decides by orchestration's record of the run and
 // the policies of its workflow, never by what the caller claims; with `ask` it opens an
 // approval request (approval.requested goes onto the bus with it) and merges only once
-// that is approved. Merges go through the pull request integration with the platform
-// token, which only this bundle holds (ADR 0008).
+// that is approved. Merges go through the pull request integration configured for the
+// pull request's host, with the platform token only this bundle holds (ADR 0008).
 const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
 const merges = createMergeGate({
   policies: configuration.policies,
@@ -81,11 +80,14 @@ const merges = createMergeGate({
     const run = await orchestration.get(runId);
     return run && toGatedRun(run);
   },
-  pullRequests: createPullRequestIntegrations({ githubToken: () => platformSecrets.resolve(PLATFORM_GITHUB_TOKEN) }),
+  pullRequests: createPullRequestIntegrations({ integrations: configuration.pullRequestIntegrations, secrets: platformSecrets }),
   approvals: approvalStore,
 });
 const approvals = createApprovals({ store: approvalStore });
 console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
+console.log(
+  `configuration: pull request integrations ${configuration.pullRequestIntegrations.map(({ metadata, spec }) => `${metadata.name} (${spec.integration} on ${spec.host})`).join(", ") || "none"}`,
+);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control

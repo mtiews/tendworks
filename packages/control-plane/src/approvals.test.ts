@@ -16,7 +16,7 @@ const pending: ApprovalRequest = {
 function api(approvals?: ApprovalsPort, probes: HealthProbe[] = []) {
   return createControlPlaneApi({
     probes,
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     runs: createInMemoryRuns(),
     ...(approvals ? { approvals } : {}),
   });

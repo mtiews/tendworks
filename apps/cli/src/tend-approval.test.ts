@@ -21,7 +21,7 @@ async function setup() {
   await store.open(pending, (request) => approvalRequested(request, request.createdAt));
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     runs: createInMemoryRuns(),
     approvals: createApprovals({ store, now: () => new Date("2026-10-19T10:05:00.000Z") }),
   });

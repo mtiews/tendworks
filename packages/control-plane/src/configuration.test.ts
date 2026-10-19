@@ -95,7 +95,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, SandboxTemplate, TriggerBinding)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, PullRequestIntegration, SandboxTemplate, TriggerBinding)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -194,6 +194,31 @@ describe("loadConfiguration", () => {
       `agents/developer.md: /spec/env/GH_TOKEN/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
       `triggers/github.yaml: /spec/source/github/token/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
       "workflows/build.sw.yaml: /do/0/implement calls agent://developer, but no agent profile 'developer' is configured",
+    ]);
+  });
+
+  it("loads pull request integrations and rejects a second one for the same host", () => {
+    const integration = (name: string, host: string, spec: string) =>
+      `apiVersion: tendworks.dev/v1\nkind: PullRequestIntegration\nmetadata: { name: ${name} }\nspec: { host: ${host}, ${spec} }\n`;
+    const github = "integration: github, github: { token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }";
+    const fake = "integration: fake, fake: { pullRequests: [{ url: 'https://git.example/acme/app/pull/1', headBranch: main }] }";
+    const valid = folder({
+      "integrations/pull-requests/github.yaml": integration("github", "github.com", github),
+      "integrations/pull-requests/fake.yaml": integration("fake", "git.example", fake),
+    });
+    expect(loadConfiguration(valid).pullRequestIntegrations.map(({ metadata, spec }) => [metadata.name, spec.host, spec.integration])).toEqual([
+      ["fake", "git.example", "fake"],
+      ["github", "github.com", "github"],
+    ]);
+
+    const invalid = folder({
+      "integrations/a.yaml": integration("a", "github.com", github),
+      "integrations/b.yaml": integration("b", "github.com", fake),
+      "integrations/c.yaml": integration("c", "git.example", "integration: github"),
+    });
+    expect(issuesOf(invalid)).toEqual([
+      "integrations/b.yaml: pull request integration 'b' serves host github.com, which integrations/a.yaml already serves",
+      "integrations/c.yaml: /spec: must have required property 'github'",
     ]);
   });
 

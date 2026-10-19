@@ -1,7 +1,7 @@
-# The shape of develop-issue with fakes: the fake agent reports a pull request on a
-# reserved .example host, and the platform merges it in its fake pull request
-# integration behind the policies of this workflow (merge-gate: merge: auto). Runs
-# without a model or a repository.
+# The shape of develop-issue with fakes: the fake agent reports a pull request on the
+# reserved git.example host, and the platform merges it in the fake pull request
+# integration (integrations/pull-requests/fake.yaml) behind the policies of this
+# workflow (merge-gate: merge: auto). Runs without a model or a repository.
 # Start it with: POST /runs {"workflow": "fake-develop-and-merge", "input": {"issue": {"number": 1, "title": "Say hello"}}}
 document:
   dsl: '1.0.3'

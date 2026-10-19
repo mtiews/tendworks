@@ -180,7 +180,7 @@ describe("control plane: notifications", () => {
 });
 
 describe("control plane: merges behind the gate, and approval requests", () => {
-  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, state: "open" }])) {
+  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open" }])) {
     const store = createInMemoryApprovalStore();
     const runs = async (runId: string): Promise<GatedRun | undefined> =>
       runId === "r-1" ? { id: "r-1", workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR }], ...run } : undefined;

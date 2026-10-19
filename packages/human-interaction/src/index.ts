@@ -36,11 +36,7 @@ export {
 } from "./merge-gate.js";
 export { decide, decideFor, type GatedAction, type Policy, type PolicyDecision } from "./policy.js";
 export { createGithubPullRequests, type GithubPullRequestsOptions } from "./pull-requests/github/github-pull-requests.js";
-export {
-  createPullRequestIntegrations,
-  PLATFORM_GITHUB_TOKEN,
-  type PullRequestIntegrationsOptions,
-} from "./pull-requests/pull-requests-for.js";
+export { createPullRequestIntegrations, type PullRequestIntegrationsOptions } from "./pull-requests/pull-requests-for.js";
 export {
   createFakePullRequests,
   MergeRefusedError,

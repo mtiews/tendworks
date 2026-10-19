@@ -6,7 +6,7 @@ const PR = "https://git.example/acme/app/pull/7";
 async function merge(body: unknown, merges?: MergesPort) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [] },
+    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     runs: createInMemoryRuns(),
     ...(merges ? { merges } : {}),
   });

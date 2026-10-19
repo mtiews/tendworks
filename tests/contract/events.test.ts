@@ -108,7 +108,7 @@ describe("events the domains emit", () => {
     const gate = createMergeGate({
       policies: configuration.policies,
       runs: async (id) => ({ id, workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR }] }),
-      pullRequests: () => createFakePullRequests([{ url: PR, state: "open" }]),
+      pullRequests: () => createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open" }]),
       approvals,
     });
 

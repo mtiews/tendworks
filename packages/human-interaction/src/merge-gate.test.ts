@@ -26,7 +26,7 @@ const running = (overrides: Partial<GatedRun> = {}): GatedRun => ({
 function setup({
   policies = [policy("merge-gate", "auto", ["develop-issue"]), policy("careful", "ask", ["careful-issue"])],
   runs = [running(), running({ id: "run-2", workflow: "careful-issue" })],
-  pullRequests = createFakePullRequests([{ url: PR, state: "open" }]),
+  pullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open" }]),
 }: { policies?: Policy[]; runs?: GatedRun[]; pullRequests?: PullRequests & { merged?(): string[] } } = {}) {
   const approvals = createInMemoryApprovalStore();
   const gate = createMergeGate({
@@ -169,7 +169,7 @@ describe("merge gate", () => {
 
   it("refuses to merge a pull request the run did not report", async () => {
     const other = "https://git.example/acme/app/pull/8";
-    const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: other, state: "open" }]) });
+    const { gate, merged } = setup({ pullRequests: createFakePullRequests([{ url: other, headBranch: "tendworks/issue-7", state: "open" }]) });
 
     expect(await gate.merge({ run: "run-1", pullRequest: other })).toEqual({
       refused: {
@@ -207,7 +207,7 @@ describe("merge gate", () => {
   });
 
   it("passes on why the repository refused the merge", async () => {
-    const { gate } = setup({ pullRequests: createFakePullRequests([{ url: PR, state: "open", mergeable: false }]) });
+    const { gate } = setup({ pullRequests: createFakePullRequests([{ url: PR, headBranch: "tendworks/issue-7", state: "open", mergeable: false }]) });
 
     const outcome = await gate.merge({ run: "run-1", pullRequest: PR });
 

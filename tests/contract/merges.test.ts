@@ -35,7 +35,7 @@ const contracts = guardedContracts("orchestration", "control-plane");
 type Run = ControlPlane.components["schemas"]["run"];
 const PR = "https://git.example/example/playground/pull/1"; // examples/config/agents/fake-pr-developer.md
 
-function platform({ pullRequests = [{ url: PR, state: "open" }] }: { pullRequests?: FakePullRequest[] } = {}) {
+function platform({ pullRequests = [{ url: PR, headBranch: "tendworks/issue-7", state: "open" }] }: { pullRequests?: FakePullRequest[] } = {}) {
   const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
   const repository = createFakePullRequests(pullRequests);
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
@@ -122,7 +122,7 @@ describe("merge step through the control plane's merge gate", () => {
   });
 
   it("fails the merge step with the repository's reason when the merge is refused", async () => {
-    const { run } = platform({ pullRequests: [{ url: PR, state: "open", mergeable: false }] });
+    const { run } = platform({ pullRequests: [{ url: PR, headBranch: "tendworks/issue-7", state: "open", mergeable: false }] });
 
     const done = await run("fake-develop-and-merge");
 
