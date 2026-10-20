@@ -103,7 +103,8 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
   return (
     <section className="chat panel" aria-label="Conversation">
       <TranscriptOf view={view} missing="No transcript was found for this chat." />
-      {!isOpen(chat) ? (
+      {/* The transcript may show the end before the chat is read again: the input goes at once. */}
+      {!isOpen(chat) || turn.state === "ended" ? (
         <p className="muted">This chat has ended.</p>
       ) : scope === "read" ? (
         <p className="muted">Read-only access: you can follow this chat but not write to it.</p>
@@ -114,7 +115,7 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
   );
 }
 
-/** The next message while the agent waits, and ending the chat. */
+/** The next message while the agent waits, cancelling the turn while it works, and ending the chat. */
 function ChatActions({ chatId, turn, following, changed }: { chatId: string; turn: Turn; following: boolean; changed: () => void }) {
   const { client } = useApi();
   const inputId = useId();
@@ -125,6 +126,7 @@ function ChatActions({ chatId, turn, following, changed }: { chatId: string; tur
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [ending, setEnding] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [failure, setFailure] = useState<string>();
 
   const waiting = following && turn.state === "waiting" && (sentAfter === undefined || turn.position > sentAfter) && !sending;
@@ -143,6 +145,20 @@ function ChatActions({ chatId, turn, following, changed }: { chatId: string; tur
       setFailure(messageOf(error));
     } finally {
       setSending(false);
+      changed();
+    }
+  };
+
+  // The agent stops the turn and waits for the next message; the transcript says so.
+  const cancel = async () => {
+    setCancelling(true);
+    setFailure(undefined);
+    try {
+      await answer(client.POST("/chats/{chatId}/cancel", { params: { path: { chatId } } }));
+    } catch (error: unknown) {
+      setFailure(messageOf(error));
+    } finally {
+      setCancelling(false);
       changed();
     }
   };
@@ -185,6 +201,11 @@ function ChatActions({ chatId, turn, following, changed }: { chatId: string; tur
           <button type="submit" className="primary" disabled={!waiting || text.trim() === ""}>
             Send
           </button>
+          {!waiting && following && (
+            <button type="button" disabled={cancelling} onClick={() => void cancel()}>
+              Cancel turn
+            </button>
+          )}
           {!waiting && <span className="muted">{following ? "The agent is working…" : "Reading the chat…"}</span>}
           <button type="button" className="chat-end" disabled={confirming} onClick={() => setConfirming(true)}>
             End chat

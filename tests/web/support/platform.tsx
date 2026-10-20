@@ -60,5 +60,7 @@ export function renderApp({ path = "/ui/", unreachable = false, ...options }: Pl
   };
   const user = userEvent.setup();
   const view = render(<App fetch={fetch} />);
-  return { user, platform, view };
+  /** Opens the app once more at the same address and on the same platform, as a second tab would. */
+  const openTab = () => render(<App fetch={fetch} />);
+  return { user, platform, view, openTab };
 }

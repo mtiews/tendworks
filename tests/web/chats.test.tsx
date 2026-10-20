@@ -259,6 +259,98 @@ describe("chat window", () => {
     expect(within(conversation()).queryByRole("status")).toBeNull();
   });
 
+  it("cancels the running turn and then takes the next message, with the chat still open", async () => {
+    const { user, agentRuntime, chat, platform: running } = await openChat();
+    expect(within(conversation()).queryByRole("button", { name: "Cancel turn" })).toBeNull();
+
+    await user.type(input(), "Count to a million");
+    await user.click(within(conversation()).getByRole("button", { name: "Send" }));
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("Count to a million"));
+
+    await user.click(within(conversation()).getByRole("button", { name: "Cancel turn" }));
+
+    await vi.waitFor(() => expect(input().disabled).toBe(false));
+    expect(posts(running.requests, `/chats/${chat.id}/cancel`)).toHaveLength(1);
+    expect(transcriptItems().slice(-2)).toEqual(["Turn cancelled · 0.01 USD", "Waiting for the next message · turn 0 USD · 0.01 USD so far"]);
+    expect(within(conversation()).queryByRole("button", { name: "Cancel turn" })).toBeNull();
+    await vi.waitFor(() => expect(field("Status")).toBe("input-required"));
+
+    await user.type(input(), "Just to ten then");
+    await user.click(within(conversation()).getByRole("button", { name: "Send" }));
+    await vi.waitFor(() => expect(agentRuntime.chats.get(chat.id)!.status).toBe("working"));
+    agentRuntime.finishTurn(chat.id, "1, 2, … 10", USD(0.02));
+    expect(await within(conversation()).findByText("1, 2, … 10")).toBeTruthy();
+  });
+
+  it("shows the same conversation in two tabs, and either tab continues it", async () => {
+    const { user, agentRuntime, chat, view, openTab } = await openChat();
+    const second = openTab();
+    const tab = (container: HTMLElement) => {
+      const region = () => within(container).getByRole("region", { name: "Conversation" });
+      return {
+        items: () => [...within(region()).getByRole("list", { name: "Transcript" }).children].map((item) => item.textContent?.replace(/\s+/g, " ").trim()),
+        input: () => within(region()).getByRole<HTMLTextAreaElement>("textbox", { name: "Message" }),
+        send: async (text: string) => {
+          await user.type(within(region()).getByRole("textbox", { name: "Message" }), text);
+          await user.click(within(region()).getByRole("button", { name: "Send" }));
+        },
+      };
+    };
+    const first = tab(view.container);
+    const other = tab(second.container);
+    await within(second.container).findByText("none");
+    expect(other.items()).toEqual(first.items());
+
+    await first.send("From the first tab");
+    await vi.waitFor(() => expect(other.items().at(-1)).toBe("From the first tab"));
+    expect(other.input().disabled).toBe(true);
+
+    agentRuntime.finishTurn(chat.id, "Answer one", USD(0.02));
+    await vi.waitFor(() => expect(other.input().disabled).toBe(false));
+    await vi.waitFor(() => expect(first.input().disabled).toBe(false));
+
+    await other.send("From the second tab");
+    await vi.waitFor(() => expect(first.items().at(-1)).toBe("From the second tab"));
+    expect(first.input().disabled).toBe(true);
+    agentRuntime.finishTurn(chat.id, "Answer two", USD(0.03));
+
+    await vi.waitFor(() => expect(first.items().at(-1)).toBe("Waiting for the next message · turn 0.01 USD · 0.03 USD so far"));
+    expect(other.items()).toEqual(first.items());
+    expect(first.items().slice(-6)).toEqual([
+      "From the first tab",
+      "Answer one",
+      "Waiting for the next message · turn 0.01 USD · 0.02 USD so far",
+      "From the second tab",
+      "Answer two",
+      "Waiting for the next message · turn 0.01 USD · 0.03 USD so far",
+    ]);
+  });
+
+  it("shows a chat ended by another client as ended, without input", async () => {
+    const { agentRuntime, chat } = await openChat();
+    await agentRuntime.sendChatMessage(chat.id, "From the CLI");
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("From the CLI"));
+
+    await agentRuntime.endChat(chat.id);
+
+    expect(await within(conversation()).findByText("This chat has ended.")).toBeTruthy();
+    expect(within(conversation()).queryByRole("textbox")).toBeNull();
+    expect(within(conversation()).queryByRole("button", { name: "Cancel turn" })).toBeNull();
+    expect(transcriptItems().at(-1)).toBe("Task completed");
+    await vi.waitFor(() => expect(field("Status")).toBe("ended"));
+  });
+
+  it("hides the input as soon as the transcript shows the chat ended, before the chat is read again", async () => {
+    const { agentRuntime, chat, platform: running } = await openChat();
+    // The platform cannot be read for a moment: only the live transcript tells.
+    agentRuntime.append(chat.id, { type: "task-ended", state: "TASK_STATE_COMPLETED", message: "ended elsewhere", position: 99, time: new Date().toISOString() });
+    running.unreachable(true);
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("Task completed"));
+    expect(within(conversation()).getByText("This chat has ended.")).toBeTruthy();
+    expect(within(conversation()).queryByRole("textbox")).toBeNull();
+  });
+
   it("shows an ended chat's history without input", async () => {
     const { agentRuntime, configuration } = platform();
     const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello", repository: "https://example.test/acme/playground.git" });

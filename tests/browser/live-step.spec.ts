@@ -1,13 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { API_TOKEN, expect, expectNoHorizontalScroll, signIn, test } from "./support/test.js";
-
-/** The scripted ACP agent runs in the Claude Code harness, which needs some credential selected (CI sets one). */
-function credentialSelected(): boolean {
-  if (process.env.TEND_CLAUDE_CODE_CREDENTIAL) return true;
-  const env = fileURLToPath(new URL("../../deploy/.env", import.meta.url));
-  return existsSync(env) && /^TEND_CLAUDE_CODE_CREDENTIAL=(oauth-token|api-key)\s*$/m.test(readFileSync(env, "utf8"));
-}
+import { API_TOKEN, credentialSelected, expect, expectNoHorizontalScroll, signIn, test } from "./support/test.js";
 
 const baseUrl = process.env.TEND_URL ?? "http://localhost:8080";
 
