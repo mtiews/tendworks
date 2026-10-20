@@ -1,7 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { isTraceparent } from "@tendworks/platform";
+import { isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
+import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
 import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
@@ -24,6 +25,8 @@ export interface ControlPlaneApiOptions {
   configuration: Configuration;
   /** Orchestration, which owns runs. */
   runs: RunsPort;
+  /** The agent runtime, which owns transcripts of agent sessions; their endpoints answer 503 without it. */
+  agentRuntime?: AgentRuntimePort;
   /** The trigger gateway, which owns the schedule; without it no triggers are listed. */
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
@@ -33,10 +36,43 @@ export interface ControlPlaneApiOptions {
   /** Human interaction's approval requests; their endpoints answer 503 without it. */
   approvals?: ApprovalsPort;
   /**
-   * The platform's API token: operations that change state need it as a bearer token
-   * (`apiToken` security scheme), reading does not. Interim until OIDC.
+   * The platform's API token (`apiToken` security scheme): every operation accepts it as
+   * a bearer token, and operations that change state need it. Interim until OIDC.
    */
   apiToken: string;
+  /**
+   * The read-only token (`readToken` security scheme): accepted for reading, refused with
+   * 403 by operations that change state. Without it, reading needs the API token.
+   */
+  readToken?: string;
+}
+
+const MINIMUM_TOKEN_LENGTH = 16;
+
+/**
+ * Why the server must not start with these tokens (empty when it may): each must be long
+ * enough to resist guessing, and the read-only token must not be the API token. Agent
+ * profiles that list the platform MCP server need the read-only token (ADR 0016), so it
+ * must be set when any of `agentProfiles` does.
+ */
+export function apiTokenProblems({
+  apiToken,
+  readToken,
+  agentProfiles = [],
+}: Pick<ControlPlaneApiOptions, "apiToken" | "readToken"> & { agentProfiles?: Configuration["agentProfiles"] }): string[] {
+  const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
+  const problems: string[] = [];
+  if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
+  const readers = agentProfiles.filter(listsPlatformMcpServer).map((profile) => profile.metadata.name);
+  if (readToken === undefined && readers.length > 0) {
+    const profiles = `agent profile${readers.length > 1 ? "s" : ""} ${readers.join(", ")} list${readers.length > 1 ? "" : "s"}`;
+    problems.push(`TEND_API_READ_TOKEN must be set: ${profiles} the platform MCP server (mcp: [tendworks]), which reads with it`);
+  }
+  if (readToken !== undefined) {
+    if (readToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_READ_TOKEN"));
+    else if (readToken === apiToken) problems.push("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state");
+  }
+  return problems;
 }
 
 /** The public control plane API as a fetch handler; see contracts/openapi/control-plane.yaml. */
@@ -46,11 +82,13 @@ export function createControlPlaneApi({
   probeTimeoutMs,
   configuration,
   runs,
+  agentRuntime,
   triggers = createInMemoryTriggers(),
   notifications,
   merges,
   approvals,
   apiToken,
+  readToken,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   if (!apiToken) throw new Error("the control plane API needs an API token");
   const app = new Hono();
@@ -60,10 +98,31 @@ export function createControlPlaneApi({
   // Compared as digests, so neither the length nor the content leaks through timing.
   const digest = (value: string) => createHash("sha256").update(value).digest();
   const expected = digest(`Bearer ${apiToken}`);
+  const expectedRead = readToken ? digest(`Bearer ${readToken}`) : undefined;
+  const presented = (authorization: string): "admin" | "read" | undefined => {
+    const given = digest(authorization);
+    // Both comparisons always run, so timing does not tell which token was close.
+    const admin = timingSafeEqual(given, expected);
+    const read = expectedRead !== undefined && timingSafeEqual(given, expectedRead);
+    return admin ? "admin" : read ? "read" : undefined;
+  };
+  const challenge = { "www-authenticate": "Bearer" };
+
+  // Reading (GET, and HEAD, which GET routes answer too) needs either token; only
+  // GET /status stays open as the liveness check.
+  app.use(async (c, next) => {
+    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || c.req.path === "/status") return next();
+    if (!presented(c.req.header("authorization") ?? "")) {
+      return problem(401, "Unauthorized", "reading needs the platform's API token or its read-only token as a bearer token", challenge);
+    }
+    await next();
+  });
+
   const authenticated: MiddlewareHandler = async (c, next) => {
-    const authorization = c.req.header("authorization") ?? "";
-    if (!timingSafeEqual(digest(authorization), expected)) {
-      return problem(401, "Unauthorized", "this operation needs the platform's API token as a bearer token", { "www-authenticate": "Bearer" });
+    const token = presented(c.req.header("authorization") ?? "");
+    if (token === "read") return problem(403, "Forbidden", "the read-only token cannot change state; this operation needs the platform's API token");
+    if (token !== "admin") {
+      return problem(401, "Unauthorized", "this operation needs the platform's API token as a bearer token", challenge);
     }
     await next();
   };
@@ -110,7 +169,146 @@ export function createControlPlaneApi({
     return run ? c.json(run satisfies Schemas["run"], 200) : problem(404, "Run not found");
   });
 
-  app.get("/agents", (c) => {
+  app.get("/runs/:runId/tasks/:taskId/transcript", async (c) => {
+    const runId = c.req.param("runId");
+    const taskId = c.req.param("taskId");
+    const run = await runs.get(runId);
+    if (!run) return problem(404, "Run not found");
+    if (!run.steps.some((step) => step.taskId === taskId)) return problem(404, "Task not found", `no step of run ${runId} handed task ${taskId} to an agent`);
+    if (!agentRuntime) return problem(503, "Agent runtime unavailable", "no agent runtime is configured");
+    let items;
+    try {
+      items = await agentRuntime.transcript(taskId);
+    } catch (error) {
+      return problem(503, "Agent runtime unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!items) return problem(404, "Transcript not found", `task ${taskId} has no transcript`);
+    return c.json({ items } satisfies Schemas["TranscriptEntryList"], 200);
+  });
+
+  app.get("/runs/:runId/tasks/:taskId/transcript/stream", async (c) => {
+    const runId = c.req.param("runId");
+    const taskId = c.req.param("taskId");
+    const lastEventId = c.req.header("last-event-id");
+    if (lastEventId !== undefined && !/^(0|[1-9][0-9]*)$/.test(lastEventId)) {
+      return problem(400, "Invalid Last-Event-ID", "Last-Event-ID must be the position of a transcript entry, e.g. 41");
+    }
+    const run = await runs.get(runId);
+    if (!run) return problem(404, "Run not found");
+    if (!run.steps.some((step) => step.taskId === taskId)) return problem(404, "Task not found", `no step of run ${runId} handed task ${taskId} to an agent`);
+    if (!agentRuntime) return problem(503, "Agent runtime unavailable", "no agent runtime is configured");
+    let stream;
+    try {
+      stream = await agentRuntime.streamTranscript(taskId, lastEventId === undefined ? {} : { after: Number(lastEventId) });
+    } catch (error) {
+      return problem(503, "Agent runtime unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!stream) return problem(404, "Transcript not found", `task ${taskId} has no transcript`);
+    // Passed through as it comes (ADR 0017); the agent runtime ends it when the task ends.
+    return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+  });
+
+  // Chats (ADR 0015) live in the agent runtime; the control plane passes them through.
+  const POSITION = /^(0|[1-9][0-9]*)$/;
+  const runtimeUnavailable = (detail: string) => problem(503, "Agent runtime unavailable", detail);
+  /** Calls the agent runtime, mapping its refusals to 400/409 and anything else to 503. */
+  const throughRuntime = async (work: (runtime: AgentRuntimePort) => Promise<Response>): Promise<Response> => {
+    if (!agentRuntime) return runtimeUnavailable("no agent runtime is configured");
+    try {
+      return await work(agentRuntime);
+    } catch (error) {
+      if (error instanceof ChatRefusedError) return problem(400, error.title, error.detail);
+      if (error instanceof ChatConflictError) return problem(409, error.title, error.detail);
+      return runtimeUnavailable(error instanceof Error ? error.message : String(error));
+    }
+  };
+  const noChat = (chatId: string) => problem(404, "Chat not found", `no chat '${chatId}' exists`);
+  const textOf = (body: Record<string, unknown> | undefined) => (typeof body?.text === "string" && body.text !== "" ? body.text : undefined);
+
+  app.post("/chats", authenticated, async (c) => {
+    const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
+    const text = textOf(body);
+    const repository = body?.repository;
+    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
+      return problem(
+        400,
+        "Invalid request",
+        "the body must be { agent, text, repository? } with the name of an agent profile that allows chats, the first message and a clone URL",
+      );
+    }
+    const agent = body.agent;
+    return throughRuntime(async (runtime) => {
+      // The agent runtime checks the repository: it owns the workspace rules.
+      const chat = await runtime.startChat({ agent, text, ...(repository === undefined ? {} : { repository }) });
+      return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
+    });
+  });
+
+  app.get("/chats", async (c) => throughRuntime(async (runtime) => c.json({ items: await runtime.listChats() } satisfies Schemas["chatList"], 200)));
+
+  app.get("/chats/:chatId", async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.getChat(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.post("/chats/:chatId/messages", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    const text = textOf((await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined);
+    if (text === undefined) return problem(400, "Invalid request", "the body must be { text } with the next message");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.sendChatMessage(chatId, text);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.post("/chats/:chatId/cancel", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.cancelChatTurn(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.post("/chats/:chatId/end", authenticated, async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      const chat = await runtime.endChat(chatId);
+      return chat ? c.json(chat satisfies Schemas["chat"], 200) : noChat(chatId);
+    });
+  });
+
+  app.get("/chats/:chatId/transcript", async (c) => {
+    const chatId = c.req.param("chatId");
+    return throughRuntime(async (runtime) => {
+      // Only a chat's transcript: a task id of a run's step is no chat.
+      if (!(await runtime.getChat(chatId))) return noChat(chatId);
+      const items = await runtime.transcript(chatId);
+      return items ? c.json({ items } satisfies Schemas["TranscriptEntryList"], 200) : noChat(chatId);
+    });
+  });
+
+  app.get("/chats/:chatId/transcript/stream", async (c) => {
+    const chatId = c.req.param("chatId");
+    const lastEventId = c.req.header("last-event-id");
+    if (lastEventId !== undefined && !POSITION.test(lastEventId)) {
+      return problem(400, "Invalid Last-Event-ID", "Last-Event-ID must be the position of a transcript entry, e.g. 41");
+    }
+    return throughRuntime(async (runtime) => {
+      if (!(await runtime.getChat(chatId))) return noChat(chatId);
+      const stream = await runtime.streamTranscript(chatId, lastEventId === undefined ? {} : { after: Number(lastEventId) });
+      if (!stream) return noChat(chatId);
+      // Passed through as it comes (ADR 0017); the agent runtime ends it when the chat ends.
+      return new Response(stream, { headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-cache" } });
+    });
+  });
+
+  app.get("/agents", async (c) => {
+    // Who works right now lives in the agent runtime; the profiles come from the configuration,
+    // so they are listed also when the agent runtime cannot be reached, without sessions then.
+    const sessions = await agentRuntime?.listSessions().catch(() => undefined);
     const items = configuration.agentProfiles
       .map(({ metadata, spec }): Schemas["Agent"] => {
         const secrets = Object.values(spec.env ?? {}).map(({ secretRef }) => secretRef.name);
@@ -120,6 +318,7 @@ export function createControlPlaneApi({
           ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
           ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
           ...(secrets.length > 0 ? { secrets } : {}),
+          ...(sessions ? { sessions: sessions.filter((session) => session.agent === metadata.name) } : {}),
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));

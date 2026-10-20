@@ -75,9 +75,12 @@ services:
       # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
       # merge gate merges pull requests on github.com with it. Never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
-      # API token for operations that change state (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
-      # The default is for the laptop profile only: set your own in deploy/.env.
+      # API token: every operation but GET /status needs a token, operations that change
+      # state need this one (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
+      # The read-only token is accepted for reading only (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
+      # The defaults are for the laptop profile only: set your own in deploy/.env.
       TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-laptop-only-insecure-read-token}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
@@ -109,6 +112,12 @@ services:
       # with the API token. The token is no agent secret, so it never enters a sandbox.
       TEND_CONTROL_PLANE_URL: http://server:8080
       TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+      # The platform MCP server (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)):
+      # its address as sandboxes reach the server's published port, and the read-only token
+      # it is read with. Only sessions of agent profiles that list it (mcp: [tendworks]) get
+      # both, from the agent runtime itself; no profile can reference them.
+      TEND_PLATFORM_MCP_URL: ${TEND_PLATFORM_MCP_URL:-http://host.docker.internal:${TEND_PORT:-8080}/mcp}
+      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-laptop-only-insecure-read-token}
       # Sandboxes run on their own Docker network, not on this stack's networks, so they
       # cannot reach the server, worker, store or socket proxy by name or address.
       TEND_SANDBOX_NETWORK: tendworks-sandboxes

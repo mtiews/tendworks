@@ -1,3 +1,4 @@
+import { readServerSentEvents } from "@tendworks/platform";
 import { contractSchema, describeErrors, readContract, type Document } from "./contracts.js";
 
 /*
@@ -62,13 +63,18 @@ export function openApiContract(name: string): OpenApiContract {
     }
     return current as T;
   };
+  /** Where a parameter's own definition is: behind its local `$ref`, if it has one. */
+  const parameterPointer = (parameter: unknown, at: string): string => {
+    const ref = (parameter as { $ref?: unknown }).$ref;
+    return typeof ref === "string" && ref.startsWith("#/") ? ref : at;
+  };
 
   const operations: Operation[] = [];
   for (const [template, item] of Object.entries((document.paths ?? {}) as Record<string, Document>)) {
     const itemPointer = `#/paths/${segment(template)}`;
     const shared = ((item.parameters ?? []) as unknown[]).map((parameter, index) => ({
       ...resolve<Omit<Parameter, "pointer">>(parameter),
-      pointer: `${itemPointer}/parameters/${index}`,
+      pointer: parameterPointer(parameter, `${itemPointer}/parameters/${index}`),
     }));
     for (const method of METHODS) {
       const operation = item[method] as Document | undefined;
@@ -76,7 +82,7 @@ export function openApiContract(name: string): OpenApiContract {
       const pointer = `${itemPointer}/${method}`;
       const own = ((operation.parameters ?? []) as unknown[]).map((parameter, index) => ({
         ...resolve<Omit<Parameter, "pointer">>(parameter),
-        pointer: `${pointer}/parameters/${index}`,
+        pointer: parameterPointer(parameter, `${pointer}/parameters/${index}`),
       }));
       const names = new Set(own.map((parameter) => `${parameter.in}:${parameter.name}`));
       operations.push({
@@ -102,14 +108,15 @@ export function openApiContract(name: string): OpenApiContract {
     const names = [...operation.template.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]!);
     operation.pattern.exec(url.pathname)!.slice(1).forEach((value, index) => values.set(`path:${names[index]}`, decodeURIComponent(value)));
     url.searchParams.forEach((value, key) => values.set(`query:${key}`, value));
+    request.headers.forEach((value, key) => values.set(`header:${key.toLowerCase()}`, value));
     for (const key of values.keys()) {
       if (key.startsWith("query:") && !operation.parameters.some((parameter) => `${parameter.in}:${parameter.name}` === key)) {
         issues.push(`undocumented query parameter ${key.slice(6)}`);
       }
     }
     for (const parameter of operation.parameters) {
-      if (parameter.in !== "path" && parameter.in !== "query") continue;
-      const value = values.get(`${parameter.in}:${parameter.name}`);
+      if (parameter.in === "cookie") continue;
+      const value = values.get(`${parameter.in}:${parameter.in === "header" ? parameter.name.toLowerCase() : parameter.name}`);
       if (value === undefined) {
         if (parameter.required) issues.push(`missing ${parameter.in} parameter ${parameter.name}`);
         continue;
@@ -141,12 +148,49 @@ export function openApiContract(name: string): OpenApiContract {
     return issues;
   }
 
+  const responseKey = (operation: Operation, status: number) => (String(status) in operation.responses ? String(status) : "default");
+  const mediaTypeOf = (response: Response) => (response.headers.get("content-type") ?? "").split(";")[0]!.trim();
+
+  /*
+   * An event stream may stay open, so it is not read up front: its events are checked
+   * as they pass to the caller, each against the documented schema of one event. A bad
+   * event is recorded as a violation, since the exchange has been answered already.
+   */
+  function watchEvents(operation: Operation, status: number, body: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+    const validate = schemaAt(`${operation.pointer}/responses/${responseKey(operation, status)}/content/${segment("text/event-stream")}/schema`);
+    let feed!: ReadableStreamDefaultController<Uint8Array>;
+    const watched = new ReadableStream<Uint8Array>({ start: (controller) => void (feed = controller) });
+    const checked = (async () => {
+      for await (const { data, ...fields } of readServerSentEvents(watched)) {
+        let event: unknown;
+        try {
+          event = { ...fields, data: JSON.parse(data) as unknown };
+        } catch {
+          event = { ...fields, data };
+        }
+        if (!validate(event)) violations.push(`${label(operation)} answered ${status} with an event ${describeErrors(validate.errors)}: ${JSON.stringify(event)}`);
+      }
+    })();
+    return body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          controller.enqueue(chunk);
+          feed.enqueue(chunk);
+        },
+        async flush() {
+          feed.close();
+          await checked;
+        },
+      }),
+    );
+  }
+
   async function responseIssues(operation: Operation, status: number, response: Response): Promise<string[]> {
-    const key = String(status) in operation.responses ? String(status) : "default";
+    const key = responseKey(operation, status);
     const content = operation.responses[key]!.content;
     const text = await response.text();
     if (!content) return text === "" ? [] : ["a body, but the contract documents no content"];
-    const mediaType = (response.headers.get("content-type") ?? "").split(";")[0]!.trim();
+    const mediaType = mediaTypeOf(response);
     if (!(mediaType in content)) return [`a body of undocumented type '${mediaType}'`];
     if (mediaType !== "application/json") return [];
     const validate = schemaAt(`${operation.pointer}/responses/${key}/content/${segment(mediaType)}/schema`);
@@ -165,6 +209,12 @@ export function openApiContract(name: string): OpenApiContract {
     }
     if (refused.length > 0 && !(status >= 400 && status < 500)) {
       throw new ContractViolation(`${label(operation)} answered ${status} to a request ${file} forbids: ${refused.join("; ")}`);
+    }
+    const content = operation.responses[responseKey(operation, status)]!.content;
+    if (mediaTypeOf(response) === "text/event-stream" && response.body && content?.["text/event-stream"]) {
+      exercised.add(`${label(operation)} ${status}`);
+      const { headers, statusText } = response;
+      return new Response(watchEvents(operation, status, response.body), { status, statusText, headers });
     }
     const issues = await responseIssues(operation, status, response.clone());
     if (issues.length > 0) throw new ContractViolation(`${label(operation)} answered ${status} with ${issues.join("; ")}`);

@@ -70,6 +70,50 @@ describe("a fetch handler guarded by its OpenAPI contract", () => {
     expect(response.status).toBe(400);
   });
 
+  describe("with an event stream", () => {
+    const entry = { position: 0, time: "2026-10-19T10:00:00.000Z", type: "message-chunk", text: "Hello" };
+    const sse = (text: string, open = false) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode(text));
+            if (!open) controller.close();
+          },
+        }),
+        { headers: { "content-type": "text/event-stream" } },
+      );
+    const stream = new Request("http://worker.test/tasks/t-1/transcript/stream");
+
+    it("hands over a stream that stays open without waiting for its end", async () => {
+      const contract = openApiContract("agent-runtime");
+      const response = await contract.guard(async () => sse(`id: 0\nevent: entry\ndata: ${JSON.stringify(entry)}\n\n`, true))(stream);
+      const reader = response.body!.getReader();
+
+      const first = new TextDecoder().decode((await reader.read()).value);
+      await reader.cancel();
+
+      expect(first).toContain('"text":"Hello"');
+      expect(contract.unexercised()).not.toContain("GET /tasks/{taskId}/transcript/stream 200");
+      expect(contract.violations()).toEqual([]);
+    });
+
+    it("records an event of the stream the contract does not allow as it passes", async () => {
+      const contract = openApiContract("agent-runtime");
+      const response = await contract.guard(async () => sse(`id: 0\nevent: entry\ndata: ${JSON.stringify({ ...entry, type: "acp-update" })}\n\nevent: end\ndata: {}\n\n`))(stream);
+
+      await response.text();
+
+      expect(contract.violations()).toEqual([expect.stringMatching(/GET \/tasks\/\{taskId\}\/transcript\/stream answered 200 with an event/)]);
+    });
+
+    it("validates documented header parameters of the request", async () => {
+      const contract = openApiContract("agent-runtime");
+      const fetch = contract.guard(async () => sse("event: end\ndata: {}\n\n"));
+
+      await expect(fetch(new Request(stream, { headers: { "last-event-id": "soon" } }))).rejects.toThrow(/header parameter Last-Event-ID/);
+    });
+  });
+
   it("remembers a violation even when the caller swallows it", async () => {
     const contract = openApiContract("health");
     const fetch = contract.guard(async () => json(healthy, 500));

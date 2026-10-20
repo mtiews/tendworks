@@ -133,6 +133,29 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       expect((await context.store.get(run.id))?.steps).toEqual([step]);
     });
 
+    it("names the task and transcript of a running step without changing anything else", async () => {
+      const run = newRun();
+      await context.store.create(run);
+      const step = { name: "implement", reference: "/do/0/implement", status: "running" as const, workspace: { repository: "https://git.example/acme/app.git", branch: "b" }, startedAt: "2026-10-18T10:00:01.000Z" };
+      await context.store.saveStep(run.id, step, []);
+
+      await context.store.nameTask(run.id, step.reference, { taskId: "t-1", transcript: "file:///var/lib/tendworks/transcripts/t-1.jsonl" });
+
+      expect((await context.store.get(run.id))?.steps).toEqual([{ ...step, taskId: "t-1", transcript: "file:///var/lib/tendworks/transcripts/t-1.jsonl" }]);
+    });
+
+    it("leaves a step that already ended, or does not exist, as it is when its task is named late", async () => {
+      const run = newRun();
+      await context.store.create(run);
+      const step = { name: "implement", reference: "/do/0/implement", status: "failed" as const, startedAt: "2026-10-18T10:00:01.000Z", finishedAt: "2026-10-18T10:00:02.000Z" };
+      await context.store.saveStep(run.id, step, []);
+
+      await context.store.nameTask(run.id, step.reference, { taskId: "t-late" });
+      await context.store.nameTask(run.id, "/do/9/missing", { taskId: "t-missing" });
+
+      expect((await context.store.get(run.id))?.steps).toEqual([step]);
+    });
+
     it("publishes an event only once when a write is repeated", async () => {
       const run = newRun();
       await context.store.create(run);

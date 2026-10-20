@@ -2,8 +2,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
 import { afterAll, beforeAll } from "vitest";
+import type { ChatEvent, ChatEventPublisher } from "../chat-events.js";
 import { describeTaskStore } from "../task-store.suite.js";
-import { createPostgresTaskStore, migrateAgentRuntimeStore } from "./postgres-task-store.js";
+import { createPostgresTaskStore, migrateAgentRuntimeStore, type SqlTransaction } from "./postgres-task-store.js";
 
 /* Runs the shared task store suite against a throwaway Postgres container. */
 
@@ -39,4 +40,14 @@ afterAll(async () => {
   if (container) await docker("rm", "-f", "-v", container);
 });
 
-describeTaskStore("Postgres", () => createPostgresTaskStore({ pool }));
+describeTaskStore("Postgres", () => {
+  const published: ChatEvent[] = [];
+  // Writes inside the store's transaction, so only events of committed writes are seen.
+  const publisher: ChatEventPublisher<SqlTransaction> = {
+    async publish(tx, event) {
+      await tx.query("select 1");
+      published.push(event);
+    },
+  };
+  return { store: createPostgresTaskStore({ pool, publisher }), published: async () => published };
+});

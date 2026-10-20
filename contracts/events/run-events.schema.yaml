@@ -11,6 +11,7 @@ $defs:
     description: A run began executing.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, data]
     properties:
@@ -23,6 +24,7 @@ $defs:
     description: A run completed.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, data]
     properties:
@@ -35,6 +37,7 @@ $defs:
     description: A run failed; `error.instance` names the failing task.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, data]
     properties:
@@ -47,6 +50,7 @@ $defs:
     description: A step started.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, stepid, data]
     properties:
@@ -59,6 +63,7 @@ $defs:
     description: A step completed.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, stepid, data]
     properties:
@@ -71,6 +76,7 @@ $defs:
     description: A step failed.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, stepid, data]
     properties:

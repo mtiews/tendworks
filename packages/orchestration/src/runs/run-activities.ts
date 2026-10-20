@@ -1,4 +1,4 @@
-import type { AgentTaskExecutor } from "../workflow/agent-task-executor.js";
+import { RUN_ID, STEP_REFERENCE, TRANSCRIPT, type AgentTaskExecutor } from "../workflow/agent-task-executor.js";
 import type { HttpExecutor } from "../workflow/http-executor.js";
 import type { RunActivities } from "./execute-run.js";
 import { runFinished, runStarted, stepChanged } from "./run-events.js";
@@ -29,7 +29,17 @@ export function createRunActivities({ store, agents, http, now = () => new Date(
         [stepChanged(run, step, time)],
       );
     },
-    sendMessage: (agent, request) => agents.sendMessage(agent, request),
+    // The step names its task while the agent still works, so clients can follow it.
+    sendMessage: (agent, request) =>
+      agents.sendMessage(agent, request, {
+        onTask: async ({ id, metadata }) => {
+          const runId = request.metadata?.[RUN_ID];
+          const reference = request.metadata?.[STEP_REFERENCE];
+          if (typeof runId !== "string" || typeof reference !== "string") return;
+          const transcript = metadata?.[TRANSCRIPT];
+          await store.nameTask(runId, reference, { taskId: id, ...(typeof transcript === "string" ? { transcript } : {}) });
+        },
+      }),
     httpRequest: (request) => http.request(request),
     async runFinished(run, outcome) {
       const time = timestamp();

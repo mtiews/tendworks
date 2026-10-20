@@ -1,6 +1,6 @@
 import pg from "pg";
 import type { EventPublisher, RunEvent } from "../runs/run-events.js";
-import type { Run, RunPatch, RunStore, StepRecord } from "../runs/run-store.js";
+import type { Run, RunPatch, RunStore, StepRecord, StepTask } from "../runs/run-store.js";
 
 /** The part of a database connection a publisher needs to write inside the store's transaction. */
 export interface SqlTransaction {
@@ -195,6 +195,12 @@ export function createPostgresRunStore({ pool, publisher = createPostgresOutbox(
           ],
         );
       }, events);
+    },
+    async nameTask(runId: string, reference: string, { taskId, transcript }: StepTask) {
+      await pool.query(
+        "update orchestration.steps set task_id = $3, transcript = $4 where run_id = $1 and reference = $2 and status = 'running'",
+        [runId, reference, taskId, transcript ?? null],
+      );
     },
     async get(runId) {
       return (await read("where id = $1", [runId]))[0];

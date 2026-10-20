@@ -10,6 +10,7 @@ $defs:
     description: A trigger binding matched an issue and started a run; `runid` is that run.
     allOf:
       - $ref: './cloudevent.schema.yaml'
+      - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
     type: object
     required: [type, data]
     properties:

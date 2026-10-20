@@ -51,8 +51,8 @@ function remote() {
   return { origin, workspace };
 }
 
-function checkout(workspace: string, repository: string, branch: string) {
-  const request = checkoutCommand({ repository, branch });
+function checkout(workspace: string, repository: string, branch?: string) {
+  const request = checkoutCommand({ repository, ...(branch === undefined ? {} : { branch }) });
   return run(request.command, workspace);
 }
 
@@ -77,6 +77,27 @@ describe("workspace checkout", { timeout: 20_000 }, () => {
     expect(result.status, result.stderr).toBe(0);
     expect(git(workspace, "branch", "--show-current")).toBe("tendworks/run-earlier");
     expect(readFileSync(join(workspace, "progress.txt"), "utf8").trim()).toBe("half done");
+  });
+
+  it("clones the repository and stays on its default branch when no branch is asked for, as for a chat", () => {
+    const { origin, workspace } = remote();
+
+    const result = checkout(workspace, origin);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(git(workspace, "branch", "--show-current")).toBe("main");
+    expect(readFileSync(join(workspace, "README.md"), "utf8").trim()).toBe("hello");
+  });
+
+  it("keeps a workspace without a branch that is already checked out, e.g. when a chat resumes", () => {
+    const { origin, workspace } = remote();
+    checkout(workspace, origin);
+    writeFileSync(join(workspace, "draft.txt"), "uncommitted\n");
+
+    const result = checkout(workspace, origin);
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(existsSync(join(workspace, "draft.txt"))).toBe(true);
   });
 
   it("keeps a workspace that is already checked out, including uncommitted work", () => {
@@ -122,12 +143,18 @@ describe("workspaceOf", () => {
     expect(workspaceOf(message({ "dev.tendworks/workspace": workspace }))).toEqual({ workspace });
   });
 
+  it("reads a workspace without a branch", () => {
+    const workspace = { repository: "https://git.example/acme/app.git" };
+
+    expect(workspaceOf(message({ "dev.tendworks/workspace": workspace }))).toEqual({ workspace });
+  });
+
   it("is empty for a message without a workspace", () => {
     expect(workspaceOf(message())).toEqual({});
   });
 
   it.each([
-    [{ repository: "https://git.example/acme/app.git" }],
+    [{ branch: "x" }],
     [{ repository: "", branch: "x" }],
     [{ repository: "https://git.example/acme/app.git", branch: "-x" }],
     [{ repository: "https://git.example/acme/app.git", branch: "a b" }],

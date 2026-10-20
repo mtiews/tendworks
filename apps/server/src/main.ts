@@ -1,6 +1,8 @@
 import { serve } from "@hono/node-server";
 import {
+  apiTokenProblems,
   ConfigurationError,
+  createAgentRuntimeClient,
   createControlPlaneApi,
   createOrchestrationClient,
   createStoreProbe,
@@ -27,6 +29,7 @@ import {
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
 } from "@tendworks/trigger-gateway";
+import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
 import pg from "pg";
 
@@ -52,10 +55,15 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 // requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
-// Operations that change state need this token (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
+// Every operation but GET /status needs a token: the API token for anything, the
+// optional read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
+// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
 const apiToken = env("TEND_API_TOKEN");
-if (apiToken.length < 16) {
-  console.error("TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`");
+const readToken = process.env.TEND_API_READ_TOKEN || undefined;
+// Profiles that list the platform MCP server read with the read-only token, so it must be set then.
+const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }), agentProfiles: configuration.agentProfiles });
+if (tokenProblems.length > 0) {
+  for (const problem of tokenProblems) console.error(problem);
   process.exit(1);
 }
 
@@ -74,6 +82,8 @@ bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier),
 
 const workerUrl = env("TEND_WORKER_URL");
 const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
+// The agent runtime runs in the worker too; transcripts are read through its internal API.
+const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
 // Human interaction: the merge gate. It decides by orchestration's record of the run and
 // the policies of its workflow, never by what the caller claims; with `ask` it opens an
@@ -114,20 +124,30 @@ const api = createControlPlaneApi({
   bundles: [{ name: "worker", baseUrl: workerUrl }],
   configuration,
   runs: orchestration,
+  agentRuntime,
   notifications,
   merges,
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
+  ...(readToken === undefined ? {} : { readToken }),
 });
 
+// The platform MCP server (ADR 0016) at /mcp, for chat agents: a client of the public API
+// above with the token its caller presents, so it can read no more than that token may.
+const mcp = createPlatformMcpServer({ controlPlane: { baseUrl: "http://control-plane.internal", fetch: inProcess(() => api) } });
+const MCP_PATH = "/mcp";
+
 const port = Number(env("PORT", "8080"));
-const server = serve({ fetch: (request) => api.fetch(request), port }, () => console.log(`control plane listening on :${port}`));
+const server = serve({ fetch: (request) => (new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : api.fetch(request)), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
 async function shutdown() {
   await triggerGateway.stop();
-  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.
+  if ("closeAllConnections" in server) server.closeAllConnections();
+  await closed;
   await bus.close();
   await pool.end();
 }

@@ -17,6 +17,9 @@
       "path": "../../packages/human-interaction"
     },
     {
+      "path": "../../packages/mcp-platform"
+    },
+    {
       "path": "../../packages/platform"
     },
     {

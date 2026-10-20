@@ -1,11 +1,11 @@
 import type { A2A } from "@tendworks/shared";
-import type { AgentTaskExecutor } from "./agent-task-executor.js";
+import type { AgentTaskExecutor, SendMessageOptions } from "./agent-task-executor.js";
 
-type Respond = (request: A2A.SendMessageRequest) => A2A.Task | Promise<A2A.Task>;
+type Respond = (request: A2A.SendMessageRequest, options?: SendMessageOptions) => A2A.Task | Promise<A2A.Task>;
 
 /**
  * Agent task executor that answers from memory and records every request.
- * By default each agent completes the task immediately with an empty result.
+ * By default each agent creates a task and completes it immediately with an empty result.
  */
 export class InMemoryAgentTaskExecutor implements AgentTaskExecutor {
   readonly requests: { agent: string; request: A2A.SendMessageRequest }[] = [];
@@ -17,11 +17,13 @@ export class InMemoryAgentTaskExecutor implements AgentTaskExecutor {
     return this;
   }
 
-  async sendMessage(agent: string, request: A2A.SendMessageRequest): Promise<A2A.Task> {
+  async sendMessage(agent: string, request: A2A.SendMessageRequest, options?: SendMessageOptions): Promise<A2A.Task> {
     this.requests.push({ agent, request });
     const respond = this.#agents.get(agent);
-    if (respond) return respond(request);
-    return { id: `task-${this.requests.length}`, status: { state: "TASK_STATE_COMPLETED" } };
+    if (respond) return respond(request, options);
+    const id = `task-${this.requests.length}`;
+    await options?.onTask?.({ id, status: { state: "TASK_STATE_WORKING" } });
+    return { id, status: { state: "TASK_STATE_COMPLETED" } };
   }
 
   /** The parts of every message sent so far. */

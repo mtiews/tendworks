@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** walking skeleton milestone 1 is done (spec: issue #1). Milestone 1b (chat path) is specified (spec: issue #24, tickets are its sub-issues).
+**Current state:** walking skeleton milestone 1 is done (spec: issue #1). Milestone 1b (chat path) is implemented on the integration branch; acceptance with the real harness is #33.
 
 ## Commands
 
@@ -66,7 +66,7 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 ## Conventions
 
 - **Language: always English** for code, comments, commit messages, docs, ADRs, issues and PRs — even when the conversation with the user is in German.
-- Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`
+- Events: CloudEvents with prefix `dev.tendworks.`, extension attributes `runid`, `stepid` and W3C `traceparent`; chat events carry no `runid`/`stepid` and name the chat in `subject` (`chats/<id>`)
 - TDD where it pays off: interpreter, policies, adapters, action journal — not dogmatically everywhere
 - Pin external versions (harnesses, skills); updates via PR
 - Dev skills: Matt Pocock's skills (`grill-me`, `tdd`); setup info lives in `docs/agents/`

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
-import { createAgentRuntime } from "@tendworks/agent-runtime";
-import { createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
+import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
+import { createAgentRuntimeClient, createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
 import {
   createApprovals,
@@ -14,15 +14,17 @@ import {
   type PullRequests,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
+import { readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
+import { readContract } from "./support/contracts.js";
 import { openApiContract } from "./support/openapi-contract.js";
 
 /*
  * Each HTTP API against its OpenAPI contract, in process: the control plane (public),
- * orchestration, the trigger gateway and the runtime health API (internal). Every
+ * orchestration, the agent runtime, the trigger gateway and the runtime health API (internal). Every
  * exchange goes through a guard that validates request and response against the
  * contract, on both sides of each internal API. Together the tests must produce every
  * response the contracts document; a documented response no test produces fails the
@@ -34,6 +36,7 @@ import { openApiContract } from "./support/openapi-contract.js";
 const contracts = {
   controlPlane: openApiContract("control-plane"),
   orchestration: openApiContract("orchestration"),
+  agentRuntime: openApiContract("agent-runtime"),
   triggerGateway: openApiContract("trigger-gateway"),
   health: openApiContract("health"),
 };
@@ -49,29 +52,47 @@ afterAll(() => {
 const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
 const PR = "https://git.example/example/playground/pull/1";
 const API_TOKEN = "contract-test-token";
+const READ_TOKEN = "contract-test-read-token";
 const healthy = createStaticHealthProbe("store", { status: "healthy" });
 const unhealthy = createStaticHealthProbe("execution-engine", { status: "unhealthy", message: "no answer" });
 const unreachable = async (): Promise<Response> => {
   throw new TypeError("fetch failed");
 };
 
-function orchestration(engine?: (real: RunEngine) => RunEngine) {
-  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
+/** The worker's internal APIs: orchestration and the agent runtime it hands tasks to. */
+function worker(engine?: (real: RunEngine) => RunEngine, sleep: (ms: number) => Promise<void> = async () => {}) {
+  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep });
   const store = createInMemoryRunStore();
   const real = createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() }));
-  const api = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
-  return contracts.orchestration.guard((request) => api.fetch(request));
+  const orchestration = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
+  const agentRuntime = createAgentRuntimeApi({ runtime: agents });
+  return {
+    orchestration: contracts.orchestration.guard((request) => orchestration.fetch(request)),
+    agentRuntime: contracts.agentRuntime.guard((request) => agentRuntime.fetch(request)),
+  };
 }
 
-function controlPlane(options: Partial<ControlPlaneApiOptions> = {}, { token = API_TOKEN }: { token?: string } = {}) {
+const orchestration = (engine?: (real: RunEngine) => RunEngine) => worker(engine).orchestration;
+
+function controlPlane(
+  options: Partial<ControlPlaneApiOptions> = {},
+  { token = API_TOKEN, sleep }: { token?: string | null; sleep?: (ms: number) => Promise<void> } = {},
+) {
+  const internal = worker(undefined, sleep);
   const api = createControlPlaneApi({
     probes: [healthy],
     configuration,
-    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: orchestration() }),
+    runs: createOrchestrationClient({ baseUrl: "http://worker.test", fetch: internal.orchestration }),
+    agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: internal.agentRuntime }),
     apiToken: API_TOKEN,
+    readToken: READ_TOKEN,
     ...options,
   });
-  return createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${token}` }, fetch: contracts.controlPlane.guard((request) => api.fetch(request)) });
+  return createClient<ControlPlane.paths>({
+    baseUrl: "http://tend.test",
+    ...(token === null ? {} : { headers: { authorization: `Bearer ${token}` } }),
+    fetch: contracts.controlPlane.guard((request) => api.fetch(request)),
+  });
 }
 
 const unreachableOrchestration = () => createOrchestrationClient({ baseUrl: "http://worker.test", fetch: unreachable });
@@ -130,13 +151,293 @@ describe("control plane: runs, through orchestration", () => {
   });
 });
 
+describe("control plane: transcripts of run steps, through orchestration and the agent runtime", () => {
+  async function finishedRun(client: ReturnType<typeof controlPlane>) {
+    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
+      if (run?.status === "completed" || run?.status === "failed") return run;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("the run did not finish");
+  }
+  const transcript = (client: ReturnType<typeof controlPlane>, runId: string, taskId: string) =>
+    client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } });
+
+  it("reads the transcript of a step's agent session", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    const { data, response } = await transcript(client, run.id, run.steps[0]!.taskId!);
+
+    expect(response.status).toBe(200);
+    expect(data?.items.map((entry) => entry.type)).toEqual(["task-started", "message-chunk", "turn-ended", "task-ended"]);
+  });
+
+  it("refuses an unknown run and a task that is no step of the run", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    expect((await transcript(client, "missing", "task-1")).response.status).toBe(404);
+    expect((await transcript(client, run.id, "not-a-step-task")).response.status).toBe(404);
+  });
+
+  it("answers 503 when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const run = await finishedRun(client);
+
+    expect((await transcript(client, run.id, run.steps[0]!.taskId!)).response.status).toBe(503);
+  });
+
+  const stream = (client: ReturnType<typeof controlPlane>, runId: string, taskId: string, lastEventId?: string) =>
+    client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
+      params: { path: { runId, taskId }, header: lastEventId === undefined ? {} : { "Last-Event-ID": lastEventId } },
+      parseAs: "stream",
+    });
+  async function events(body: ReadableStream<Uint8Array> | null | undefined) {
+    const all: { id?: string; event?: string; data: string }[] = [];
+    for await (const event of readServerSentEvents(body!)) all.push(event);
+    return all;
+  }
+
+  it("streams the entries of a step's agent session, each event as the contract describes it, after Last-Event-ID", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+
+    const whole = await stream(client, run.id, run.steps[0]!.taskId!);
+    const resumed = await stream(client, run.id, run.steps[0]!.taskId!, "1");
+
+    expect(whole.response.status).toBe(200);
+    expect((await events(whole.data)).map((event) => event.event)).toEqual(["entry", "entry", "entry", "entry", "end"]);
+    expect((await events(resumed.data)).map((event) => event.id)).toEqual(["2", "3", undefined]);
+  });
+
+  it("refuses a Last-Event-ID that is no position, an unknown run and a task that is no step of the run", async () => {
+    const client = controlPlane();
+    const run = await finishedRun(client);
+    const taskId = run.steps[0]!.taskId!;
+    const refusedId = await client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", {
+      params: { path: { runId: run.id, taskId } },
+      headers: { "last-event-id": "latest" },
+    });
+
+    expect(refusedId.response.status).toBe(400);
+    expect((await stream(client, "missing", taskId)).response.status).toBe(404);
+    expect((await stream(client, run.id, "not-a-step-task")).response.status).toBe(404);
+  });
+
+  it("answers 503 for a stream when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const run = await finishedRun(client);
+
+    expect((await stream(client, run.id, run.steps[0]!.taskId!)).response.status).toBe(503);
+  });
+});
+
+describe("control plane: chats, through the agent runtime", () => {
+  /** A control plane whose fake agents work on a turn until the test lets them answer. */
+  function chatting() {
+    const turns: (() => void)[] = [];
+    const client = controlPlane({}, { sleep: () => new Promise<void>((resolve) => turns.push(resolve)) });
+    const of = (id: string) => ({ params: { path: { chatId: id } } });
+    /** Lets the running turn end and waits until the chat waits for the next message. */
+    async function answer(id: string) {
+      for (let attempt = 0; attempt < 100 && turns.length === 0; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+      turns.shift()?.();
+      for (let attempt = 0; attempt < 100; attempt++) {
+        if ((await client.GET("/chats/{chatId}", of(id))).data?.status === "input-required") return;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      throw new Error("the turn did not end");
+    }
+    /** Forgets the wait of a turn that was cancelled, so `answer` lets the next turn end. */
+    const forget = () => void turns.splice(0);
+    return { client, of, answer, forget };
+  }
+  async function events(body: ReadableStream<Uint8Array> | null | undefined) {
+    const all: { id?: string; event?: string; data: string }[] = [];
+    for await (const event of readServerSentEvents(body!)) all.push(event);
+    return all;
+  }
+
+  it("starts a chat, refuses a message during a turn, takes the next one, ends it and keeps the transcript", async () => {
+    const { client, of, answer } = chatting();
+
+    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const id = started.data!.id;
+    const during = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Still there?" } });
+    await answer(id);
+    const next = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Again" } });
+    await answer(id);
+    const listed = await client.GET("/chats");
+    const ended = await client.POST("/chats/{chatId}/end", of(id));
+    const after = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Hello?" } });
+    const transcript = await client.GET("/chats/{chatId}/transcript", of(id));
+    const stream = await client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId: id }, header: { "Last-Event-ID": "1" } }, parseAs: "stream" });
+
+    expect(started.response.status).toBe(201);
+    expect([during.response.status, next.response.status, ended.response.status, after.response.status]).toEqual([409, 200, 200, 409]);
+    expect(listed.data?.items.map((chat) => chat.id)).toEqual([id]);
+    expect(ended.data).toMatchObject({ status: "ended", cost: { amount: 0, currency: "USD" } });
+    expect(transcript.data?.items.map((entry) => entry.type)).toEqual([
+      "task-started",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "message-received",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "task-ended",
+    ]);
+    expect((await events(stream.data)).map((event) => event.id ?? event.event)).toEqual(["2", "3", "4", "5", "6", "7", "8", "end"]);
+  });
+
+  it("cancels a running turn, takes the next message, and refuses to cancel once the chat ended", async () => {
+    const { client, of, answer, forget } = chatting();
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Work forever" } });
+    const id = chat!.id;
+
+    const cancelled = await client.POST("/chats/{chatId}/cancel", of(id));
+    forget();
+    const idle = await client.POST("/chats/{chatId}/cancel", of(id));
+    const next = await client.POST("/chats/{chatId}/messages", { ...of(id), body: { text: "Something quick instead" } });
+    await answer(id);
+    await client.POST("/chats/{chatId}/end", of(id));
+    const afterEnd = await client.POST("/chats/{chatId}/cancel", of(id));
+    const transcript = await client.GET("/chats/{chatId}/transcript", of(id));
+
+    expect(cancelled.data).toMatchObject({ id, status: "input-required" });
+    expect(idle.data).toMatchObject({ id, status: "input-required" });
+    expect(next.response.status).toBe(200);
+    expect(afterEnd.response.status).toBe(409);
+    expect(transcript.data?.items.map((entry) => entry.type)).toEqual([
+      "task-started",
+      "turn-ended",
+      "input-required",
+      "message-received",
+      "message-chunk",
+      "turn-ended",
+      "input-required",
+      "task-ended",
+    ]);
+  });
+
+  it("starts a chat with a repository as its workspace, and refuses a repository with credentials in its URL", async () => {
+    const { client } = chatting();
+
+    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://git.example/acme/app.git" } });
+    const refused = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://user:token@git.example/acme/app.git" } });
+
+    expect(started.response.status).toBe(201);
+    expect(started.data).toMatchObject({ repository: "https://git.example/acme/app.git" });
+    expect(refused.response.status).toBe(400);
+    expect(refused.error).toMatchObject({ title: "Invalid repository" });
+  });
+
+  it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
+    const { client, of } = chatting();
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+
+    expect((await client.POST("/chats", { body: { agent: "fake-assistant", text: "" } })).response.status).toBe(400);
+    expect((await client.POST("/chats", { body: { agent: "fake-developer", text: "Push it" } })).response.status).toBe(400);
+    expect((await client.POST("/chats/{chatId}/messages", { ...of(chat!.id), body: { text: "" } })).response.status).toBe(400);
+    const refusedId = await client.GET("/chats/{chatId}/transcript/stream", { ...of(chat!.id), headers: { "last-event-id": "latest" } });
+    expect(refusedId.response.status).toBe(400);
+    expect((await client.GET("/chats/{chatId}", of("missing"))).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/messages", { ...of("missing"), body: { text: "Hi" } })).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/cancel", of("missing"))).response.status).toBe(404);
+    expect((await client.POST("/chats/{chatId}/end", of("missing"))).response.status).toBe(404);
+    expect((await client.GET("/chats/{chatId}/transcript", of("missing"))).response.status).toBe(404);
+    expect((await client.GET("/chats/{chatId}/transcript/stream", { ...of("missing"), parseAs: "stream" })).response.status).toBe(404);
+  });
+
+  it("answers 503 when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+    const of = { params: { path: { chatId: "c-1" } } };
+
+    const answers = await Promise.all([
+      client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } }),
+      client.GET("/chats"),
+      client.GET("/chats/{chatId}", of),
+      client.POST("/chats/{chatId}/messages", { ...of, body: { text: "Hi" } }),
+      client.POST("/chats/{chatId}/cancel", of),
+      client.POST("/chats/{chatId}/end", of),
+      client.GET("/chats/{chatId}/transcript", of),
+      client.GET("/chats/{chatId}/transcript/stream", { ...of, parseAs: "stream" }),
+    ]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([503, 503, 503, 503, 503, 503, 503, 503]);
+  });
+});
+
+describe("agent runtime, called directly", () => {
+  it("refuses a chat message without text", async () => {
+    const { agentRuntime } = worker();
+    const started = await agentRuntime(new Request("http://worker.test/chats", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ agent: "fake-assistant", text: "Hello" }) }));
+    const { id } = (await started.json()) as { id: string };
+
+    const refused = await agentRuntime(new Request(`http://worker.test/chats/${id}/messages`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "" }) }));
+
+    expect(refused.status).toBe(400);
+  });
+
+  it("refuses a task it does not know", async () => {
+    const response = await worker().agentRuntime(new Request("http://worker.test/tasks/unknown/transcript"));
+
+    expect(response.status).toBe(404);
+  });
+
+  it("refuses to stream a task it does not know or after a Last-Event-ID that is no position", async () => {
+    const { agentRuntime } = worker();
+
+    const unknown = await agentRuntime(new Request("http://worker.test/tasks/unknown/transcript/stream"));
+    const invalid = await agentRuntime(new Request("http://worker.test/tasks/unknown/transcript/stream", { headers: { "last-event-id": "-1" } }));
+
+    expect([unknown.status, invalid.status]).toEqual([404, 400]);
+  });
+});
+
 describe("control plane: agents", () => {
   it("lists the agent profiles of the example configuration", async () => {
     const { data, response } = await controlPlane().GET("/agents");
 
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
-    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"] });
+    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+  });
+
+  it("shows the active agent sessions of a run's step and of a chat under their profiles, and leaves out finished ones", async () => {
+    const working: (() => void)[] = [];
+    const client = controlPlane({}, { sleep: () => new Promise<void>((resolve) => working.push(resolve)) });
+    const { data: run } = await client.POST("/runs", { body: { workflow: "slow-agent" } });
+    const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    for (let attempt = 0; attempt < 200 && working.length < 2; attempt++) await new Promise((resolve) => setTimeout(resolve, 5));
+    const sessionsOf = async (name: string) => (await client.GET("/agents")).data?.items.find((agent) => agent.name === name)?.sessions;
+
+    const step = await sessionsOf("fake-slow-developer");
+    const chatting = await sessionsOf("fake-assistant");
+    working.splice(0).forEach((resolve) => resolve());
+    await client.POST("/chats/{chatId}/end", { params: { path: { chatId: chat!.id } } });
+    for (let attempt = 0; attempt < 200 && (await client.GET("/runs/{runId}", { params: { path: { runId: run!.id } } })).data?.status === "running"; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+
+    expect(step).toEqual([
+      { kind: "run-step", agent: "fake-slow-developer", taskId: expect.any(String), status: "working", startedAt: expect.any(String), run: run!.id, step: "/do/0/implement" },
+    ]);
+    expect(chatting).toEqual([{ kind: "chat", agent: "fake-assistant", taskId: chat!.id, status: "working", startedAt: chat!.startedAt, chat: chat!.id }]);
+    expect([await sessionsOf("fake-slow-developer"), await sessionsOf("fake-assistant")]).toEqual([[], []]);
+  });
+
+  it("lists the agent profiles without sessions when the agent runtime cannot be reached", async () => {
+    const client = controlPlane({ agentRuntime: createAgentRuntimeClient({ baseUrl: "http://worker.test", fetch: unreachable }) });
+
+    const { data, response } = await client.GET("/agents");
+
+    expect(response.status).toBe(200);
+    expect(data?.items.find((agent) => agent.name === "developer")).toEqual(expect.objectContaining({ name: "developer", harness: "claude-code" }));
+    expect(data?.items.some((agent) => "sessions" in agent)).toBe(false);
   });
 });
 
@@ -147,8 +448,76 @@ describe("control plane: the API token", () => {
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
     const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
+    const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided].map(({ response }) => response.status)).toEqual([401, 401, 401]);
+    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
+  });
+
+  it("refuses operations that change state with the read-only token", async () => {
+    const client = controlPlane({}, { token: READ_TOKEN });
+
+    const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
+    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
+    const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
+    const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
+    const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
+
+    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
+  });
+
+  it("refuses reading without a token, except the platform status", async () => {
+    const client = controlPlane({}, { token: null });
+
+    const answers = await Promise.all([
+      client.GET("/runs"),
+      client.GET("/runs/{runId}", { params: { path: { runId: "r-1" } } }),
+      client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
+      client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
+      client.GET("/agents"),
+      client.GET("/triggers"),
+      client.GET("/notifications"),
+      client.GET("/approval-requests"),
+      client.GET("/chats"),
+      client.GET("/chats/{chatId}", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/status"),
+    ]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+  });
+
+  it("serves reading with the read-only token", async () => {
+    const client = controlPlane({ notifications: createInMemoryNotificationStore(), approvals: createApprovals({ store: createInMemoryApprovalStore() }) }, { token: READ_TOKEN });
+
+    const answers = await Promise.all([client.GET("/runs"), client.GET("/agents"), client.GET("/triggers"), client.GET("/notifications"), client.GET("/approval-requests")]);
+
+    expect(answers.map(({ response }) => response.status)).toEqual([200, 200, 200, 200, 200]);
+  });
+
+  it("declares the API token for every operation but the status, and the read-only token for reading only", () => {
+    const document = readContract("openapi/control-plane.yaml") as {
+      security?: Record<string, string[]>[];
+      paths: Record<string, Record<string, { security?: Record<string, string[]>[]; responses: Record<string, unknown> }>>;
+    };
+    const declared = Object.entries(document.paths).flatMap(([path, item]) =>
+      Object.entries(item).map(([method, operation]) => ({
+        operation: `${method.toUpperCase()} ${path}`,
+        schemes: (operation.security ?? document.security ?? []).flatMap((requirement) => Object.keys(requirement)).sort(),
+        refusals: ["401", "403"].filter((status) => status in operation.responses),
+      })),
+    );
+
+    for (const { operation, schemes, refusals } of declared) {
+      if (operation === "GET /status") expect({ operation, schemes, refusals }).toEqual({ operation, schemes: [], refusals: [] });
+      else if (operation.startsWith("GET ")) expect({ operation, schemes, refusals }).toEqual({ operation, schemes: ["apiToken", "readToken"], refusals: ["401"] });
+      else expect({ operation, schemes, refusals }).toEqual({ operation, schemes: ["apiToken"], refusals: ["401", "403"] });
+    }
   });
 });
 

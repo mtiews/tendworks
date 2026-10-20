@@ -1,6 +1,6 @@
 import type { A2A } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
-import type { TranscriptEntry } from "./transcripts/transcript-store.js";
+import type { TranscriptRecord } from "./transcripts/transcript-store.js";
 
 /** One task as a harness gets it. */
 export interface HarnessTask {
@@ -39,13 +39,58 @@ export interface HarnessResult {
 
 /** What a harness reports while it works. */
 export interface HarnessObserver {
-  /** Appends an entry to the task's transcript. */
-  record(entry: TranscriptEntry): void;
+  /** Appends an entry to the task's transcript; the runtime stamps its time and position. */
+  record(entry: TranscriptRecord): void;
   /** The agent's progress so far, shown as the working task's status message. */
   progress(text: string): void;
   /** Keeps the agent session with the task, durably once the promise resolves; replaces what was kept before. */
   saveSession(session: HarnessSession): Promise<void>;
 }
+
+/** How one turn of an agent session that waits for input between turns ended. */
+export interface HarnessTurn {
+  /** `TASK_STATE_INPUT_REQUIRED`: the agent ended its turn and the session goes on; `TASK_STATE_FAILED`: the session failed for good. */
+  state: Extract<A2A.TaskState, "TASK_STATE_INPUT_REQUIRED" | "TASK_STATE_FAILED">;
+  /** The agent's answer in this turn, or why the session failed. */
+  message: string;
+  /** What this turn cost, if the harness knows. */
+  cost?: Cost;
+}
+
+/**
+ * An agent session held open across turns, e.g. a chat's (ADR 0015): one task, one
+ * agent session, any number of prompt turns. Between turns the session and its
+ * workspace are kept until `end`.
+ */
+export interface OpenSession {
+  /**
+   * Runs one prompt turn with `message`. The first turn starts the session; a session
+   * whose sandbox is gone (e.g. after idle time or a restart) is resumed first.
+   * `interrupted`: the turn on `message` had begun before and was interrupted (e.g. by a
+   * restart); a resumed session is told to continue it rather than given the message again.
+   */
+  turn(message: A2A.Message, options?: { interrupted?: boolean }): Promise<HarnessTurn>;
+  /**
+   * Asks the agent to stop the running turn, which then ends in `TASK_STATE_INPUT_REQUIRED`
+   * with a `turn-ended` entry of reason `cancelled`; the session goes on. Resolves once
+   * the request is made, not once the turn ended. Nothing happens while no turn runs.
+   */
+  cancel(): Promise<void>;
+  /**
+   * Lets go of the session's sandbox between turns, e.g. when a chat is idle (ADR 0015):
+   * the sandbox goes, its volumes and what is kept to resume the session stay, so the
+   * next turn resumes the session in a new sandbox.
+   */
+  suspend(): Promise<void>;
+  /** Ends the session for good, also during a turn: removes its sandbox and its volumes. */
+  end(): Promise<void>;
+}
+
+/** A task without its message, for a session whose messages arrive turn by turn. */
+export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs"> & {
+  /** The workspace the session works in, checked out before its first turn; without it the workspace starts empty. */
+  workspace?: A2A.Workspace;
+};
 
 /**
  * The harness port: runs one agent session for a task, e.g. Claude Code over ACP in a
@@ -57,4 +102,9 @@ export interface HarnessObserver {
  */
 export interface Harness {
   run(task: HarnessTask, observer: HarnessObserver): Promise<HarnessResult>;
+  /**
+   * Opens an agent session that waits for input between turns (a chat). Nothing starts
+   * before the first turn. Harnesses without it cannot hold chats.
+   */
+  open?(task: HarnessSessionTask, observer: HarnessObserver): OpenSession;
 }

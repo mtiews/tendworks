@@ -31,7 +31,7 @@ async function tend(args: string[]) {
   });
   let stdout = "";
   let stderr = "";
-  const exitCode = await runTend(args, {
+  const exitCode = await runTend(["--token", "test-token", ...args], {
     fetch: (request) => api.fetch(request),
     stdout: (text) => (stdout += text),
     stderr: (text) => (stderr += text),

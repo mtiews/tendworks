@@ -1,7 +1,7 @@
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import type { Harness, HarnessObserver } from "./harness.js";
-import type { TranscriptEntry } from "./transcripts/transcript-store.js";
+import type { TranscriptRecord } from "./transcripts/transcript-store.js";
 
 export interface HarnessSuiteContext {
   harness: Harness;
@@ -22,7 +22,7 @@ export function describeHarness(name: string, setup: () => HarnessSuiteContext |
     const message: A2A.Message = { messageId: "m-1", role: "ROLE_USER", parts: [{ text: "Say hello" }] };
 
     const observe = () => {
-      const entries: TranscriptEntry[] = [];
+      const entries: TranscriptRecord[] = [];
       const progress: string[] = [];
       const observer: HarnessObserver = {
         record: (entry) => entries.push(entry),

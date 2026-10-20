@@ -6,12 +6,15 @@ import {
   createInMemoryTaskStore,
   createInMemoryTranscriptStore,
   createPostgresTaskStore,
+  type ChatEventPublisher,
   type Harness,
   type Sandboxes,
   type TaskStore,
   type TranscriptStore,
 } from "@tendworks/agent-runtime";
 import {
+  createAgentRuntimeClient,
+  createInMemoryAgentRuntime,
   createInMemoryApprovals,
   createInMemoryRuns,
   createInMemoryTriggers,
@@ -19,6 +22,7 @@ import {
   createOrchestrationClient,
   createStoreProbe,
   createTriggerGatewayClient,
+  type AgentRuntimePort,
   type ApprovalsPort,
   type MergesPort,
   type NotificationsPort,
@@ -95,6 +99,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "agent-runtime/TaskStore": port<TaskStore>({ postgres: createPostgresTaskStore, "in-memory": createInMemoryTaskStore }),
   "agent-runtime/TranscriptStore": port<TranscriptStore>({ files: createFileTranscriptStore, "in-memory": createInMemoryTranscriptStore }),
   "agent-runtime/Sandboxes": port<Sandboxes>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
+  "agent-runtime/ChatEventPublisher": port<ChatEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 
   "sandbox/SandboxApi": port<SandboxApi>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
 
@@ -117,6 +122,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
 
   "event-bus/EventBus": port<EventBus<never>>({ postgres: createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 
+  "control-plane/AgentRuntimePort": port<AgentRuntimePort>({ "agent-runtime": createAgentRuntimeClient, "in-memory": createInMemoryAgentRuntime }),
   "control-plane/RunsPort": port<RunsPort>({ orchestration: createOrchestrationClient, "in-memory": createInMemoryRuns }),
   "control-plane/TriggersPort": port<TriggersPort>({ "trigger-gateway": createTriggerGatewayClient, "in-memory": createInMemoryTriggers }),
   "control-plane/ApprovalsPort": port<ApprovalsPort>({ "human-interaction": createApprovals, "in-memory": createInMemoryApprovals }),

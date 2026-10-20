@@ -8,6 +8,7 @@
     "tend": "./dist/main.js"
   },
   "dependencies": {
+    "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "commander": "15.0.0",
     "openapi-fetch": "0.17.0",

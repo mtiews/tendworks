@@ -1,17 +1,25 @@
 import type { A2A } from "@tendworks/shared";
 import { beforeEach, describe, expect, it } from "vitest";
+import type { ChatEvent } from "./chat-events.js";
 import type { StoredTask, TaskStore } from "./task-store.js";
+
+export interface TaskStoreSuiteContext {
+  store: TaskStore;
+  /** Events the store published with its writes, oldest first. */
+  published(): Promise<ChatEvent[]>;
+}
 
 /**
  * The behaviour every task store must show. Runs against the real adapter and the
  * fake, so the fake stays a faithful stand-in.
  */
-export function describeTaskStore(name: string, setup: () => Promise<TaskStore> | TaskStore) {
+export function describeTaskStore(name: string, setup: () => Promise<TaskStoreSuiteContext> | TaskStoreSuiteContext) {
   describe(`task store: ${name}`, () => {
     let store: TaskStore;
+    let published: () => Promise<ChatEvent[]>;
 
     beforeEach(async () => {
-      store = await setup();
+      ({ store, published } = await setup());
     });
 
     const candidate = (messageId: string = crypto.randomUUID()): StoredTask => ({
@@ -75,6 +83,81 @@ export function describeTaskStore(name: string, setup: () => Promise<TaskStore> 
       await store.saveSession(first.task.id, { sessionId: "session-1", sandboxId: "sandbox1" });
 
       expect(await store.claim(candidate(first.messageId))).toEqual({ ...first, session: { sessionId: "session-1", sandboxId: "sandbox1" } });
+    });
+
+    const event = (type: "started" | "ended", chatId: string): ChatEvent =>
+      ({
+        specversion: "1.0",
+        id: `${chatId}:chat.${type}`,
+        source: "/tendworks/test",
+        subject: `chats/${chatId}`,
+        type: `dev.tendworks.chat.${type}`,
+        time: "2026-10-18T10:00:00.000Z",
+        datacontenttype: "application/json",
+        traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
+        data: type === "started" ? { agent: "echo" } : { agent: "echo", status: "ended" },
+      }) as ChatEvent;
+
+    it("publishes the event of a claim with a new task, and none when the message has a task already", async () => {
+      const chat = { ...candidate(), kind: "chat" as const };
+      const before = (await published()).length;
+
+      await store.claim(chat, event("started", chat.task.id));
+      await store.claim({ ...candidate(chat.messageId), kind: "chat" }, event("started", "other"));
+
+      expect((await published()).slice(before)).toEqual([event("started", chat.task.id)]);
+    });
+
+    it("publishes the event of an update with it", async () => {
+      const chat = { ...candidate(), kind: "chat" as const };
+      await store.claim(chat);
+      const before = (await published()).length;
+
+      await store.update({ ...chat.task, status: { state: "TASK_STATE_COMPLETED" } }, event("ended", chat.task.id));
+
+      expect((await published()).slice(before)).toEqual([event("ended", chat.task.id)]);
+    });
+
+    it("lists the tasks of a kind, the most recently started first", async () => {
+      const at = (startedAt: string) => ({ ...candidate(), kind: "chat" as const, startedAt });
+      const older = at("2026-10-18T09:00:00.000Z");
+      const newer = at("2026-10-18T11:00:00.000Z");
+      await store.claim(older);
+      await store.claim(newer);
+      const other = candidate();
+      await store.claim(other);
+
+      const listed = (await store.list({ kind: "chat" })).map((task) => task.id);
+
+      expect(listed.indexOf(newer.task.id)).toBeGreaterThanOrEqual(0);
+      expect(listed.indexOf(newer.task.id)).toBeLessThan(listed.indexOf(older.task.id));
+      expect(listed).not.toContain(other.task.id);
+    });
+
+    it("lists the tasks that have not ended, of every kind, the most recently started first", async () => {
+      const at = (startedAt: string, kind?: "chat") => ({ ...candidate(), startedAt, ...(kind ? { kind } : {}) });
+      const step = at("2026-10-18T09:00:00.000Z");
+      const chat = at("2026-10-18T11:00:00.000Z", "chat");
+      const waiting = at("2026-10-18T10:00:00.000Z", "chat");
+      const finished = at("2026-10-18T12:00:00.000Z");
+      const ended = at("2026-10-18T12:00:00.000Z", "chat");
+      for (const task of [step, chat, waiting, finished, ended]) await store.claim(task);
+      await store.update({ ...waiting.task, status: { state: "TASK_STATE_INPUT_REQUIRED" } });
+      await store.update({ ...finished.task, status: { state: "TASK_STATE_COMPLETED" } });
+      await store.update({ ...ended.task, status: { state: "TASK_STATE_FAILED" } });
+
+      const active = (await store.active()).filter((stored) => [step, chat, waiting, finished, ended].some((task) => task.messageId === stored.messageId));
+
+      expect(active).toEqual([chat, { ...waiting, task: { ...waiting.task, status: { state: "TASK_STATE_INPUT_REQUIRED" } } }, step]);
+    });
+
+    it("finds a task as it is kept, with its kind and harness session", async () => {
+      const chat = { ...candidate(), kind: "chat" as const };
+      await store.claim(chat);
+      await store.saveSession(chat.task.id, { sessionId: "session-1" });
+
+      expect(await store.find(chat.task.id)).toEqual({ ...chat, session: { sessionId: "session-1" } });
+      expect(await store.find("unknown-task")).toBeUndefined();
     });
 
     it("refuses to keep a session for a task it does not know", async () => {

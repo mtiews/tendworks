@@ -4,14 +4,21 @@ info:
   version: 0.1.0
   description: >-
     Public API of the Tendworks control plane. The web UI, the tend CLI, the
-    meta-agent and any script use only this API. Operations that change state (start a
-    run, merge a pull request, decide an approval request) need the platform's API token
-    as a bearer token; reading does not. This is an interim scheme until identity (OIDC)
+    meta-agent and any script use only this API. Every operation but `GET /status` needs
+    a bearer token: operations that change state (start a run, merge a pull request,
+    decide an approval request, start, continue or end a chat) need the platform's API token; reading accepts the API
+    token or the read-only token. This is an interim scheme until identity (OIDC)
     arrives.
+# Reading accepts either token; operations that change state narrow this to `apiToken`.
+security:
+  - apiToken: []
+  - readToken: []
 paths:
   /status:
     get:
       operationId: getPlatformStatus
+      # The liveness check stays open, e.g. for the compose health check.
+      security: []
       summary: Platform health
       description: >-
         Health of the platform and of each component it depends on, and how many
@@ -81,6 +88,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Orchestration, which owns runs, cannot be reached.
           content:
@@ -97,6 +110,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Orchestration, which owns runs, cannot be reached.
           content:
@@ -120,6 +144,17 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No run with this id.
           content:
@@ -132,13 +167,513 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /runs/{runId}/tasks/{taskId}/transcript:
+    get:
+      operationId: getRunTaskTranscript
+      summary: Read the transcript of a step's agent session
+      description: >-
+        The transcript entries of the agent session behind task `taskId`, which a step of
+        run `runId` handed to an agent (the step's `taskId`), in order of their position.
+        Readable as soon as the step names its task, also while the agent still works.
+        Secrets the session was given are redacted.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The transcript so far.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptEntryList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id, no step of the run with this task, or the task has no transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, or the agent runtime, which owns transcripts, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /runs/{runId}/tasks/{taskId}/transcript/stream:
+    get:
+      operationId: streamRunTaskTranscript
+      summary: Follow the transcript of a step's agent session live
+      description: >-
+        The transcript of the agent session behind task `taskId` of run `runId` as
+        Server-Sent Events (ADR 0017), passed through from the agent runtime: first the
+        entries recorded so far, then each new entry as it is recorded, until the task
+        ends; then an `end` event, and the stream closes. Each entry event's id is the
+        entry's position; a client that reconnects with `Last-Event-ID` continues right
+        after that entry, without gaps or duplicates. Secrets the session was given are
+        redacted.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: >-
+            The live transcript. The schema describes each event of the stream, as a
+            client parses it (the role of OpenAPI 3.2's `itemSchema`).
+          content:
+            text/event-stream:
+              schema:
+                $ref: "../schemas/transcript-entry.schema.yaml#/$defs/streamEvent"
+        "400":
+          description: "`Last-Event-ID` is not the position of an entry."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id, no step of the run with this task, or no such task in the agent runtime.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, or the agent runtime, which owns transcripts, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats:
+    post:
+      operationId: startChat
+      security:
+        - apiToken: []
+      summary: Start a chat with an agent profile
+      description: >-
+        Starts a chat (ADR 0015): an agent session with the agent profile `agent`, without
+        a run, that the human leads turn by turn. Answers at once with the chat in
+        `working` while the agent works on the first message; follow its transcript to see
+        the answer. Only profiles with `spec.chat` allow chats.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/chat.schema.yaml#/$defs/startChatRequest"
+      responses:
+        "201":
+          description: The chat, working on its first turn.
+          headers:
+            Location:
+              description: Path of the new chat.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "400":
+          description: >-
+            The body is invalid, no such agent profile is configured, the profile does not
+            allow chats, or the repository is no clone URL reachable without credentials.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+    get:
+      operationId: listChats
+      summary: List chats, the most recently started first
+      description: All chats with their profile, status, start, last activity and cost; ended chats included.
+      responses:
+        "200":
+          description: Chats.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chatList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}:
+    get:
+      operationId: getChat
+      summary: Get a chat
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The chat.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/messages:
+    post:
+      operationId: sendChatMessage
+      security:
+        - apiToken: []
+      summary: Send the next message of a chat
+      description: >-
+        Hands the next message to the chat's agent, which starts its next turn in the same
+        agent session. Answers at once with the chat in `working`. Messages are
+        serialized: while a turn runs, a message is refused with 409; wait for the turn to
+        end (the transcript's `input-required` entry).
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/chat.schema.yaml#/$defs/chatMessageRequest"
+      responses:
+        "200":
+          description: The chat, working on the turn.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "400":
+          description: The body is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: A turn is still running, or the chat has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/cancel:
+    post:
+      operationId: cancelChatTurn
+      security:
+        - apiToken: []
+      summary: Cancel the current turn of a chat
+      description: >-
+        Stops the agent's work on the running turn without ending the chat. Answers once
+        the turn has stopped, with the chat waiting for the next message
+        (`input-required`); the transcript shows the turn as cancelled. Cancelling while
+        no turn runs changes nothing.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The chat, waiting for the next message.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The chat has ended.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/end:
+    post:
+      operationId: endChat
+      security:
+        - apiToken: []
+      summary: End a chat
+      description: >-
+        Ends the chat for good, also while a turn runs: its sandbox is destroyed and its
+        volumes are deleted; the transcript stays readable. Ending an ended chat changes
+        nothing.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The ended chat.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/chat.schema.yaml#/$defs/chat"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/transcript:
+    get:
+      operationId: getChatTranscript
+      summary: Read the transcript of a chat
+      description: >-
+        The transcript entries of the chat's agent session in order of their position,
+        also while a turn runs. Secrets the session was given are redacted.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+      responses:
+        "200":
+          description: The transcript so far.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TranscriptEntryList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /chats/{chatId}/transcript/stream:
+    get:
+      operationId: streamChatTranscript
+      summary: Follow the transcript of a chat live
+      description: >-
+        The chat's transcript as Server-Sent Events (ADR 0017), passed through from the
+        agent runtime: first the entries recorded so far, then each new entry as it is
+        recorded, across turns, until the chat ends; then an `end` event, and the stream
+        closes. An `input-required` entry marks the end of a turn. Each entry event's id is
+        the entry's position; a client that reconnects with `Last-Event-ID` continues right
+        after that entry. Secrets the session was given are redacted.
+      parameters:
+        - $ref: "#/components/parameters/ChatId"
+        - $ref: "#/components/parameters/LastEventId"
+      responses:
+        "200":
+          description: >-
+            The live transcript. The schema describes each event of the stream, as a
+            client parses it (the role of OpenAPI 3.2's `itemSchema`).
+          content:
+            text/event-stream:
+              schema:
+                $ref: "../schemas/transcript-entry.schema.yaml#/$defs/streamEvent"
+        "400":
+          description: "`Last-Event-ID` is not the position of an entry."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The agent runtime, which owns chats, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /agents:
     get:
       operationId: listAgents
-      summary: List the configured agent profiles, ordered by name
+      summary: List the configured agent profiles with their active agent sessions, ordered by name
       description: >-
         The agent profiles workflows can hand tasks to (`agent://<name>`), as the
-        configuration defines them.
+        configuration defines them, each with the agent sessions that work right now:
+        those of runs' steps and those of chats. Answers whether an agent is running.
+        When the agent runtime, which owns agent sessions, cannot be reached, the
+        profiles are listed without `sessions`: whether they work is unknown then.
       responses:
         "200":
           description: Agent profiles.
@@ -146,6 +681,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /triggers:
     get:
       operationId: listTriggers
@@ -157,6 +703,17 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: The trigger gateway, which owns the schedule, cannot be reached.
           content:
@@ -177,6 +734,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "503":
           description: Notifications cannot be read.
           content:
@@ -246,7 +814,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "403":
-          description: The approval request for this merge was rejected.
+          description: >-
+            The approval request for this merge was rejected, or the request carries the
+            read-only token, which cannot change state.
           content:
             application/json:
               schema:
@@ -289,6 +859,17 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApprovalRequestList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "400":
           description: The status filter is not an approval status.
           content:
@@ -347,6 +928,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "404":
           description: No approval request with this id.
           content:
@@ -372,8 +959,23 @@ components:
       scheme: bearer
       description: >-
         The platform's API token (`TEND_API_TOKEN`), shared by the operator's clients and
-        the worker's merge step. Interim until OIDC; never handed to sandboxes.
+        the worker's merge step; accepted by every operation. Interim until OIDC; never
+        handed to sandboxes.
+    readToken:
+      type: http
+      scheme: bearer
+      description: >-
+        The platform's read-only token (`TEND_API_READ_TOKEN`), for clients that only read,
+        e.g. the platform MCP server of chat agents. Accepted by reading operations;
+        operations that change state answer 403 to it. Interim until OIDC; never an agent
+        secret a profile can reference.
   parameters:
+    ChatId:
+      name: chatId
+      in: path
+      required: true
+      schema:
+        type: string
     Traceparent:
       name: traceparent
       in: header
@@ -382,7 +984,24 @@ components:
       schema:
         type: string
         pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
+    LastEventId:
+      name: Last-Event-ID
+      in: header
+      required: false
+      description: Position of the last entry the client received; the stream continues after it.
+      schema:
+        type: string
+        pattern: "^(0|[1-9][0-9]*)$"
   schemas:
+    TranscriptEntryList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "../schemas/transcript-entry.schema.yaml#/$defs/transcriptEntry"
     ApprovalRequestList:
       type: object
       required: [items]
@@ -496,7 +1115,7 @@ components:
             $ref: "#/components/schemas/Agent"
     Agent:
       type: object
-      description: An agent profile of the configuration.
+      description: An agent profile of the configuration with its active agent sessions.
       required: [name, harness]
       additionalProperties: false
       properties:
@@ -519,6 +1138,13 @@ components:
           items:
             type: string
           description: Names of the secrets the profile passes into its sandbox (never their values).
+        sessions:
+          type: array
+          description: >-
+            The profile's active agent sessions, the most recently started first; empty when
+            none works. Missing when the agent runtime cannot be reached, so it is unknown.
+          items:
+            $ref: "../schemas/agent-session.schema.yaml#/$defs/agentSession"
     StartRunRequest:
       type: object
       required: [workflow]

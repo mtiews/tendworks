@@ -26,6 +26,7 @@ field() {
     });' "$1"
 }
 
+# Every request sends the API token: reading needs a token too (ADR 0016).
 # Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.
 api_get() { curl -fsS "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" 2>/dev/null || true; }
 api_post() {
@@ -47,24 +48,23 @@ wait_run() {
   echo "$status"
 }
 
-# Prints the container path of the first transcript of run $1 (empty while there is none).
-# The run API names a step's transcript only once the step has finished, so while it runs
-# the transcript is found in the worker by the run id in its task message.
+# Prints the API path of the transcript of run $1's first agent step (empty while no step
+# names its task). A step names its task as soon as the agent runtime created it.
 transcript_path() {
-  local path
-  path=$(api_get "/runs/$1" | field 'r.steps?.find((s) => s.transcript)?.transcript' | sed 's|^file://||')
-  if [ -z "$path" ]; then
-    path=$(MSYS_NO_PATHCONV=1 compose exec -T worker sh -c \
-      "grep -l '\"messageId\":\"$1/' \"\$TEND_TRANSCRIPT_DIR\"/*.jsonl 2>/dev/null | head -1" 2>/dev/null || true)
-  fi
-  echo "$path" | tr -d '\r'
+  local task
+  task=$(api_get "/runs/$1" | field 'r.steps?.find((s) => s.taskId)?.taskId')
+  [ -z "$task" ] || echo "/runs/$1/tasks/$task/transcript"
 }
 
-# Prints transcript $1; MSYS_NO_PATHCONV keeps Git Bash from rewriting the container path.
-transcript() { [ -n "$1" ] && MSYS_NO_PATHCONV=1 compose exec -T worker cat "$1" 2>/dev/null || true; }
+# Prints transcript $1 (an API path from transcript_path) as JSON: { items: [entries] }.
+transcript() { [ -n "$1" ] && api_get "$1" || true; }
 
-# Counts transcript entries of type $2 in transcript $1.
-count_entries() { { transcript "$1" | grep -c "\"type\":\"$2\"" || true; } | head -1; }
+# Counts the entries of type $2 in transcript $1 (0 when it cannot be read).
+count_entries() {
+  local count
+  count=$(transcript "$1" | field "r.items.filter((e) => e.type === '$2').length")
+  echo "${count:-0}"
+}
 
 # Records a check: check "<description>" <condition command...>
 check() {
@@ -78,10 +78,28 @@ check() {
   fi
 }
 
-# Checks that no sandbox container or session volume was left behind.
+# Prints the task ids of run $1's agent steps, space-separated.
+run_tasks() { api_get "/runs/$1" | field 'r.steps?.filter((s) => s.taskId).map((s) => s.taskId).join(" ")'; }
+
+# The sandboxes and volumes of tasks $@ (run steps' task ids or chat ids): a task's volumes
+# are tendworks-volume-<task>-workspace and -session, its sandbox mounts them. Only these
+# count, so debris of other runs on the Docker daemon (e.g. integration tests) does not.
+task_sandboxes() {
+  local task
+  for task in "$@"; do
+    docker ps -aq --filter "volume=tendworks-volume-$task-workspace" --filter "volume=tendworks-volume-$task-session"
+  done | sort -u | wc -l
+}
+task_volumes() {
+  local task
+  for task in "$@"; do docker volume ls -q --filter "name=tendworks-volume-$task-"; done | sort -u | wc -l
+}
+
+# Checks that no sandbox or volume of tasks $@ is left: check_no_leftovers $(run_tasks "$RUN_ID")
 check_no_leftovers() {
-  check "no leftover sandbox" test "$(docker ps -aq --filter label=dev.tendworks.sandbox | wc -l)" -eq 0
-  check "no leftover session volume" test "$(docker volume ls -q --filter label=dev.tendworks.volume | wc -l)" -eq 0
+  check "the tasks to check for leftovers are known" test "$#" -gt 0
+  check "no leftover sandbox" test "$(task_sandboxes "$@")" -eq 0
+  check "no leftover session volume" test "$(task_volumes "$@")" -eq 0
 }
 
 # Shapes of GitHub and Anthropic credentials that must never show up in runs or transcripts.
@@ -162,5 +180,12 @@ if ! curl -fsS -o /dev/null "$URL/status" 2>/dev/null && [ "$(curl -s -o /dev/nu
   echo "The control plane at $URL does not answer." >&2
   echo "Check: docker compose -f deploy/compose.yaml ps   and   ... logs server --tail 20" >&2
   echo "After code or contract changes rebuild: docker compose -f deploy/compose.yaml up -d --build --wait" >&2
+  exit 1
+fi
+
+# Reading needs a token too (ADR 0016), so every request above carries TEND_API_TOKEN;
+# fail early when the control plane refuses it instead of polling empty answers.
+if [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/runs" -H "authorization: Bearer $TEND_API_TOKEN")" = 401 ]; then
+  echo "The control plane at $URL refused TEND_API_TOKEN; export the same value as in deploy/.env." >&2
   exit 1
 fi

@@ -11,10 +11,25 @@ export interface AgentTasks {
    * already known returns the existing task instead of starting a new one. Rejects
    * when the message cannot be delivered, e.g. the profile does not exist.
    */
-  sendMessage(agent: string, request: A2A.SendMessageRequest): Promise<A2A.Task>;
+  sendMessage(agent: string, request: A2A.SendMessageRequest, options?: SendMessageOptions): Promise<A2A.Task>;
   getTask(taskId: string): Promise<A2A.Task | undefined>;
 }
 
+export interface SendMessageOptions {
+  /**
+   * Called once the runtime keeps the task, before the agent starts working on it (also
+   * when an interrupted task is resumed): the working task with its id and transcript
+   * reference. A failure here does not stop the task.
+   */
+  onTask?: (task: A2A.Task) => void | Promise<void>;
+}
+
+/**
+ * `SendMessageRequest.metadata` keys a run's step names itself by (ADR 0002); the runtime
+ * keeps them in `Task.metadata`, so the task's agent session names its run and step.
+ */
+export const RUN_ID = "dev.tendworks/runId";
+export const STEP_REFERENCE = "dev.tendworks/stepReference";
 /** `Task.metadata` key: reference to the transcript of the agent session (string). */
 export const TRANSCRIPT = "dev.tendworks/transcript";
 /** `Task.metadata` key: what the agent session cost, `{ amount, currency }`. */

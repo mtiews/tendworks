@@ -3,6 +3,7 @@ import {
   AgentProfileError,
   claudeCodeCredentialFromEnv,
   createAgentRuntime,
+  createAgentRuntimeApi,
   createClaudeCodeHarness,
   createFileTranscriptStore,
   createPostgresTaskStore,
@@ -12,7 +13,7 @@ import {
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi } from "@tendworks/health";
-import { createSecretResolver } from "@tendworks/platform";
+import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platform";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -61,6 +62,18 @@ for (const profile of profiles) {
     if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
+// The platform MCP server (ADR 0016): its address as sandboxes reach it (configuration,
+// since it depends on how sandboxes reach the server's published port) and the read-only
+// token. Both go only to sessions of profiles that list it (mcp: [tendworks]); the API
+// token never enters a sandbox. Never log the token.
+const platformMcpUrl = process.env.TEND_PLATFORM_MCP_URL || undefined;
+const readToken = process.env.TEND_API_READ_TOKEN || undefined;
+const platformMcp = platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken } : undefined;
+for (const profile of profiles) {
+  if (listsPlatformMcpServer(profile) && !platformMcp) {
+    console.warn(`agent profile ${profile.metadata.name}: lists the platform MCP server, but TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN is not set; its tasks will fail until this is fixed`);
+  }
+}
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
   sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
@@ -68,6 +81,7 @@ const claudeCode = createClaudeCodeHarness({
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
   secrets,
+  ...(platformMcp ? { platformMcp } : {}),
   ...(process.env.ANTHROPIC_BASE_URL ? { baseUrl: process.env.ANTHROPIC_BASE_URL } : {}),
 });
 
@@ -77,16 +91,16 @@ await migrateOrchestrationStore(pool);
 await migrateAgentRuntimeStore(pool);
 await migrateEventBus(pool);
 
+// Run, step and chat events go onto the event bus in the transaction of the state they describe.
+const bus = createPostgresEventBus({ pool });
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
 // Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
 const agents = createAgentRuntime({
   profiles,
   harnesses: { "claude-code": claudeCode },
-  store: createPostgresTaskStore({ pool }),
+  store: createPostgresTaskStore({ pool, publisher: bus }),
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
-// Run and step events go onto the event bus in the transaction of the run state they describe.
-const bus = createPostgresEventBus({ pool });
 const store = createPostgresRunStore({ pool, publisher: bus });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 // Other domains' events that name a run (e.g. approval.decided) go to that run, whose
@@ -104,16 +118,26 @@ const http = createFetchHttpExecutor({ allowedOrigin: controlPlaneUrl, apiToken:
 const runtime = { name: "tendworks", metadata: { controlPlaneUrl: controlPlaneUrl.replace(/\/+$/, "") } };
 const runWorker = await createTemporalRunWorker({ address: engineAddress, activities: createRunActivities({ store, agents, http }) });
 
-// Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml)
-// and orchestration (contracts/openapi/orchestration.yaml).
+// Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml),
+// the agent runtime (contracts/openapi/agent-runtime.yaml) and orchestration (contracts/openapi/orchestration.yaml).
 const health = createHealthApi({
   probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
 });
 const orchestration = createOrchestrationApi({ store, engine, runtime });
-const fetch = (request: Request) => (new URL(request.url).pathname === "/health" ? health.fetch(request) : orchestration.fetch(request));
+const agentRuntime = createAgentRuntimeApi({ runtime: agents });
+const fetch = (request: Request) => {
+  const { pathname } = new URL(request.url);
+  if (pathname === "/health") return health.fetch(request);
+  if (pathname.startsWith("/tasks/") || pathname === "/chats" || pathname.startsWith("/chats/") || pathname === "/sessions") return agentRuntime.fetch(request);
+  return orchestration.fetch(request);
+};
 
 const port = Number(env("PORT", "8081"));
 const server = serve({ fetch, port }, () => console.log(`worker internal API listening on :${port}`));
+
+// Chats have no run whose engine would resend their message after a restart: the agent
+// runtime takes up their interrupted turns and idle times itself (ADR 0015).
+agents.resumeChats().catch((error: unknown) => console.error("cannot resume chats:", error));
 
 const stopped = runWorker.run().catch((error: unknown) => {
   console.error("run worker failed:", error);
@@ -123,6 +147,8 @@ const stopped = runWorker.run().catch((error: unknown) => {
 async function shutdown() {
   runWorker.shutdown();
   server.close();
+  // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.
+  if ("closeAllConnections" in server) server.closeAllConnections();
   await stopped;
   await bus.close();
   await Promise.all([engine.close(), pool.end()]);
