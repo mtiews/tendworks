@@ -4,9 +4,16 @@ export const UNREACHABLE = "Cannot reach the platform. Is it running?";
 export class AnswerError extends Error {
   constructor(
     readonly status: number,
-    title: string | undefined,
+    readonly title: string | undefined,
+    /** The problem's detail: why the platform refused, e.g. a request it found invalid. */
+    readonly detail?: string,
   ) {
     super(title ? `${title} (${status})` : `The platform answered ${status}.`);
+  }
+
+  /** The platform's reason in its own words, `Title: detail`, e.g. for a refused form. */
+  get reason(): string {
+    return this.title && this.detail ? `${this.title}: ${this.detail}` : this.message;
   }
 }
 
@@ -28,6 +35,6 @@ export async function answer<T>(call: Promise<Result<T>>): Promise<T> {
     throw new Error(UNREACHABLE);
   }
   if (result.data !== undefined) return result.data;
-  const problem = result.error as { title?: unknown } | undefined;
-  throw new AnswerError(result.response.status, typeof problem?.title === "string" ? problem.title : undefined);
+  const problem = result.error as { title?: unknown; detail?: unknown } | undefined;
+  throw new AnswerError(result.response.status, typeof problem?.title === "string" ? problem.title : undefined, typeof problem?.detail === "string" ? problem.detail : undefined);
 }

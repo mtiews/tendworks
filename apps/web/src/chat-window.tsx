@@ -1,0 +1,201 @@
+import type { ControlPlane } from "@tendworks/shared";
+import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useApi } from "./api.js";
+import { AnswerError, answer } from "./answers.js";
+import { Confirmation } from "./confirm.js";
+import { formatCost } from "./format.js";
+import { TranscriptOf } from "./live-transcript.js";
+import { Time } from "./time.js";
+import type { TranscriptEntry } from "./transcript.js";
+import { usePolling } from "./use-polling.js";
+import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
+
+type Chat = ControlPlane.components["schemas"]["chat"];
+
+const messageOf = (error: unknown) => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
+const isOpen = (chat: Chat) => chat.status === "working" || chat.status === "input-required";
+
+/**
+ * Where a chat's turn stands by its transcript, which arrives live while the polled chat
+ * lags: the last entry that starts a turn (`task-started`, `message-received`, a resume),
+ * ends one (`input-required`) or ends the chat (`task-ended`) decides.
+ */
+export type Turn = { state: "working" | "waiting" | "ended"; position: number };
+
+export function turnOf(entries: readonly TranscriptEntry[]): Turn {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const { type, position } = entries[index]!;
+    if (type === "input-required") return { state: "waiting", position };
+    if (type === "task-ended") return { state: "ended", position };
+    if (type === "task-started" || type === "task-resumed" || type === "message-received") return { state: "working", position };
+  }
+  return { state: "working", position: -1 };
+}
+
+/**
+ * One chat (ADR 0015, `tend chat attach`): its profile, status and total cost, its history and
+ * then the agent's output live, the input while the agent waits for the next message, and
+ * ending it after a confirmation. Several windows on one chat behave like several `tend`
+ * clients: all state is on the platform. Read-only access shows the chat without actions.
+ */
+export function ChatWindow({ chatId }: { chatId: string }) {
+  const { client } = useApi();
+  const { data: chat, error, refresh } = usePolling(useCallback(() => answer(client.GET("/chats/{chatId}", { params: { path: { chatId } } })), [client, chatId]));
+
+  if (!chat) {
+    return (
+      <>
+        <h1>Chat {chatId}</h1>
+        {error instanceof AnswerError && error.status === 404 ? (
+          <p className="muted">There is no chat {chatId}.</p>
+        ) : error !== undefined ? (
+          <p className="message message-error" role="alert">
+            {messageOf(error)}
+          </p>
+        ) : (
+          <p className="muted">Loading…</p>
+        )}
+      </>
+    );
+  }
+
+  const fields: [string, ReactNode][] = [
+    ["Agent", chat.agent],
+    ["Status", <span className={`status status-${chat.status}`}>{chat.status}</span>],
+    ...(chat.repository ? [["Repository", <code>{chat.repository}</code>] as [string, ReactNode]] : []),
+    ["Started", <Time value={chat.startedAt} />],
+    ["Last activity", <Time value={chat.lastActivityAt} />],
+    ...(chat.endedAt ? [["Ended", <Time value={chat.endedAt} />] as [string, ReactNode]] : []),
+    ["Cost", chat.cost ? formatCost(chat.cost) : ""],
+  ];
+
+  return (
+    <>
+      <h1>Chat {chat.id}</h1>
+      {error !== undefined && <p className="message message-error">{messageOf(error)}</p>}
+      <dl className="fields">
+        {fields.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <Conversation chat={chat} changed={refresh} />
+    </>
+  );
+}
+
+/** The chat's transcript, live while the chat is open, and what the operator can do in it. */
+function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
+  const { client, scope } = useApi();
+  const chatId = chat.id;
+  const read = useCallback(async () => (await answer(client.GET("/chats/{chatId}/transcript", { params: { path: { chatId } } }))).items, [client, chatId]);
+  const open = useCallback<OpenTranscriptStream>((header) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream" }), [client, chatId]);
+  const view = useTranscript({ read, open, live: isOpen(chat), onEnded: changed });
+  const turn = turnOf(view.phase === "shown" ? view.entries : []);
+
+  // A turn that starts or ends changes the chat's status and cost: read it again at once.
+  useEffect(() => {
+    if (turn.position >= 0) changed();
+  }, [turn.state, turn.position, changed]);
+
+  return (
+    <section className="chat panel" aria-label="Conversation">
+      <TranscriptOf view={view} missing="No transcript was found for this chat." />
+      {!isOpen(chat) ? (
+        <p className="muted">This chat has ended.</p>
+      ) : scope === "read" ? (
+        <p className="muted">Read-only access: you can follow this chat but not write to it.</p>
+      ) : (
+        <ChatActions chatId={chatId} turn={turn} following={view.phase === "shown"} changed={changed} />
+      )}
+    </section>
+  );
+}
+
+/** The next message while the agent waits, and ending the chat. */
+function ChatActions({ chatId, turn, following, changed }: { chatId: string; turn: Turn; following: boolean; changed: () => void }) {
+  const { client } = useApi();
+  const inputId = useId();
+  const [text, setText] = useState("");
+  // The turn position when the last message went out: until the transcript moves past it,
+  // the agent is taken to work on it, so the input does not reopen in between.
+  const [sentAfter, setSentAfter] = useState<number>();
+  const [sending, setSending] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [failure, setFailure] = useState<string>();
+
+  const waiting = following && turn.state === "waiting" && (sentAfter === undefined || turn.position > sentAfter) && !sending;
+
+  const send = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!waiting || text.trim() === "") return;
+    setSending(true);
+    setFailure(undefined);
+    setSentAfter(turn.position);
+    try {
+      await answer(client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text } }));
+      setText("");
+    } catch (error: unknown) {
+      setSentAfter(undefined);
+      setFailure(messageOf(error));
+    } finally {
+      setSending(false);
+      changed();
+    }
+  };
+
+  const end = async () => {
+    setEnding(true);
+    setFailure(undefined);
+    try {
+      await answer(client.POST("/chats/{chatId}/end", { params: { path: { chatId } } }));
+    } catch (error: unknown) {
+      setFailure(messageOf(error));
+    } finally {
+      setEnding(false);
+      setConfirming(false);
+      changed();
+    }
+  };
+
+  return (
+    <div className="chat-actions">
+      {failure !== undefined && (
+        <p className="message message-error" role="alert">
+          {failure}
+        </p>
+      )}
+      <form className="chat-input" onSubmit={(event) => void send(event)}>
+        <label htmlFor={inputId}>Message</label>
+        <textarea
+          id={inputId}
+          rows={3}
+          value={text}
+          disabled={!waiting}
+          onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            // Ctrl+Enter (Cmd+Enter) sends, as in most chat clients; Enter alone is a new line.
+            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void send(event);
+          }}
+        />
+        <div className="chat-buttons">
+          <button type="submit" className="primary" disabled={!waiting || text.trim() === ""}>
+            Send
+          </button>
+          {!waiting && <span className="muted">{following ? "The agent is working…" : "Reading the chat…"}</span>}
+          <button type="button" className="chat-end" disabled={confirming} onClick={() => setConfirming(true)}>
+            End chat
+          </button>
+        </div>
+      </form>
+      {confirming && (
+        <Confirmation title="End this chat?" confirmLabel="End chat" busy={ending} onConfirm={() => void end()} onCancel={() => setConfirming(false)}>
+          <p>The agent stops and its sandbox and volumes are removed; the transcript stays.</p>
+        </Confirmation>
+      )}
+    </div>
+  );
+}

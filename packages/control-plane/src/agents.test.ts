@@ -92,3 +92,35 @@ describe("agents API: active agent sessions", () => {
     expect(await setup("none")()).toEqual(withoutSessions);
   });
 });
+
+describe("agents API: chat settings and MCP servers", () => {
+  it("shows a profile's chat settings with their defaults and its MCP servers, and leaves them out where the profile has none", async () => {
+    const api = createControlPlaneApi({
+      probes: [],
+      configuration: {
+        workflowNames: [],
+        workflow: () => undefined,
+        agentProfiles: [
+          { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "assistant" }, spec: { harness: "fake", chat: { idleMinutes: 10 }, mcp: ["tendworks"] } },
+          { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "chatty" }, spec: { harness: "fake", chat: {} } },
+          profile("developer"),
+        ],
+        triggerBindings: [],
+        policies: [],
+        pullRequestIntegrations: [],
+      },
+      runs: createInMemoryRuns(),
+      apiToken: "test-token",
+    });
+
+    const response = await api.fetch(new Request("http://tend.test/agents", { headers: { authorization: "Bearer test-token" } }));
+
+    expect(await response.json()).toEqual({
+      items: [
+        { name: "assistant", harness: "fake", chat: { idleMinutes: 10 }, mcp: ["tendworks"] },
+        { name: "chatty", harness: "fake", chat: { idleMinutes: 5 } },
+        { name: "developer", harness: "fake" },
+      ],
+    });
+  });
+});

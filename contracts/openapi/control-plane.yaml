@@ -1166,6 +1166,19 @@ components:
           items:
             type: string
           description: Names of the secrets the profile passes into its sandbox (never their values).
+        chat:
+          description: >-
+            The profile's chat settings (ADR 0015), defaults filled in; missing when the
+            profile allows no chats, so `POST /chats` refuses it.
+          $ref: "../schemas/agent-profile.schema.yaml#/$defs/chatSettings"
+        mcp:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: >-
+            MCP servers the platform configures for its sessions, as the profile lists them
+            (e.g. `tendworks`, the platform MCP server); missing when it lists none.
         sessions:
           type: array
           description: >-

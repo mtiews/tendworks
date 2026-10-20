@@ -405,6 +405,8 @@ describe("control plane: agents", () => {
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
     expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+    expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("chat");
+    expect(data?.items.find((agent) => agent.name === "assistant")).toMatchObject({ chat: { idleMinutes: 5 }, mcp: ["tendworks"] });
   });
 
   it("shows the active agent sessions of a run's step and of a chat under their profiles, and leaves out finished ones", async () => {

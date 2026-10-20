@@ -153,7 +153,7 @@ describe("transcript", () => {
       "Checked out https://example.test/acme/playground.git agent/7 (exit code 0)",
       "Result: pull-request",
       "Results ignored: not a list",
-      "Waiting for the next message · 0.2 USD so far",
+      "Waiting for the next message · turn 0.2 USD · 0.2 USD so far",
       "Task failed: the harness ended unexpectedly · 0.3 USD",
     ]);
     expect(within(transcript).getByRole("link", { name: "pull-request" }).getAttribute("href")).toBe("https://example.test/acme/playground/pull/8");

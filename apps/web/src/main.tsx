@@ -5,6 +5,7 @@ import "./styles.css";
 import "./runs.css";
 import "./approvals.css";
 import "./transcript.css";
+import "./chats.css";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("the entry page has no #root");

@@ -18,13 +18,26 @@ type Item =
   | { kind: "thought"; key: string; time: string; text: string }
   | { kind: "tool"; key: string; call: Of<"tool-call">; result?: Of<"tool-result"> }
   | { kind: "turn"; key: string; entry: Of<"turn-ended">; cost?: Cost }
-  | { kind: "entry"; key: string; entry: Exclude<TranscriptEntry, Of<"message-chunk" | "thought-chunk" | "tool-call" | "turn-ended" | "usage">> };
+  /** The agent waits for the next message: what the turn that just ended cost, and the total so far. */
+  | { kind: "waiting"; key: string; entry: Of<"input-required">; turn?: Cost }
+  | { kind: "entry"; key: string; entry: Exclude<TranscriptEntry, Of<"message-chunk" | "thought-chunk" | "tool-call" | "turn-ended" | "usage" | "input-required">> };
 
-/** Joins consecutive message and thought chunks, pairs tool calls with their results and gives each turn end the cost so far. */
+/** The cost between two running totals (the turn's), when both are in one currency. */
+function difference(total: Cost, before: Cost | undefined): Cost | undefined {
+  if (!before) return total;
+  return before.currency === total.currency ? { amount: total.amount - before.amount, currency: total.currency } : undefined;
+}
+
+/**
+ * Joins consecutive message and thought chunks, pairs tool calls with their results, gives
+ * each turn end the cost so far and each wait for the next message its turn's cost.
+ */
 function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, Extract<Item, { kind: "tool" }>>();
   let cost: Cost | undefined;
+  // The running total when the agent last waited for a message, where the next turn starts.
+  let waitedAt: Cost | undefined;
   for (const entry of entries) {
     const key = String(entry.position);
     const last = items.at(-1);
@@ -40,6 +53,10 @@ function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
       cost = entry.cost;
     } else if (entry.type === "turn-ended") {
       items.push({ kind: "turn", key, entry, ...(cost ? { cost } : {}) });
+    } else if (entry.type === "input-required") {
+      const turn = entry.cost && difference(entry.cost, waitedAt);
+      if (entry.cost) cost = waitedAt = entry.cost;
+      items.push({ kind: "waiting", key, entry, ...(turn ? { turn } : {}) });
     } else {
       const call = entry.type === "tool-result" ? tools.get(entry.toolCallId) : undefined;
       if (call && entry.type === "tool-result") {
@@ -48,7 +65,7 @@ function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
         tools.set(entry.toolCallId, item);
         continue;
       }
-      if ((entry.type === "input-required" || entry.type === "task-ended") && entry.cost) cost = entry.cost;
+      if (entry.type === "task-ended" && entry.cost) cost = entry.cost;
       items.push({ kind: "entry", key, entry });
     }
   }
@@ -142,6 +159,13 @@ export function Transcript({ entries }: TranscriptProps) {
                 <li key={item.key} className="entry entry-marker" title={item.entry.time}>
                   {TURN_ENDS[item.entry.reason]}
                   {withCost(item.cost)}
+                </li>
+              );
+            case "waiting":
+              return (
+                <li key={item.key} className="entry entry-marker entry-waiting" title={item.entry.time}>
+                  Waiting for the next message{item.turn && ` · turn ${formatCost(item.turn)}`}
+                  {withCost(item.entry.cost, " so far")}
                 </li>
               );
             case "entry":
@@ -241,8 +265,6 @@ function Entry({ entry, showHarness, open, toggle }: { entry: Extract<Item, { ki
       );
     case "artifacts-ignored":
       return marker(`Results ignored: ${entry.problem}`);
-    case "input-required":
-      return marker(`Waiting for the next message${withCost(entry.cost, " so far")}`);
     case "task-ended":
       return marker(`Task ${STATES[entry.state]}${entry.state === "TASK_STATE_COMPLETED" ? "" : `: ${entry.message}`}${withCost(entry.cost)}`, `entry entry-marker${entry.state === "TASK_STATE_FAILED" ? " entry-error" : ""}`);
     case "harness-output":

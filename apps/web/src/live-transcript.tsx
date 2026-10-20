@@ -1,5 +1,5 @@
 import { Transcript } from "./transcript.js";
-import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
+import { useTranscript, type OpenTranscriptStream, type TranscriptView } from "./use-transcript.js";
 import type { TranscriptEntry } from "./transcript.js";
 
 /**
@@ -22,7 +22,11 @@ export function LiveTranscript({
   /** Called when the stream says the task ended. */
   onEnded?: () => void;
 }) {
-  const view = useTranscript({ read, open, live, onEnded });
+  return <TranscriptOf view={useTranscript({ read, open, live, onEnded })} missing={missing} />;
+}
+
+/** A transcript as `useTranscript` gives it: loading, missing, empty, the entries, following live, lost. */
+export function TranscriptOf({ view, missing = "No transcript was found." }: { view: TranscriptView; missing?: string | undefined }) {
   switch (view.phase) {
     case "loading":
       return <p className="muted">Loading the transcript…</p>;
