@@ -121,6 +121,67 @@ describe("live step", () => {
     expect(within(step()).getByText(/Write before\.txt/)).toBeTruthy();
   });
 
+  it("tries again later after losing the live transcript and resumes after the last entry, without gaps or duplicates", async () => {
+    const { runs, agentRuntime, finish } = platformWith(entry.started, entry.tool);
+    signedIn();
+    const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
+    const streams = () => platform.requests.filter((request) => request.url.endsWith("/transcript/stream"));
+    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByRole("button", { name: /Write before\.txt/ });
+    await vi.waitFor(() => expect(streams()).toHaveLength(1));
+
+    platform.unreachable(true);
+    agentRuntime.drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await within(step()).findByText(/The live transcript was lost/)).toBeTruthy();
+    const attempts = streams().length;
+
+    platform.unreachable(false);
+    agentRuntime.append("task-live", entry.hel);
+    agentRuntime.append("task-live", entry.lo);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(await within(step()).findByText("Hello there")).toBeTruthy();
+    const resumed = streams().slice(attempts).find((request) => request.headers.get("last-event-id") !== null);
+    expect(resumed?.headers.get("last-event-id")).toBe("1");
+    expect(within(step()).queryByText(/The live transcript was lost/)).toBeNull();
+    expect(within(step()).getByRole("status").textContent).toBe("Live");
+
+    agentRuntime.append("task-live", entry.ended);
+    finish();
+    await vi.waitFor(() => expect(within(step()).queryByRole("status")).toBeNull());
+    expect(within(step()).getAllByRole("button", { name: /Write before\.txt/ })).toHaveLength(1);
+    expect(within(step()).getAllByText("Hello there")).toHaveLength(1);
+  });
+
+  it("tries again at once when the tab becomes visible after losing the live transcript", async () => {
+    const { runs, agentRuntime } = platformWith(entry.started, entry.tool);
+    signedIn();
+    const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
+    const streams = () => platform.requests.filter((request) => request.url.endsWith("/transcript/stream"));
+    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByRole("button", { name: /Write before\.txt/ });
+    await vi.waitFor(() => expect(streams()).toHaveLength(1));
+
+    platform.unreachable(true);
+    agentRuntime.drop();
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await within(step()).findByText(/The live transcript was lost/)).toBeTruthy();
+    const attempts = streams().length;
+
+    platform.unreachable(false);
+    agentRuntime.append("task-live", entry.hel);
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    try {
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.waitFor(() => expect(streams().length).toBeGreaterThan(attempts));
+    } finally {
+      visibility.mockRestore();
+    }
+
+    expect(streams()[attempts]!.headers.get("last-event-id")).toBe("1");
+    expect(await within(step()).findByText("Hel")).toBeTruthy();
+    expect(within(step()).queryByText(/The live transcript was lost/)).toBeNull();
+  });
+
   it("shows a finished step's transcript without following it", async () => {
     const { runs, agentRuntime, finish } = platformWith(entry.started, entry.hel, entry.lo);
     finish();
