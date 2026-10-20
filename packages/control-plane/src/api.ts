@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
@@ -332,9 +332,6 @@ export function createControlPlaneApi({
     });
   });
 
-  // The default of `spec.chat.idleMinutes` in the agent profile schema, so clients see what applies.
-  const DEFAULT_CHAT_IDLE_MINUTES = 5;
-
   app.get("/agents", async (c) => {
     // Who works right now lives in the agent runtime; the profiles come from the configuration,
     // so they are listed also when the agent runtime cannot be reached, without sessions then.
@@ -348,6 +345,7 @@ export function createControlPlaneApi({
           ...(spec.sandbox === undefined ? {} : { sandbox: spec.sandbox }),
           ...(spec.skills?.length ? { skills: [...spec.skills] } : {}),
           ...(secrets.length > 0 ? { secrets } : {}),
+          // With the schema's default, so clients see what applies.
           ...(spec.chat === undefined ? {} : { chat: { idleMinutes: spec.chat.idleMinutes ?? DEFAULT_CHAT_IDLE_MINUTES } }),
           ...(spec.mcp?.length ? { mcp: [...spec.mcp] } : {}),
           ...(sessions ? { sessions: sessions.filter((session) => session.agent === metadata.name) } : {}),
