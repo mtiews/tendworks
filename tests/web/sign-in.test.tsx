@@ -162,6 +162,19 @@ describe("the app shell", () => {
     expect(document.title).toBe("Notifications · Tendworks");
   });
 
+  it("asks what the token may do once per sign-in, not on each navigation", async () => {
+    const { user, platform } = renderApp();
+    await signIn(user, API_TOKEN);
+    await screen.findByText("Full access");
+
+    for (const view of ["Runs", "Notifications", "Chats", "Status"]) {
+      await user.click(screen.getByRole("link", { name: view }));
+      expect(await screen.findByRole("heading", { name: view })).toBeTruthy();
+    }
+
+    expect(platform.requests.filter((request) => new URL(request.url).pathname === "/access")).toHaveLength(1);
+  });
+
   it("says when there is no page at an address", async () => {
     const { user } = renderApp({ path: "/ui/no-such-page" });
     await signIn(user, API_TOKEN);

@@ -5,19 +5,13 @@ import { Link, useLocation } from "./router.js";
 
 /** The signed-in app: navigation, the access scope, sign-out, and the current view. */
 export function Shell({ signOut }: { signOut: () => void }) {
-  const { client, scope } = useApi();
+  const { scope } = useApi();
   const { path } = useLocation();
   const found = resolve(path);
 
   useEffect(() => {
     document.title = `${found?.route.title ?? "Not found"} · Tendworks`;
   }, [found?.route.title]);
-
-  // Each navigation asks again what the token may do, so a token that is no longer accepted
-  // sends the operator back to sign-in (the client's 401 handler) even on a view that reads nothing.
-  useEffect(() => {
-    void client.GET("/access").catch(() => undefined);
-  }, [client, path]);
 
   return (
     <div className="shell">
