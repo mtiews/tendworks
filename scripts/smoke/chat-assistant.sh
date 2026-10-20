@@ -207,6 +207,8 @@ sleep 5
 STATE3=$(live_state)
 ASKER_EXIT=0
 printf '%s\n' "$Q3" | tend chat attach "$CHAT" >"$TMP/asker.log" 2>&1 || ASKER_EXIT=$?
+# The asker leaves once the answer is in; the chat waiting again confirms the turn ended.
+expect_waiting "$(wait_chat 300)"
 A3=$(chat_field 'r.message')
 sleep 3
 touch "$TMP/leave"
