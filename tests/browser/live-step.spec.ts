@@ -30,7 +30,7 @@ test("a running scripted agent step streams live in the run detail before it fin
   await page.goto(`/ui/runs/${run.id}`);
   await signIn(page, API_TOKEN);
 
-  const step = page.getByRole("region", { name: "/do/0/implement" });
+  const step = page.getByRole("region", { name: "/do/0/write-files" });
   await expect(step).toBeVisible({ timeout: 60_000 });
   await expect(step.getByRole("status")).toHaveText("Live");
   await expect(step.getByRole("button", { name: /Write before\.txt/ })).toBeVisible({ timeout: 120_000 });
