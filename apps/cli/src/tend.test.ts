@@ -49,6 +49,12 @@ describe("tend status", () => {
     expect(wrong.stdout).toMatch(/^ACCESS\s+none$/m);
   });
 
+  it("shows the number of active runs", async () => {
+    const { stdout } = await tend(["status"], [probe("store", "healthy")]);
+
+    expect(stdout).toMatch(/^ACTIVE RUNS\s+0$/m);
+  });
+
   it("leaves the access out of the status document, which is the platform's", async () => {
     const { stdout } = await tend(["--token", "test-token", "status", "-o", "json"], [probe("store", "healthy")]);
 

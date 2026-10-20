@@ -8,8 +8,6 @@ import { usePolling } from "./use-polling.js";
 
 type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
 
-const ACTIVE_RUN = new Set(["pending", "running"]);
-
 /** The platform at a glance (spec #38): health, what is running, what waits for the operator. */
 export function StatusPage() {
   const { client } = useApi();
@@ -23,15 +21,10 @@ export function StatusPage() {
       return report;
     }, [client]),
   );
-  const activeRuns = usePolling(
-    useCallback(async () => {
-      const { data, response } = await client.GET("/runs");
-      if (!data) throw new Error(`HTTP ${response.status}`);
-      return data.items.filter((run) => ACTIVE_RUN.has(run.status)).length;
-    }, [client]),
-  );
 
+  // Both numbers come from the status report, as `tend status` shows them.
   const report = status.data;
+  const active = report?.activeRuns;
   const pending = report?.pendingApprovals;
 
   return (
@@ -40,10 +33,12 @@ export function StatusPage() {
       <Section title="Overview">
         <ul className="overview">
           <li>
-            {activeRuns.data === undefined ? (
-              activeRuns.error === undefined ? "Active runs …" : "Active runs unknown: runs cannot be read."
+            {report === undefined ? (
+              "Active runs …"
+            ) : active === undefined ? (
+              "Active runs unknown: runs cannot be read."
             ) : (
-              <Link to="/runs">{count(activeRuns.data, "active run")}</Link>
+              <Link to="/runs">{count(active, "active run")}</Link>
             )}
           </li>
           <li>

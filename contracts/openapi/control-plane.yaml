@@ -1253,6 +1253,11 @@ components:
           description: >-
             Number of approval requests waiting for a decision; absent when approval
             requests cannot be read.
+        activeRuns:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of runs that are pending or running; absent when runs cannot be read.
     ComponentStatus:
       type: object
       required: [name, status]

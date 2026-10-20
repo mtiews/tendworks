@@ -52,6 +52,9 @@ export interface ControlPlaneApiOptions {
 
 const MINIMUM_TOKEN_LENGTH = 16;
 
+/** Runs the platform still works on, counted in the status overview. */
+const ACTIVE_RUN: ReadonlySet<Schemas["run"]["status"]> = new Set(["pending", "running"]);
+
 /**
  * Why the server must not start with these tokens (empty when it may): each must be long
  * enough to resist guessing, and the read-only token must not be the API token. Agent
@@ -135,15 +138,19 @@ export function createControlPlaneApi({
   };
 
   app.get("/status", async (c) => {
-    const [checked, pendingApprovals] = await Promise.all([
+    const [checked, pendingApprovals, activeRuns] = await Promise.all([
       checkPlatform(probes, bundles, probeTimeoutMs),
-      // Part of the overview, not of health: unreadable approvals leave the number out.
+      // Part of the overview, not of health: unreadable approvals or runs leave the number out.
       approvals?.list({ status: "pending" }).then(
         (pending) => pending.length,
         () => undefined,
       ),
+      runs.list().then(
+        (all) => all.filter((run) => ACTIVE_RUN.has(run.status)).length,
+        () => undefined,
+      ),
     ]);
-    const report = { ...checked, ...(pendingApprovals === undefined ? {} : { pendingApprovals }) };
+    const report = { ...checked, ...(pendingApprovals === undefined ? {} : { pendingApprovals }), ...(activeRuns === undefined ? {} : { activeRuns }) };
     if (report.status === "healthy") {
       return c.json(report satisfies StatusResponse[200]["content"]["application/json"], 200);
     }

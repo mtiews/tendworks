@@ -366,8 +366,9 @@ function render<T>(document: T, format: OutputFormat, table: (document: T) => st
 /** `access`: what the presented token may do (`full`, `read`), or `none` without a valid one. */
 function formatTable(report: PlatformStatus, access: string): string {
   const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...report.components.map((c) => [c.name, c.status, c.message ?? ""])];
+  const active = report.activeRuns === undefined ? "" : `ACTIVE RUNS  ${report.activeRuns}\n`;
   const pending = report.pendingApprovals === undefined ? "" : `PENDING APPROVALS  ${report.pendingApprovals}\n`;
-  return `PLATFORM  ${report.status}\n${pending}ACCESS  ${access}\n\n${table(rows)}`;
+  return `PLATFORM  ${report.status}\n${active}${pending}ACCESS  ${access}\n\n${table(rows)}`;
 }
 
 function formatRunList(list: RunList): string {
