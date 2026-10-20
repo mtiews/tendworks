@@ -307,6 +307,19 @@ describe("tend chat attach", () => {
     expect(out()).toContain(`left chat ${id}; it stays open`);
   });
 
+  it("waits for the answer to a piped line before leaving at the end of input", async () => {
+    const { agentRuntime, tend } = platform(["Two runs are active."]);
+    const id = await existingChat(agentRuntime, "Hi, I am the assistant.");
+
+    const { exitCode, input, out } = tend(["chat", "attach", id]);
+    input.type("What is running?");
+    input.close();
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toMatch(/agent\s+Two runs are active\.[\s\S]*left chat \S+; it stays open/);
+    expect(agentRuntime.chats.get(id)?.status).toBe("input-required");
+  });
+
   it("shows two attached clients the same output; a message from either continues the chat", async () => {
     const { agentRuntime, tend } = platform(["Answer to the first.", "Answer to the second."]);
     const id = await existingChat(agentRuntime, "Hi.");
