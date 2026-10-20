@@ -2,6 +2,7 @@ import { createInMemoryAgentRuntime, createInMemoryRuns, type Run, type Transcri
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderApp, signedIn } from "./support/platform.js";
+import { rows as tableRows } from "./support/table.js";
 
 const time = "2026-10-19T10:00:00.000Z";
 
@@ -33,12 +34,7 @@ function runsOf(...items: Run[]) {
 }
 
 /** The rows of the table `name` as text per cell, header first. */
-function rows(name: string): string[][] {
-  const table = screen.getByRole("table", { name });
-  return within(table)
-    .getAllByRole("row")
-    .map((row) => [...row.querySelectorAll("th, td")].map((cell) => cell.textContent ?? ""));
-}
+const rows = (name: string) => tableRows(screen.getByRole("table", { name }));
 
 afterEach(() => {
   vi.useRealTimers();
@@ -165,7 +161,8 @@ function agentRuntimeWith(transcripts: Record<string, TranscriptEntry[]>) {
 function field(label: string): string {
   const term = screen.getAllByRole("term").find((candidate) => candidate.textContent === label);
   if (!term) throw new Error(`no field ${label}`);
-  return term.nextElementSibling?.textContent ?? "";
+  const value = term.nextElementSibling;
+  return value?.querySelector("time")?.getAttribute("datetime") ?? value?.textContent ?? "";
 }
 
 describe("run detail", () => {

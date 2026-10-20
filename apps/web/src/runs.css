@@ -1,33 +1,6 @@
 /* Runs: the run list and the run detail. */
 
-.table-scroll {
-  overflow-x: auto;
-  margin-bottom: var(--space-6);
-}
-
-.table-scroll table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
-  font-size: var(--text-sm);
-}
-
-.table-scroll th,
-.table-scroll td {
-  text-align: left;
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  white-space: nowrap;
-}
-
-.table-scroll th {
-  font-weight: 600;
-  color: var(--color-muted);
-}
-
-.table-scroll .value {
+code.value {
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -58,9 +31,9 @@
   margin: 0 0 var(--space-4);
 }
 
-h2 {
-  font-size: var(--text-md);
-  margin: var(--space-6) 0 var(--space-3);
+table + h2,
+.fields + h2 {
+  margin-top: var(--space-6);
 }
 
 .fields {

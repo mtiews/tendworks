@@ -1,7 +1,9 @@
 import type { ReactNode } from "react";
+import { NotificationsPage } from "./notifications.js";
 import { match } from "./router.js";
 import { RunDetail } from "./run-detail.js";
 import { RunList } from "./runs.js";
+import { StatusPage } from "./status.js";
 
 /*
  * The views of the UI (spec #38) and their paths below /ui. A view ticket replaces its
@@ -26,11 +28,11 @@ const placeholder = (title: string) => () => (
 );
 
 export const routes: readonly Route[] = [
-  { pattern: "/", title: "Status", section: "/", nav: true, render: placeholder("Status") },
+  { pattern: "/", title: "Status", section: "/", nav: true, render: () => <StatusPage /> },
   { pattern: "/runs", title: "Runs", section: "/runs", nav: true, render: () => <RunList /> },
   { pattern: "/runs/:runId", title: "Run", section: "/runs", render: ({ runId = "" }) => <RunDetail key={runId} runId={runId} /> },
   { pattern: "/approval-requests", title: "Approval requests", section: "/approval-requests", nav: true, render: placeholder("Approval requests") },
-  { pattern: "/notifications", title: "Notifications", section: "/notifications", nav: true, render: placeholder("Notifications") },
+  { pattern: "/notifications", title: "Notifications", section: "/notifications", nav: true, render: () => <NotificationsPage /> },
   { pattern: "/chats", title: "Chats", section: "/chats", nav: true, render: placeholder("Chats") },
 ];
 

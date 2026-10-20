@@ -1,62 +1,61 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-/** How often lists refresh themselves (spec #38). */
-export const POLL_MS = 5_000;
+/** How often lists refresh themselves (spec #38): about every 5 seconds. */
+export const POLL_INTERVAL_MS = 5_000;
 
 export interface Polled<T> {
-  /** The last answer; it stays while a later fetch fails. */
+  /** The latest answer; kept while a later poll fails, so a hiccup does not blank the view. */
   data: T | undefined;
-  /** Why the last fetch failed; `undefined` once a fetch succeeds again. */
-  error: Error | undefined;
-  /** True until the first fetch settled. */
+  /** Why the latest poll failed; `undefined` once a poll succeeds again. */
+  error: unknown;
+  /** `true` until the first poll answered or failed. */
   loading: boolean;
 }
 
 /**
- * Fetches with `load` now and about every 5 seconds, paused while the tab is hidden and
- * fetching again as soon as it becomes visible, so a forgotten tab does not keep loading.
- * `load` may change between renders; the next fetch uses the latest. A change of `key`
- * (e.g. the id of what is shown) starts over.
+ * Calls `load` now and again `intervalMs` after each answer, while the tab is visible: a
+ * hidden tab stops polling, and becoming visible again polls at once. A new `load` (e.g.
+ * other parameters) starts over, so keep it stable with `useCallback`.
  */
-export function usePolling<T>(load: () => Promise<T>, key: string = ""): Polled<T> {
-  const [state, setState] = useState<Polled<T> & { key: string }>({ data: undefined, error: undefined, loading: true, key });
-  const latest = useRef(load);
-  useEffect(() => {
-    latest.current = load;
-  });
+export function usePolling<T>(load: () => Promise<T>, intervalMs: number = POLL_INTERVAL_MS): Polled<T> {
+  const [state, setState] = useState<Polled<T>>({ data: undefined, error: undefined, loading: true });
 
   useEffect(() => {
-    let active = true;
+    let stopped = false;
+    let polling = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      clearTimeout(timer);
-      timer = document.hidden ? undefined : setTimeout(() => {
-        if (!document.hidden) void fetchNow();
-      }, POLL_MS);
-    };
-    const fetchNow = async () => {
-      clearTimeout(timer);
+
+    const poll = async () => {
+      timer = undefined;
+      polling = true;
       try {
-        const data = await latest.current();
-        if (active) setState({ data, error: undefined, loading: false, key });
-      } catch (cause) {
-        const error = cause instanceof Error ? cause : new Error(String(cause));
-        if (active) setState((previous) => ({ data: previous.key === key ? previous.data : undefined, error, loading: false, key }));
+        const data = await load();
+        if (!stopped) setState({ data, error: undefined, loading: false });
+      } catch (error: unknown) {
+        if (!stopped) setState((previous) => ({ data: previous.data, error, loading: false }));
+      } finally {
+        polling = false;
       }
-      if (active) schedule();
+      if (!stopped && !document.hidden) timer = setTimeout(() => void poll(), intervalMs);
     };
+
     const visibilityChanged = () => {
-      if (document.hidden) clearTimeout(timer);
-      else void fetchNow();
+      if (document.hidden) {
+        clearTimeout(timer);
+        timer = undefined;
+      } else if (!polling && timer === undefined) {
+        void poll();
+      }
     };
-    void fetchNow();
+
+    void poll();
     document.addEventListener("visibilitychange", visibilityChanged);
     return () => {
-      active = false;
+      stopped = true;
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [key]);
+  }, [load, intervalMs]);
 
-  return state.key === key ? { data: state.data, error: state.error, loading: state.loading } : { data: undefined, error: undefined, loading: true };
+  return state;
 }
