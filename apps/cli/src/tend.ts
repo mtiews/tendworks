@@ -521,7 +521,7 @@ async function followTranscript({
     const { data, error, response } = answer;
     if (response.status === 404) return "missing";
     if (!response.ok || !data) throw new AnswerError(response, error);
-    const events = readServerSentEvents(data);
+    const events = readServerSentEvents(data, signal);
     try {
       for (;;) {
         const next = await Promise.race([events.next(), stopped]);

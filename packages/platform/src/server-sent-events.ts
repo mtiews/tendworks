@@ -56,12 +56,19 @@ export function serverSentEventStream(events: AsyncIterable<ServerSentEvent>, { 
 /**
  * Reads the events of a `text/event-stream` body as they arrive. Comments and events
  * without data are skipped, and so is an event the stream ended in the middle of.
+ * Aborting `signal` ends the events and cancels the body, which closes the connection
+ * even while a read waits: the request's own abort signal cannot be relied on for that,
+ * as Node's fetch holds the signal of a `Request` only weakly once it was sent.
  */
-export async function* readServerSentEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<ServerSentEvent> {
+export async function* readServerSentEvents(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<ServerSentEvent> {
   const decoder = new TextDecoder();
   let buffer = "";
   let event: { id?: string; event?: string; data?: string[] } = {};
   const reader = body.getReader();
+  // A cancel ends a pending read as done, so the generator returns at once.
+  const stop = () => void reader.cancel().catch(() => {});
+  if (signal?.aborted) stop();
+  signal?.addEventListener("abort", stop, { once: true });
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -87,6 +94,7 @@ export async function* readServerSentEvents(body: ReadableStream<Uint8Array>): A
       }
     }
   } finally {
+    signal?.removeEventListener("abort", stop);
     await reader.cancel().catch(() => {});
   }
 }

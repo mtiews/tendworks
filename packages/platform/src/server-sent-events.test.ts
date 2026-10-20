@@ -83,6 +83,27 @@ describe("server-sent events", () => {
     expect(stopped).toBe(true);
   });
 
+  it("stops reading and cancels the body when the signal aborts while it waits for bytes", async () => {
+    let cancelled = false;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("data: first\n\n"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const stop = new AbortController();
+    const events = readServerSentEvents(body, stop.signal);
+    expect((await events.next()).value).toEqual({ data: "first" });
+
+    const waiting = events.next();
+    stop.abort();
+
+    expect(await waiting).toEqual({ done: true, value: undefined });
+    expect(cancelled).toBe(true);
+  });
+
   it("errors the stream when the events fail", async () => {
     async function* failing(): AsyncGenerator<ServerSentEvent> {
       yield { data: "first" };
