@@ -31,11 +31,11 @@ it("rejects a platform library that knows a domain", async () => {
   expect(violations.map((v) => [v.rule.name, v.to])).toEqual([["platform-libraries-are-leaves", "packages/beta/src/index.ts"]]);
 });
 
-it("allows the web app only generated types and the platform libraries", async () => {
+it("allows the web app only generated types and the platform library", async () => {
   expect(await violationsIn("apps/web/src/index.tsx")).toEqual([]);
 });
 
-it("rejects the web app importing a domain, another app or a Node.js module", async () => {
+it("rejects the web app importing a domain, the health library, another app or a Node.js module", async () => {
   const violations = await violationsIn("apps/web/src/violation.ts");
 
   expect(violations.map((v) => [v.rule.name, v.to]).sort()).toEqual([
@@ -43,6 +43,7 @@ it("rejects the web app importing a domain, another app or a Node.js module", as
     ["web-app-is-a-client", "apps/cli/src/index.ts"],
     ["web-app-is-a-client", "fs"],
     ["web-app-is-a-client", "packages/beta/src/index.ts"],
+    ["web-app-is-a-client", "packages/health/src/index.ts"],
   ]);
 });
 

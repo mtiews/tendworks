@@ -40,10 +40,10 @@ module.exports = {
     {
       name: "web-app-is-a-client",
       comment:
-        "The web UI is a client of the public API like tend (ADR 0018): it may import only the generated types and the platform libraries, and no Node.js module, since it runs in the browser.",
+        "The web UI is a client of the public API like tend (ADR 0018): it may import only the generated types and the browser-safe platform library (packages/platform, not packages/health), and no Node.js module, since it runs in the browser.",
       severity: "error",
       from: { path: "^apps/web/" },
-      to: { path: "^(packages|apps)/", pathNot: ["^apps/web/", "^packages/shared/", "^packages/health/", "^packages/platform/"] },
+      to: { path: "^(packages|apps)/", pathNot: ["^apps/web/", "^packages/shared/", "^packages/platform/"] },
     },
     {
       name: "web-app-is-a-client",
