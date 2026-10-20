@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import {
   apiTokenProblems,
@@ -119,6 +121,8 @@ const triggerGateway = createTriggerGateway({
   runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
 });
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
+// The web UI's static build (ADR 0018): `pnpm build` puts it next to this bundle, in the image too.
+const webUiRoot = process.env.TEND_WEB_UI_DIR || fileURLToPath(new URL("../../web/dist/", import.meta.url));
 const api = createControlPlaneApi({
   probes: [createStoreProbe(databaseUrl)],
   bundles: [{ name: "worker", baseUrl: workerUrl }],
@@ -131,7 +135,9 @@ const api = createControlPlaneApi({
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
   ...(readToken === undefined ? {} : { readToken }),
+  ...(existsSync(webUiRoot) ? { webUi: { root: webUiRoot } } : {}),
 });
+console.log(existsSync(webUiRoot) ? `web UI: ${webUiRoot} under /ui/` : `web UI: no build at ${webUiRoot}; /ui/ answers 404`);
 
 // The platform MCP server (ADR 0016) at /mcp, for chat agents: a client of the public API
 // above with the token its caller presents, so it can read no more than that token may.

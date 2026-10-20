@@ -22,7 +22,9 @@ jobs:
         run: pnpm check
       - name: Unit and adapter integration tests with coverage thresholds
         run: pnpm coverage
-      - name: End-to-end tests on the compose stack
+      - name: Browser for the web UI's end-to-end flows
+        run: pnpm --filter @tendworks/browser-tests exec playwright install --with-deps chromium
+      - name: End-to-end tests on the compose stack, API and browser
         run: pnpm e2e
         env:
           # The restart test runs the Claude Code harness against a scripted ACP agent; the

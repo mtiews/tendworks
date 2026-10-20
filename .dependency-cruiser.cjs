@@ -25,10 +25,31 @@ module.exports = {
     },
     {
       name: "nothing-imports-apps",
-      comment: "apps/ only bundle packages for operation; nothing may depend on them.",
+      comment:
+        "apps/ only bundle packages for operation; nothing may depend on them. The view tests (tests/web) are the one exception: they render the web app against the real control plane in process, which the web app itself may not import.",
       severity: "error",
       from: { path: "^(packages|tests)/" },
-      to: { path: "^apps/" },
+      to: { path: "^apps/", pathNot: "^apps/web/" },
+    },
+    {
+      name: "nothing-imports-apps",
+      severity: "error",
+      from: { path: "^(packages|tests)/", pathNot: "^tests/web/" },
+      to: { path: "^apps/web/" },
+    },
+    {
+      name: "web-app-is-a-client",
+      comment:
+        "The web UI is a client of the public API like tend (ADR 0018): it may import only the generated types and the platform libraries, and no Node.js module, since it runs in the browser.",
+      severity: "error",
+      from: { path: "^apps/web/" },
+      to: { path: "^(packages|apps)/", pathNot: ["^apps/web/", "^packages/shared/", "^packages/health/", "^packages/platform/"] },
+    },
+    {
+      name: "web-app-is-a-client",
+      severity: "error",
+      from: { path: "^apps/web/" },
+      to: { dependencyTypes: ["core"] },
     },
     {
       name: "no-unresolvable-imports",
@@ -52,7 +73,7 @@ module.exports = {
     enhancedResolveOptions: {
       conditionNames: ["source", "import", "types", "default"],
       exportsFields: ["exports"],
-      extensions: [".ts", ".js"],
+      extensions: [".ts", ".tsx", ".js"],
     },
   },
 };

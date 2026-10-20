@@ -1,0 +1,20 @@
+{
+  "name": "@tendworks/web-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "View tests: the whole web app in jsdom against the real control plane over in-memory fakes, in process.",
+  "dependencies": {
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@testing-library/user-event": "14.6.7",
+    "@tendworks/control-plane": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "@tendworks/web": "workspace:*",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "jsdom": "30.1.2",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  }
+}

@@ -1,0 +1,41 @@
+import type { ReactNode } from "react";
+import { match } from "./router.js";
+
+/*
+ * The views of the UI (spec #38) and their paths below /ui. A view ticket replaces its
+ * placeholder here; the navigation lists the views with `nav`.
+ */
+
+interface Route {
+  pattern: string;
+  /** The page title, and the navigation label for views in the navigation. */
+  title: string;
+  /** Which navigation entry is current on this route. */
+  section: string;
+  nav?: boolean;
+  render(parameters: Record<string, string>): ReactNode;
+}
+
+const placeholder = (title: string) => () => (
+  <>
+    <h1>{title}</h1>
+    <p className="muted">Coming soon.</p>
+  </>
+);
+
+export const routes: readonly Route[] = [
+  { pattern: "/", title: "Status", section: "/", nav: true, render: placeholder("Status") },
+  { pattern: "/runs", title: "Runs", section: "/runs", nav: true, render: placeholder("Runs") },
+  { pattern: "/approval-requests", title: "Approval requests", section: "/approval-requests", nav: true, render: placeholder("Approval requests") },
+  { pattern: "/notifications", title: "Notifications", section: "/notifications", nav: true, render: placeholder("Notifications") },
+  { pattern: "/chats", title: "Chats", section: "/chats", nav: true, render: placeholder("Chats") },
+];
+
+/** The route for `path` with its parameters, or `undefined` for a path the UI does not know. */
+export function resolve(path: string): { route: Route; parameters: Record<string, string> } | undefined {
+  for (const route of routes) {
+    const parameters = match(route.pattern, path);
+    if (parameters) return { route, parameters };
+  }
+  return undefined;
+}

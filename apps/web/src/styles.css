@@ -1,0 +1,254 @@
+/*
+ * Design tokens and base styles of the web UI: plain CSS, no component framework (spec #38).
+ * Light and dark follow the system. Views use the tokens, never raw colors or sizes.
+ */
+
+:root {
+  color-scheme: light dark;
+
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --text-sm: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.25rem;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-6: 1.5rem;
+  --radius: 6px;
+  --content-width: 72rem;
+
+  --color-bg: #f7f7f5;
+  --color-surface: #ffffff;
+  --color-border: #d9d9d4;
+  --color-text: #1d1f1e;
+  --color-muted: #5f6662;
+  --color-accent: #2f6f4f;
+  --color-accent-text: #ffffff;
+  --color-focus: #2b6cb0;
+  --color-ok: #2f6f4f;
+  --color-warn: #8a5a00;
+  --color-error: #b3261e;
+  --color-error-bg: #fbeceb;
+  --color-read-only: #8a5a00;
+  --color-read-only-bg: #fdf3dc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #151716;
+    --color-surface: #1e2120;
+    --color-border: #343937;
+    --color-text: #e6e8e7;
+    --color-muted: #9aa29e;
+    --color-accent: #5fb38a;
+    --color-accent-text: #0f1a14;
+    --color-focus: #7fb2f0;
+    --color-ok: #5fb38a;
+    --color-warn: #e0b35a;
+    --color-error: #f08a80;
+    --color-error-bg: #3a1f1d;
+    --color-read-only: #e0b35a;
+    --color-read-only-bg: #3a2f17;
+  }
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font: var(--text-md) / 1.5 var(--font-sans);
+}
+
+h1 {
+  font-size: var(--text-lg);
+  margin: 0 0 var(--space-4);
+}
+
+a {
+  color: var(--color-accent);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+button {
+  font: inherit;
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+button.primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+button.quiet {
+  border-color: transparent;
+  background: transparent;
+}
+
+input[type="password"],
+input[type="text"],
+textarea,
+select {
+  font: inherit;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: var(--space-6);
+}
+
+.message {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+}
+
+.message-error {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+.loading {
+  padding: var(--space-6);
+  color: var(--color-muted);
+}
+
+/* Sign-in */
+
+.sign-in {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--space-4);
+}
+
+.sign-in .panel {
+  width: 100%;
+  max-width: 26rem;
+}
+
+.sign-in-form {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.sign-in-form p {
+  margin: 0;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* App shell */
+
+.top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.brand {
+  font-weight: 600;
+}
+
+.main-nav {
+  display: flex;
+  gap: var(--space-1);
+  flex: 1;
+  overflow-x: auto;
+}
+
+.main-nav a {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.main-nav a[aria-current="page"] {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+
+.scope {
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+}
+
+.scope-read {
+  color: var(--color-read-only);
+  background: var(--color-read-only-bg);
+  border-color: var(--color-read-only);
+}
+
+.content {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+/* Phone width: the navigation gets a row of its own and scrolls sideways. */
+@media (max-width: 40rem) {
+  .main-nav {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .top-bar {
+    justify-content: space-between;
+  }
+
+  .content {
+    padding: var(--space-4) var(--space-3);
+  }
+}

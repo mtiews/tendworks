@@ -10,6 +10,7 @@ import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
 import { createInMemoryTriggers, type TriggersPort } from "./triggers.js";
+import { serveWebUi, WEB_UI_HEADERS, WEB_UI_PATH, type WebUiOptions } from "./web-ui.js";
 
 type StatusResponse = ControlPlane.paths["/status"]["get"]["responses"];
 type Schemas = ControlPlane.components["schemas"];
@@ -45,6 +46,8 @@ export interface ControlPlaneApiOptions {
    * 403 by operations that change state. Without it, reading needs the API token.
    */
   readToken?: string;
+  /** The built web UI, served under /ui/ without a token (ADR 0018); /ui/ answers 404 without it. */
+  webUi?: WebUiOptions;
 }
 
 const MINIMUM_TOKEN_LENGTH = 16;
@@ -89,6 +92,7 @@ export function createControlPlaneApi({
   approvals,
   apiToken,
   readToken,
+  webUi,
 }: ControlPlaneApiOptions): { fetch(request: Request): Promise<Response> } {
   if (!apiToken) throw new Error("the control plane API needs an API token");
   const app = new Hono();
@@ -108,10 +112,13 @@ export function createControlPlaneApi({
   };
   const challenge = { "www-authenticate": "Bearer" };
 
+  // The web UI is static and public; its pages sign in and call the API like any client.
+  const isWebUi = (path: string) => path === "/" || path === "/ui" || path.startsWith(WEB_UI_PATH);
+
   // Reading (GET, and HEAD, which GET routes answer too) needs either token; only
   // GET /status stays open as the liveness check.
   app.use(async (c, next) => {
-    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || c.req.path === "/status") return next();
+    if ((c.req.method !== "GET" && c.req.method !== "HEAD") || c.req.path === "/status" || isWebUi(c.req.path)) return next();
     if (!presented(c.req.header("authorization") ?? "")) {
       return problem(401, "Unauthorized", "reading needs the platform's API token or its read-only token as a bearer token", challenge);
     }
@@ -142,6 +149,19 @@ export function createControlPlaneApi({
     }
     return c.json(report satisfies StatusResponse[503]["content"]["application/json"], 503);
   });
+
+  // The platform's root address and /ui lead to the web UI.
+  app.get("/", (c) => c.redirect(WEB_UI_PATH, 302));
+  app.get("/ui", (c) => c.redirect(WEB_UI_PATH, 302));
+  app.get(`${WEB_UI_PATH}*`, async (c) => {
+    const served = webUi && (await serveWebUi(webUi, c.req.path, c.req.method));
+    if (served) return served;
+    if (!webUi) return problem(404, "Web UI not available", "this server was started without a web UI build", { ...WEB_UI_HEADERS });
+    return problem(404, "Not found", undefined, { ...WEB_UI_HEADERS });
+  });
+
+  // The global middleware above already refused a request without either token.
+  app.get("/access", (c) => c.json({ scope: presented(c.req.header("authorization") ?? "") === "admin" ? "full" : "read" } satisfies Schemas["Access"], 200));
 
   app.post("/runs", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["StartRunRequest"]> | undefined;

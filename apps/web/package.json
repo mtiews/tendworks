@@ -1,0 +1,29 @@
+{
+  "name": "@tendworks/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The web UI: a single-page application the server serves under /ui/, a client of the public control plane API (ADR 0018).",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "openapi-fetch": "0.17.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.2",
+    "vite": "8.3.4"
+  }
+}

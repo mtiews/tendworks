@@ -78,13 +78,20 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
-      const { data, error, response } = await client.GET("/status").catch((cause: unknown) => {
-        throw new UnreachableError(baseUrl, cause);
-      });
+      const [{ data, error, response }, access] = await Promise.all([
+        client.GET("/status").catch((cause: unknown) => {
+          throw new UnreachableError(baseUrl, cause);
+        }),
+        // The token's access belongs to the table only; the status document stays the platform's.
+        client.GET("/access").then(
+          ({ data }) => data?.scope ?? "none",
+          () => "none",
+        ),
+      ]);
       // 200 and 503 both carry a status document; anything else did not come from the control plane.
       const report: PlatformStatus | undefined = response.status === 200 || response.status === 503 ? (data ?? error) : undefined;
       if (!report?.components) throw new Error(`unexpected answer from the control plane (HTTP ${response.status})`);
-      io.stdout(render(report, options.output, formatTable));
+      io.stdout(render(report, options.output, (document) => formatTable(document, access)));
       exitCode = report.status === "healthy" ? ExitCode.ok : ExitCode.unhealthy;
     });
 
@@ -350,10 +357,11 @@ function render<T>(document: T, format: OutputFormat, table: (document: T) => st
   return table(document);
 }
 
-function formatTable(report: PlatformStatus): string {
+/** `access`: what the presented token may do (`full`, `read`), or `none` without a valid one. */
+function formatTable(report: PlatformStatus, access: string): string {
   const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...report.components.map((c) => [c.name, c.status, c.message ?? ""])];
   const pending = report.pendingApprovals === undefined ? "" : `PENDING APPROVALS  ${report.pendingApprovals}\n`;
-  return `PLATFORM  ${report.status}\n${pending}\n${table(rows)}`;
+  return `PLATFORM  ${report.status}\n${pending}ACCESS  ${access}\n\n${table(rows)}`;
 }
 
 function formatRunList(list: RunList): string {

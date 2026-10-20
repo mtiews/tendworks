@@ -38,7 +38,7 @@ const mutating: [string, string, unknown][] = [
   ["POST", "/chats/c-1/end", {}],
 ];
 
-const reading = ["/runs", "/runs/r-1", "/agents", "/triggers", "/notifications", "/approval-requests", "/chats", "/chats/c-1", "/chats/c-1/transcript"];
+const reading = ["/access", "/runs", "/runs/r-1", "/agents", "/triggers", "/notifications", "/approval-requests", "/chats", "/chats/c-1", "/chats/c-1/transcript"];
 
 const wrong = [undefined, "Bearer wrong-token", `Basic ${TOKEN}`, TOKEN, `Bearer ${TOKEN}x`];
 
@@ -105,6 +105,15 @@ describe("reading", () => {
 
       expect(status).not.toBe(401);
     }
+  });
+
+  it("tells the presented token's access: full for the API token, read for the read-only token", async () => {
+    const { request } = setup();
+
+    const full = await request("GET", "/access", `Bearer ${TOKEN}`);
+    const read = await request("GET", "/access", `Bearer ${READ_TOKEN}`);
+
+    expect([full.body, read.body]).toEqual([{ scope: "full" }, { scope: "read" }]);
   });
 
   it("serves GET /status without a token, as the liveness check", async () => {

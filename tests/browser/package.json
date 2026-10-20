@@ -1,0 +1,13 @@
+{
+  "name": "@tendworks/browser-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end flows of the web UI against the compose stack (Playwright).",
+  "scripts": {
+    "test": "playwright test"
+  },
+  "dependencies": {
+    "@playwright/test": "1.63.0"
+  }
+}
