@@ -14,6 +14,7 @@ import createClient, { type Client } from "openapi-fetch";
 import { stringify as stringifyYaml } from "yaml";
 
 type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
+type AccessScope = ControlPlane.components["schemas"]["Access"]["scope"];
 type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
@@ -92,8 +93,8 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
         }),
         // The token's access belongs to the table only; the status document stays the platform's.
         client.GET("/access").then(
-          ({ data }) => data?.scope ?? "none",
-          () => "none",
+          ({ data }) => data?.scope,
+          () => undefined,
         ),
       ]);
       // 200 and 503 both carry a status document; anything else did not come from the control plane.
@@ -365,12 +366,12 @@ function render<T>(document: T, format: OutputFormat, table: (document: T) => st
   return table(document);
 }
 
-/** `access`: what the presented token may do (`full`, `read`), or `none` without a valid one. */
-function formatTable(report: PlatformStatus, access: string): string {
+/** `access`: what the presented token may do; undefined without a valid one (shown as `none`). */
+function formatTable(report: PlatformStatus, access: AccessScope | undefined): string {
   const rows = [["COMPONENT", "STATUS", "MESSAGE"], ...report.components.map((c) => [c.name, c.status, c.message ?? ""])];
   const active = report.activeRuns === undefined ? "" : `ACTIVE RUNS  ${report.activeRuns}\n`;
   const pending = report.pendingApprovals === undefined ? "" : `PENDING APPROVALS  ${report.pendingApprovals}\n`;
-  return `PLATFORM  ${report.status}\n${active}${pending}ACCESS  ${access}\n\n${table(rows)}`;
+  return `PLATFORM  ${report.status}\n${active}${pending}ACCESS  ${access ?? "none"}\n\n${table(rows)}`;
 }
 
 function formatRunList(list: RunList): string {
