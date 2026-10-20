@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /** How often lists refresh themselves (spec #38): about every 5 seconds. */
 export const POLL_INTERVAL_MS = 5_000;
@@ -10,6 +10,8 @@ export interface Polled<T> {
   error: unknown;
   /** `true` until the first poll answered or failed. */
   loading: boolean;
+  /** Polls at once, e.g. after the operator changed what the list shows. */
+  refresh: () => void;
 }
 
 /**
@@ -18,7 +20,10 @@ export interface Polled<T> {
  * other parameters) starts over, so keep it stable with `useCallback`.
  */
 export function usePolling<T>(load: () => Promise<T>, intervalMs: number = POLL_INTERVAL_MS): Polled<T> {
-  const [state, setState] = useState<Polled<T>>({ data: undefined, error: undefined, loading: true });
+  const [state, setState] = useState<Omit<Polled<T>, "refresh">>({ data: undefined, error: undefined, loading: true });
+  // Each refresh starts the polling over, which polls at once.
+  const [round, setRound] = useState(0);
+  const refresh = useCallback(() => setRound((previous) => previous + 1), []);
 
   useEffect(() => {
     let stopped = false;
@@ -55,7 +60,7 @@ export function usePolling<T>(load: () => Promise<T>, intervalMs: number = POLL_
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", visibilityChanged);
     };
-  }, [load, intervalMs]);
+  }, [load, intervalMs, round]);
 
-  return state;
+  return { ...state, refresh };
 }

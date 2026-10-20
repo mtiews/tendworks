@@ -12,14 +12,17 @@ export function LiveTranscript({
   open,
   live,
   missing = "No transcript was found.",
+  onEnded,
 }: {
   read: () => Promise<TranscriptEntry[]>;
   open: OpenTranscriptStream;
   live: boolean;
   /** What to say when there is no transcript. */
   missing?: string;
+  /** Called when the stream says the task ended. */
+  onEnded?: () => void;
 }) {
-  const view = useTranscript({ read, open, live });
+  const view = useTranscript({ read, open, live, onEnded });
   switch (view.phase) {
     case "loading":
       return <p className="muted">Loading the transcript…</p>;

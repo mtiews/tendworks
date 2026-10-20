@@ -1,5 +1,5 @@
 import { followTranscript, TranscriptStreamRefusedError, TranscriptStreamUnreachableError, type TranscriptStreamAnswer } from "@tendworks/platform";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnswerError, UNREACHABLE } from "./answers.js";
 import type { TranscriptEntry } from "./transcript.js";
 
@@ -42,9 +42,25 @@ function lostBecause(error: unknown): string {
  * so no entry is missing or shown twice. Keep `read` and `open` stable (`useCallback`); a
  * new one, or a change of `live`, reads the history again (e.g. once a step has ended).
  * `read` rejects with an `AnswerError` of status 404 for a transcript that does not exist.
+ * `onEnded` is called when the stream says the task ended, e.g. to read its owner again.
  */
-export function useTranscript({ read, open, live }: { read: () => Promise<TranscriptEntry[]>; open: OpenTranscriptStream; live: boolean }): TranscriptView {
+export function useTranscript({
+  read,
+  open,
+  live,
+  onEnded,
+}: {
+  read: () => Promise<TranscriptEntry[]>;
+  open: OpenTranscriptStream;
+  live: boolean;
+  onEnded?: (() => void) | undefined;
+}): TranscriptView {
   const [view, setView] = useState<TranscriptView>({ phase: "loading" });
+  // The latest callback, without following anew when it changes.
+  const ended = useRef(onEnded);
+  useEffect(() => {
+    ended.current = onEnded;
+  });
 
   useEffect(() => {
     let active = true;
@@ -65,7 +81,10 @@ export function useTranscript({ read, open, live }: { read: () => Promise<Transc
           signal: stop.signal,
           onEntry: (entry) => update((current) => ({ ...current, entries: [...current.entries, entry] })),
         }).then(
-          () => update((current) => ({ ...current, following: false })),
+          (outcome) => {
+            update((current) => ({ ...current, following: false }));
+            if (active && outcome === "ended") ended.current?.();
+          },
           (error: unknown) => update((current) => ({ ...current, following: false, lost: lostBecause(error) })),
         );
       },

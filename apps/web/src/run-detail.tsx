@@ -4,6 +4,7 @@ import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { formatCost, formatOrigin, totalCost } from "./format.js";
 import { safeHref } from "./markdown.js";
+import { RunApprovalRequest } from "./run-approval.js";
 import { Time } from "./time.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { usePolling } from "./use-polling.js";
@@ -22,7 +23,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  */
 export function RunDetail({ runId }: { runId: string }) {
   const { client } = useApi();
-  const { data: run, error } = usePolling(useCallback(() => answer(client.GET("/runs/{runId}", { params: { path: { runId } } })), [client, runId]));
+  const { data: run, error, refresh } = usePolling(useCallback(() => answer(client.GET("/runs/{runId}", { params: { path: { runId } } })), [client, runId]));
 
   if (!run) {
     return (
@@ -61,6 +62,7 @@ export function RunDetail({ runId }: { runId: string }) {
           Failed at {run.error.instance}: {describeError(run.error)}
         </p>
       )}
+      <RunApprovalRequest runId={run.id} />
       <dl className="fields">
         {fields.map(([label, value]) => (
           <div key={label}>
@@ -110,7 +112,7 @@ export function RunDetail({ runId }: { runId: string }) {
         </table>
       )}
       <Output output={run.output} />
-      {run.steps.map((step) => step.taskId && <AgentStep key={step.reference} runId={run.id} step={step} taskId={step.taskId} />)}
+      {run.steps.map((step) => step.taskId && <AgentStep key={step.reference} runId={run.id} step={step} taskId={step.taskId} ended={refresh} />)}
     </>
   );
 }
@@ -144,7 +146,7 @@ function Output({ output }: { output: unknown }) {
 }
 
 /** An agent step: its status, cost, error and results, and its transcript, live while the step runs. */
-function AgentStep({ runId, step, taskId }: { runId: string; step: Step; taskId: string }) {
+function AgentStep({ runId, step, taskId, ended }: { runId: string; step: Step; taskId: string; ended: () => void }) {
   const { client } = useApi();
   const read = useCallback(async () => (await answer(client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } }))).items, [client, runId, taskId]);
   const open = useCallback<OpenTranscriptStream>(
@@ -181,7 +183,7 @@ function AgentStep({ runId, step, taskId }: { runId: string; step: Step; taskId:
           })}
         </ul>
       )}
-      <LiveTranscript read={read} open={open} live={step.status === "running"} missing="No transcript was found for this step." />
+      <LiveTranscript read={read} open={open} live={step.status === "running"} missing="No transcript was found for this step." onEnded={ended} />
     </section>
   );
 }

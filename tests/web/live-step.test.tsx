@@ -70,10 +70,11 @@ describe("live step", () => {
 
     agentRuntime.append("task-live", entry.ended);
     finish();
-    await vi.advanceTimersByTimeAsync(5_000);
 
-    await vi.waitFor(() => expect(within(step()).getAllByText("completed").length).toBeGreaterThan(0));
+    // The stream's end reads the run again at once, without waiting for the next poll.
+    await vi.waitFor(() => expect(within(step()).getByText("completed", { selector: ".status" })).toBeTruthy());
     expect(within(step()).queryByRole("status")).toBeNull();
+    expect(within(step()).getByText("Hello there")).toBeTruthy();
   });
 
   it("reconnects after the stream drops and continues after the last entry, without gaps or duplicates", async () => {
