@@ -4,6 +4,7 @@ import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { formatCost, formatOrigin, totalCost } from "./format.js";
 import { safeHref } from "./markdown.js";
+import { RunApprovalRequest } from "./run-approval.js";
 import { Time } from "./time.js";
 import { Transcript, type TranscriptEntry } from "./transcript.js";
 import { usePolling } from "./use-polling.js";
@@ -60,6 +61,7 @@ export function RunDetail({ runId }: { runId: string }) {
           Failed at {run.error.instance}: {describeError(run.error)}
         </p>
       )}
+      <RunApprovalRequest runId={run.id} />
       <dl className="fields">
         {fields.map(([label, value]) => (
           <div key={label}>
