@@ -28,10 +28,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
 /** What the operator reads when following broke off. */
 function lostBecause(error: unknown): string {
   if (error instanceof TranscriptStreamUnreachableError) return UNREACHABLE;
-  if (error instanceof TranscriptStreamRefusedError) {
-    const problem = error.problem as { title?: unknown } | undefined;
-    return new AnswerError(error.response.status, typeof problem?.title === "string" ? problem.title : undefined).message;
-  }
+  if (error instanceof TranscriptStreamRefusedError) return AnswerError.from(error.response.status, error.problem).message;
   return messageOf(error);
 }
 

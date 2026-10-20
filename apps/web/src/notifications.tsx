@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { answer } from "./answers.js";
 import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
 import { Link } from "./router.js";
@@ -9,11 +10,7 @@ import { usePolling } from "./use-polling.js";
 export function NotificationsPage() {
   const { client } = useApi();
   const notifications = usePolling(
-    useCallback(async () => {
-      const { data, response } = await client.GET("/notifications");
-      if (!data) throw new Error(`HTTP ${response.status}`);
-      return data.items;
-    }, [client]),
+    useCallback(async () => (await answer(client.GET("/notifications"))).items, [client]),
   );
 
   return (

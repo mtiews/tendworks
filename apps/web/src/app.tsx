@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { UNREACHABLE } from "./answers.js";
 import { ApiProvider, checkAccess, createControlPlaneClient, type Fetch, type Scope } from "./api.js";
 import { Router } from "./router.js";
 import { Shell } from "./shell.js";
@@ -17,7 +18,6 @@ type State =
   | { kind: "signed-in"; token: string; scope: Scope };
 
 const NO_LONGER_ACCEPTED = "Your token is no longer accepted. Sign in again.";
-const UNREACHABLE = "Cannot reach the platform. Is it running?";
 
 /** The web UI: sign-in with an API token, then the app shell (ADR 0018). */
 export function App({ fetch }: AppProps) {
@@ -62,7 +62,10 @@ export function App({ fetch }: AppProps) {
   const token = state.kind === "signed-in" ? state.token : undefined;
   const scope = state.kind === "signed-in" ? state.scope : undefined;
   const api = useMemo(
-    () => (token === undefined || scope === undefined ? undefined : { client: createControlPlaneClient({ token, fetch, unauthorized: () => signedOut(NO_LONGER_ACCEPTED) }), scope }),
+    () =>
+      token === undefined || scope === undefined
+        ? undefined
+        : { client: createControlPlaneClient({ token, fetch, unauthorized: () => signedOut(NO_LONGER_ACCEPTED) }), canChange: scope === "full" },
     [token, scope, fetch, signedOut],
   );
 

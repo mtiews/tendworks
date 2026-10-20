@@ -5,7 +5,7 @@ import { Link, useLocation } from "./router.js";
 
 /** The signed-in app: navigation, the access scope, sign-out, and the current view. */
 export function Shell({ signOut }: { signOut: () => void }) {
-  const { scope } = useApi();
+  const { canChange } = useApi();
   const { path } = useLocation();
   const found = resolve(path);
 
@@ -26,8 +26,8 @@ export function Shell({ signOut }: { signOut: () => void }) {
               </Link>
             ))}
         </nav>
-        <span className={`scope scope-${scope}`} title={scope === "read" ? "Signed in with the read-only token: the UI only shows." : "Signed in with the API token."}>
-          {scope === "read" ? "Read-only" : "Full access"}
+        <span className={`scope scope-${canChange ? "full" : "read"}`} title={canChange ? "Signed in with the API token." : "Signed in with the read-only token: the UI only shows."}>
+          {canChange ? "Full access" : "Read-only"}
         </span>
         <button type="button" className="quiet" onClick={signOut}>
           Sign out

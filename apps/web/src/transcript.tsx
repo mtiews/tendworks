@@ -1,6 +1,6 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { useId, useMemo, useState, type ReactNode } from "react";
-import { formatCost, type Cost } from "./format.js";
+import { formatCost, type Cost } from "@tendworks/platform";
 import { Markdown, safeHref } from "./markdown.js";
 
 /*

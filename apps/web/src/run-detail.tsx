@@ -2,7 +2,7 @@ import type { ControlPlane } from "@tendworks/shared";
 import { useCallback, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
-import { formatCost, formatOrigin, totalCost } from "./format.js";
+import { formatCost, formatOrigin, totalCost } from "@tendworks/platform";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
 import { Time } from "./time.js";

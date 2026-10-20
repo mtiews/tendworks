@@ -3,7 +3,7 @@ import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { Confirmation } from "./confirm.js";
-import { formatCost } from "./format.js";
+import { formatCost } from "@tendworks/platform";
 import { TranscriptOf } from "./live-transcript.js";
 import { Time } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
@@ -88,7 +88,7 @@ export function ChatWindow({ chatId }: { chatId: string }) {
 
 /** The chat's transcript, live while the chat is open, and what the operator can do in it. */
 function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
-  const { client, scope } = useApi();
+  const { client, canChange } = useApi();
   const chatId = chat.id;
   const read = useCallback(async () => (await answer(client.GET("/chats/{chatId}/transcript", { params: { path: { chatId } } }))).items, [client, chatId]);
   const open = useCallback<OpenTranscriptStream>((header) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream" }), [client, chatId]);
@@ -106,7 +106,7 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
       {/* The transcript may show the end before the chat is read again: the input goes at once. */}
       {!isOpen(chat) || turn.state === "ended" ? (
         <p className="muted">This chat has ended.</p>
-      ) : scope === "read" ? (
+      ) : !canChange ? (
         <p className="muted">Read-only access: you can follow this chat but not write to it.</p>
       ) : (
         <ChatActions chatId={chatId} turn={turn} following={view.phase === "shown"} changed={changed} />

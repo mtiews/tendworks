@@ -1,21 +1,21 @@
 import { useCallback } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
-import { formatCost } from "./format.js";
+import { formatCost } from "@tendworks/platform";
 import { Link } from "./router.js";
 import { Time } from "./time.js";
 import { usePolling } from "./use-polling.js";
 
 /** Open and ended chats, the most recently started first, refreshed by polling (`tend chat list`). */
 export function ChatList() {
-  const { client, scope } = useApi();
+  const { client, canChange } = useApi();
   const { data, error } = usePolling(useCallback(() => answer(client.GET("/chats")), [client]));
 
   return (
     <>
       <div className="page-head">
         <h1>Chats</h1>
-        {scope === "full" && (
+        {canChange && (
           <Link to="/chats/new" className="button primary">
             New chat
           </Link>

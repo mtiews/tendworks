@@ -11,7 +11,7 @@ export function LiveTranscript({
   read,
   open,
   live,
-  missing = "No transcript was found.",
+  missing,
   onEnded,
 }: {
   read: () => Promise<TranscriptEntry[]>;

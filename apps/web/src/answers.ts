@@ -11,6 +11,12 @@ export class AnswerError extends Error {
     super(title ? `${title} (${status})` : `The platform answered ${status}.`);
   }
 
+  /** The error for an answer with `status` and its problem document, if it is one. */
+  static from(status: number, problem: unknown): AnswerError {
+    const { title, detail } = (problem ?? {}) as { title?: unknown; detail?: unknown };
+    return new AnswerError(status, typeof title === "string" ? title : undefined, typeof detail === "string" ? detail : undefined);
+  }
+
   /** The platform's reason in its own words, `Title: detail`, e.g. for a refused form. */
   get reason(): string {
     return this.title && this.detail ? `${this.title}: ${this.detail}` : this.message;
@@ -35,6 +41,5 @@ export async function answer<T>(call: Promise<Result<T>>): Promise<T> {
     throw new Error(UNREACHABLE);
   }
   if (result.data !== undefined) return result.data;
-  const problem = result.error as { title?: unknown; detail?: unknown } | undefined;
-  throw new AnswerError(result.response.status, typeof problem?.title === "string" ? problem.title : undefined, typeof problem?.detail === "string" ? problem.detail : undefined);
+  throw AnswerError.from(result.response.status, result.error);
 }

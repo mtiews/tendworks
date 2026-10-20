@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
-import { formatOrigin } from "./format.js";
+import { formatOrigin } from "@tendworks/platform";
 import { Pending } from "./pending.js";
 import { Link } from "./router.js";
 import { Time } from "./time.js";

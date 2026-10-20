@@ -1,5 +1,6 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { useCallback, useId, type ReactNode } from "react";
+import { answer, UNREACHABLE } from "./answers.js";
 import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
 import { Link } from "./router.js";
@@ -13,13 +14,12 @@ export function StatusPage() {
   const { client } = useApi();
 
   const status = usePolling(
-    useCallback(async (): Promise<PlatformStatus> => {
-      // 503 carries the same status document as 200: an unhealthy platform is an answer, not a failure.
-      const { data, error, response } = await client.GET("/status");
-      const report = data ?? (response.status === 503 ? error : undefined);
-      if (!report) throw new Error(`HTTP ${response.status}`);
-      return report;
-    }, [client]),
+    useCallback(
+      (): Promise<PlatformStatus> =>
+        // 503 carries the same status document as 200: an unhealthy platform is an answer, not a failure.
+        answer<PlatformStatus>(client.GET("/status").then((result) => (result.error !== undefined && result.response.status === 503 ? { data: result.error, response: result.response } : result))),
+      [client],
+    ),
   );
 
   // Both numbers come from the status report, as `tend status` shows them.
@@ -58,7 +58,7 @@ export function StatusPage() {
             <p className="muted">Loading…</p>
           ) : (
             <p className="message message-error" role="alert">
-              Cannot reach the platform. Is it running?
+              {UNREACHABLE}
             </p>
           )
         ) : (
@@ -102,11 +102,7 @@ type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number
 function Triggers() {
   const { client } = useApi();
   const triggers = usePolling(
-    useCallback(async () => {
-      const { data, response } = await client.GET("/triggers");
-      if (!data) throw new Error(`HTTP ${response.status}`);
-      return data.items;
-    }, [client]),
+    useCallback(async () => (await answer(client.GET("/triggers"))).items, [client]),
   );
 
   return (
@@ -181,11 +177,7 @@ type Session = NonNullable<Agent["sessions"]>[number];
 function Agents() {
   const { client } = useApi();
   const agents = usePolling(
-    useCallback(async () => {
-      const { data, response } = await client.GET("/agents");
-      if (!data) throw new Error(`HTTP ${response.status}`);
-      return data.items;
-    }, [client]),
+    useCallback(async () => (await answer(client.GET("/agents"))).items, [client]),
   );
 
   const items = agents.data;

@@ -35,11 +35,10 @@ export function Age({ value, now }: { value: string; now: number }) {
 
 /** The approval requests (`tend approval list`): pending first, then decided ones with their decision (spec #38). */
 export function ApprovalRequestsPage() {
-  const { client, scope } = useApi();
+  const { client, canChange } = useApi();
   const requests = usePolling(
     useCallback(async () => ({ items: pendingFirst((await answer(client.GET("/approval-requests"))).items), readAt: Date.now() }), [client]),
   );
-  const full = scope === "full";
   const { failure, decided } = useDecision(requests.refresh);
   const list = requests.data;
 
@@ -60,7 +59,7 @@ export function ApprovalRequestsPage() {
               <th>Run</th>
               <th>Requested</th>
               <th>Decided</th>
-              {full && <th>Actions</th>}
+              {canChange && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -82,7 +81,7 @@ export function ApprovalRequestsPage() {
                   <Age value={request.createdAt} now={list.readAt} />
                 </td>
                 <td>{request.decidedAt && <Time value={request.decidedAt} />}</td>
-                {full && (
+                {canChange && (
                   <td>
                     {request.status === "pending" && <DecisionActions request={request} onDone={decided} />}
                   </td>

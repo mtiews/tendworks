@@ -1,5 +1,8 @@
 import {
   followTranscript as followPlatformTranscript,
+  formatCost,
+  formatOrigin,
+  totalCost,
   TranscriptStreamRefusedError,
   TranscriptStreamUnreachableError,
   type FollowTranscriptOptions,
@@ -14,7 +17,6 @@ type PlatformStatus = ControlPlane.components["schemas"]["PlatformStatus"];
 type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
-type Cost = ControlPlane.components["schemas"]["cost"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
@@ -377,13 +379,6 @@ function formatRunList(list: RunList): string {
     ...list.items.map((run) => [run.id, run.workflow, run.status, formatOrigin(run.startedBy), run.createdAt, run.finishedAt ?? ""]),
   ];
   return table(rows);
-}
-
-/** `manual`, or `trigger <binding>: <owner>/<name>#<n>`; empty for runs recorded without an origin. */
-function formatOrigin(origin: Run["startedBy"], { url = false }: { url?: boolean } = {}): string {
-  if (!origin) return "";
-  if (origin.kind === "manual") return "manual";
-  return `trigger ${origin.binding}: ${origin.issue.repository}#${origin.issue.number}${url ? ` (${origin.issue.url})` : ""}`;
 }
 
 function formatAgentList(list: AgentList): string {
@@ -983,15 +978,6 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
     }
   }
   return lines;
-}
-
-const formatCost = ({ amount, currency }: Cost) => `${Number(amount.toFixed(4))} ${currency}`;
-
-/** Sums costs per currency, e.g. "0.52 USD". */
-function totalCost(costs: Cost[]): string {
-  const sums = new Map<string, number>();
-  for (const { amount, currency } of costs) sums.set(currency, (sums.get(currency) ?? 0) + amount);
-  return [...sums].map(([currency, amount]) => formatCost({ amount, currency })).join(", ");
 }
 
 function formatNotificationList(list: NotificationList): string {

@@ -10,7 +10,7 @@ import { usePolling } from "./use-polling.js";
  * shows the request without actions.
  */
 export function RunApprovalRequest({ runId }: { runId: string }) {
-  const { client, scope } = useApi();
+  const { client, canChange } = useApi();
   const polled = usePolling(
     useCallback(
       async () => ({
@@ -39,7 +39,7 @@ export function RunApprovalRequest({ runId }: { runId: string }) {
           <p className="muted">
             {loaded.request.action} · {loaded.request.policy} · requested <Age value={loaded.request.createdAt} now={loaded.readAt} />
           </p>
-          {scope === "full" && <DecisionActions key={loaded.request.id} request={loaded.request} onDone={decided} />}
+          {canChange && <DecisionActions key={loaded.request.id} request={loaded.request} onDone={decided} />}
         </section>
       )}
     </>

@@ -39,8 +39,11 @@ export async function checkAccess(token: string, fetch: Fetch): Promise<Scope | 
 
 interface Api {
   client: ControlPlaneClient;
-  /** `read`: the UI only shows; it offers no action the API would refuse (ADR 0016, ADR 0018). */
-  scope: Scope;
+  /**
+   * Whether the token may change state (access scope `full`). Without it (the read-only
+   * token) the UI only shows; it offers no action the API would refuse (ADR 0016, ADR 0018).
+   */
+  canChange: boolean;
 }
 
 const ApiContext = createContext<Api | undefined>(undefined);

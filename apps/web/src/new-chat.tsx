@@ -11,7 +11,7 @@ import { usePolling } from "./use-polling.js";
  * check out as the workspace. The platform checks the repository; its reason shows here.
  */
 export function NewChat() {
-  const { client, scope } = useApi();
+  const { client, canChange } = useApi();
   const { navigate } = useLocation();
   const { data: agents, error } = usePolling(useCallback(() => answer(client.GET("/agents")), [client]));
   const [agent, setAgent] = useState("");
@@ -21,7 +21,7 @@ export function NewChat() {
   const [refusal, setRefusal] = useState<string>();
   const ids = { agent: useId(), text: useId(), repository: useId() };
 
-  if (scope === "read") {
+  if (!canChange) {
     return (
       <>
         <h1>New chat</h1>
