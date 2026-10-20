@@ -1,4 +1,10 @@
-import { readServerSentEvents } from "@tendworks/platform";
+import {
+  followTranscript as followPlatformTranscript,
+  TranscriptStreamRefusedError,
+  TranscriptStreamUnreachableError,
+  type FollowTranscriptOptions,
+  type FollowTranscriptOutcome,
+} from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Command, CommanderError, Option } from "commander";
 import createClient, { type Client } from "openapi-fetch";
@@ -489,70 +495,20 @@ const TERMINAL_RUN: ReadonlySet<Run["status"]> = new Set(["completed", "failed"]
 const sleepOf = (io: TendIo) => io.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
 
 /**
- * Follows a transcript stream (ADR 0017) after position `after`, handing each entry to
- * `onEntry`. A broken connection is resumed with `Last-Event-ID` after the last entry, so
- * no entry is missed or handed over twice; `CONNECT_ATTEMPTS` failures in a row give up.
- * Ends when the stream says the task ended, when `signal` aborts (`stopped`), or when
- * there is no such stream (`missing`).
+ * Follows a transcript stream with the platform library (ADR 0017), turning its errors
+ * into the CLI's: an unreachable stream into `unreachable`, a refusal into an answer error.
  */
 async function followTranscript({
-  open,
-  after,
-  signal,
-  sleep,
   unreachable,
-  onEntry,
-}: {
-  /** Opens the stream, continuing after the entry the header names, if any. */
-  open: (
-    header: { "Last-Event-ID"?: string },
-    signal: AbortSignal,
-  ) => Promise<{ data?: ReadableStream<Uint8Array> | null | undefined; error?: { title?: string; detail?: string } | undefined; response: Response }>;
-  after: number;
-  signal: AbortSignal;
-  sleep: (ms: number) => Promise<void>;
-  unreachable: (cause: unknown) => never;
-  onEntry: (entry: TranscriptEntry) => void;
-}): Promise<"ended" | "stopped" | "missing"> {
-  const stopped = new Promise<"stopped">((resolve) => signal.addEventListener("abort", () => resolve("stopped"), { once: true }));
-  let last = after;
-  for (let failures = 0; !signal.aborted; ) {
-    let answer;
-    try {
-      answer = await open(last < 0 ? {} : { "Last-Event-ID": String(last) }, signal);
-    } catch (cause) {
-      if (signal.aborted) break;
-      if (++failures >= CONNECT_ATTEMPTS) unreachable(cause);
-      await sleep(POLL_MS);
-      continue;
-    }
-    const { data, error, response } = answer;
-    if (response.status === 404) return "missing";
-    if (!response.ok || !data) throw new AnswerError(response, error);
-    const events = readServerSentEvents(data, signal);
-    try {
-      for (;;) {
-        const next = await Promise.race([events.next(), stopped]);
-        if (next === "stopped") {
-          void events.return(undefined);
-          return next;
-        }
-        if (next.done) break;
-        failures = 0;
-        if (next.value.event === "end") return "ended";
-        if (next.value.event !== "entry") continue;
-        const entry = JSON.parse(next.value.data) as TranscriptEntry;
-        last = entry.position;
-        onEntry(entry);
-      }
-    } catch {
-      // The connection broke; resumed below.
-    }
-    if (signal.aborted) break;
-    if (++failures >= CONNECT_ATTEMPTS) unreachable(new Error("the transcript stream broke off"));
-    await sleep(POLL_MS);
+  ...follow
+}: Omit<FollowTranscriptOptions<TranscriptEntry>, "retryMs" | "attempts"> & { unreachable: (cause: unknown) => never }): Promise<FollowTranscriptOutcome> {
+  try {
+    return await followPlatformTranscript({ ...follow, retryMs: POLL_MS, attempts: CONNECT_ATTEMPTS });
+  } catch (error) {
+    if (error instanceof TranscriptStreamUnreachableError) unreachable(error.cause);
+    if (error instanceof TranscriptStreamRefusedError) throw new AnswerError(error.response, error.problem as { title?: string; detail?: string } | undefined);
+    throw error;
   }
-  return "stopped";
 }
 
 /**

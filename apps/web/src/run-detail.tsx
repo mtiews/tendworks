@@ -1,12 +1,13 @@
 import type { ControlPlane } from "@tendworks/shared";
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { formatCost, formatOrigin, totalCost } from "./format.js";
 import { safeHref } from "./markdown.js";
 import { Time } from "./time.js";
-import { Transcript, type TranscriptEntry } from "./transcript.js";
+import { LiveTranscript } from "./live-transcript.js";
 import { usePolling } from "./use-polling.js";
+import type { OpenTranscriptStream } from "./use-transcript.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 type Step = Run["steps"][number];
@@ -142,25 +143,14 @@ function Output({ output }: { output: unknown }) {
   );
 }
 
-type Loaded = { entries: TranscriptEntry[] } | { missing: true } | { error: string };
-
-/** An agent step: its status, cost, error and results, and its transcript from the history. */
+/** An agent step: its status, cost, error and results, and its transcript, live while the step runs. */
 function AgentStep({ runId, step, taskId }: { runId: string; step: Step; taskId: string }) {
   const { client } = useApi();
-  const [value, setValue] = useState<Loaded>();
-  // Read again when the step's status changes, so a step that just finished shows all of it.
-  const status = step.status;
-
-  useEffect(() => {
-    let active = true;
-    answer(client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } })).then(
-      (data) => active && setValue({ entries: data.items }),
-      (error: Error) => active && setValue(error instanceof AnswerError && error.status === 404 ? { missing: true } : { error: error.message }),
-    );
-    return () => {
-      active = false;
-    };
-  }, [client, runId, taskId, status]);
+  const read = useCallback(async () => (await answer(client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } }))).items, [client, runId, taskId]);
+  const open = useCallback<OpenTranscriptStream>(
+    (header) => client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId, taskId }, header }, parseAs: "stream" }),
+    [client, runId, taskId],
+  );
 
   const headingId = `step-${taskId}`;
   return (
@@ -191,10 +181,7 @@ function AgentStep({ runId, step, taskId }: { runId: string; step: Step; taskId:
           })}
         </ul>
       )}
-      {value === undefined && <p className="muted">Loading the transcript…</p>}
-      {value && "missing" in value && <p className="muted">No transcript was found for this step.</p>}
-      {value && "error" in value && <p className="message message-error">{value.error}</p>}
-      {value && "entries" in value && (value.entries.length === 0 ? <p className="muted">The transcript is empty so far.</p> : <Transcript entries={value.entries} />)}
+      <LiveTranscript read={read} open={open} live={step.status === "running"} missing="No transcript was found for this step." />
     </section>
   );
 }

@@ -130,3 +130,15 @@
 .image-placeholder {
   color: var(--color-muted);
 }
+
+/* A transcript that is followed live. */
+.live {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-ok);
+}
+
+.live::before {
+  content: "\25CF\00A0";
+}

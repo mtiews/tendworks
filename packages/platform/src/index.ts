@@ -2,3 +2,11 @@ export { eventEnvelope, isTraceparent, newTraceparent, traceIdOf, type EventEnve
 export { createSecretResolver, SECRET_PREFIXES, type SecretConsumer, type SecretResolver } from "./secrets.js";
 export { readServerSentEvents, serverSentEventStream, type ServerSentEvent, type ServerSentEventStreamOptions } from "./server-sent-events.js";
 export { listsPlatformMcpServer, PLATFORM_MCP_SERVER } from "./platform-mcp.js";
+export {
+  followTranscript,
+  TranscriptStreamRefusedError,
+  TranscriptStreamUnreachableError,
+  type FollowTranscriptOptions,
+  type FollowTranscriptOutcome,
+  type TranscriptStreamAnswer,
+} from "./transcript-follow.js";
