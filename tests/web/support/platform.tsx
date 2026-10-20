@@ -15,6 +15,11 @@ export const READ_TOKEN = "view-test-read-token"; // betterleaks:allow (dummy to
 
 export type PlatformOptions = Partial<ControlPlaneApiOptions>;
 
+/** Starts the next `renderApp` signed in with `token`, as after a sign-in earlier in this tab. */
+export function signedIn(token: string = API_TOKEN): void {
+  window.sessionStorage.setItem("tendworks.token", token);
+}
+
 function controlPlane(options: PlatformOptions) {
   return createControlPlaneApi({
     probes: [],

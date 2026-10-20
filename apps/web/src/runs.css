@@ -1,0 +1,104 @@
+/* Runs: the run list and the run detail. */
+
+.table-scroll {
+  overflow-x: auto;
+  margin-bottom: var(--space-6);
+}
+
+.table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+}
+
+.table-scroll th,
+.table-scroll td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.table-scroll th {
+  font-weight: 600;
+  color: var(--color-muted);
+}
+
+.table-scroll .value {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row-failed td {
+  background: var(--color-error-bg);
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-completed {
+  color: var(--color-ok);
+}
+
+.status-failed {
+  color: var(--color-error);
+}
+
+.status-running,
+.status-pending {
+  color: var(--color-warn);
+}
+
+.failure {
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
+}
+
+h2 {
+  font-size: var(--text-md);
+  margin: var(--space-6) 0 var(--space-3);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+
+.fields dt {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.step {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+}
+
+.step h2 {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.artifacts {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-6);
+}

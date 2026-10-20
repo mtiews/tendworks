@@ -16,6 +16,8 @@
   "dependencies": {
     "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
+    "dompurify": "3.4.16",
+    "marked": "18.1.0",
     "openapi-fetch": "0.17.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
