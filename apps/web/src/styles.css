@@ -252,3 +252,68 @@ select {
     padding: var(--space-4) var(--space-3);
   }
 }
+
+/* Views: sections, dense tables, states */
+
+h2 {
+  font-size: var(--text-md);
+  margin: 0 0 var(--space-2);
+}
+
+.section {
+  margin-bottom: var(--space-6);
+}
+
+.section > table + p,
+.section > table + table {
+  margin-top: var(--space-3);
+}
+
+.overview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Tables scroll sideways inside themselves at phone width instead of widening the page. */
+table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: var(--text-sm);
+}
+
+th,
+td {
+  padding: var(--space-1) var(--space-3) var(--space-1) 0;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+
+th {
+  font-weight: 600;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.state {
+  font-weight: 600;
+}
+
+.state-healthy {
+  color: var(--color-ok);
+}
+
+.state-unhealthy {
+  color: var(--color-error);
+}
+
+.message-warn {
+  background: var(--color-read-only-bg);
+  color: var(--color-warn);
+}
