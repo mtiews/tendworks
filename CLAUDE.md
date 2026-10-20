@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** walking skeleton milestone 1 is done (spec: issue #1). Milestone 1b (chat path) is implemented on the integration branch; acceptance with the real harness is #33.
+**Current state:** walking skeleton milestones 1 (spec: issue #1) and 1b (chat path, spec: issue #24) are done. Milestone 1c (web UI) is designed (ADR 0018); its spec follows.
 
 ## Commands
 
@@ -75,7 +75,7 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 
 1. **Milestone 1 – automated:** GitHub issue labeled `ready-for-agent` (playground repo) → time trigger → workflow → `developer` agent (Claude Code via ACP in a sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run. Clients: API and `tend` only.
 2. **Milestone 1b – chat path:** a chat (API and `tend chat`) starts an agent session without a run (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`); agent output followed live (ADR 0015–0017).
-3. **Milestone 1c – web UI:** first web UI views and chat window, as a client of the 1b APIs.
+3. **Milestone 1c – web UI:** React + Vite SPA under `/ui/` of the server, signed in with an API token until OIDC (ADR 0018): status, runs with live transcripts, approvals, notifications, chats; localhost only.
 
 Build order (slices S0–S5) and skeleton rules: [docs/platform-implementation.md](docs/platform-implementation.md#walking-skeleton-build-order-milestone-1).
 

@@ -295,7 +295,7 @@ Tendworks has two first-party clients, both built only on the public control pla
 |  | Web UI (PWA) | `tend` CLI |
 | --- | --- | --- |
 | Focus | overview, chat, approvals, also on mobile | developers, scripting, automation, CI |
-| Authentication | OIDC login | OIDC device flow, one token per context; scoped API tokens for CI and agents |
+| Authentication | OIDC login (until then the API token, ADR 0018 (the-web-ui-is-a-same-origin-spa-signed-in-with-an-api-token)) | OIDC device flow, one token per context; scoped API tokens for CI and agents |
 | Output | interactive | readable tables by default, `-o yaml` or `-o json` for scripts, stable exit codes |
 
 **Command groups (draft)**
@@ -426,7 +426,7 @@ The starting point is an existing project in which an agent in a Docker containe
 
 1. **Milestone 1 – automated, end to end:** GitHub issue (label or webhook) → trigger gateway → workflow → agent in sandbox → commit, pull request, merge → notification. The merge initially goes through a gate that can be switched to automatic via policy. Clients are the API and the `tend` CLI only.
 2. **Milestone 1b – chat path:** A chat starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same mechanism later serves to intervene in running automated runs. Clients are the API and `tend chat`; agent output of chats and run steps can be followed live. Design review of 19 Oct 2026: ADR 0015 (a-chat-is-an-a2a-task-without-a-run), ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token), ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus).
-3. **Milestone 1c – web UI:** the first web UI views (run list, run detail with live transcript and cost, notifications, chat window), as a client of the APIs from milestones 1 and 1b; designed in its own review.
+3. **Milestone 1c – web UI:** the first web UI views as a client of the APIs from milestones 1 and 1b: status overview, run list, run detail with live transcript, cost and an inline approval decision, approval requests, notifications, and chats (list, new chat, chat window). Lists poll; transcripts and chats stream. Responsive, but reachable on localhost only; remote access waits for TLS and OIDC. Design review of 20 Oct 2026: ADR 0018 (the-web-ui-is-a-same-origin-spa-signed-in-with-an-api-token).
 
 The walking skeleton uses GitHub instead of Forgejo; the connection goes through the same integration port. End-to-end runs target a dedicated playground repository, not `tendworks` itself, so the existing container agent and the platform never pick up the same issues; the existing agent is switched off once milestone 1 is met.
 

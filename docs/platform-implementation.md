@@ -52,7 +52,7 @@ tendworks/
   apps/
     server/                  # walking skeleton: bundles control-plane, trigger-gateway, human-interaction, mcp-platform
     worker/                  # walking skeleton: bundles orchestration, agent-runtime
-    web/                     # web UI: run list, chat
+    web/                     # web UI (SPA, served by the server under /ui/): status, runs, approvals, notifications, chats
     cli/                     # tend CLI on the generated API client
   images/
     sandbox-claude-code/     # Dockerfile: Claude Code + ACP adapter
@@ -79,7 +79,7 @@ Packages under `packages/` map to the domains; apps under `apps/` are only bundl
 | Keycloak, NATS, S3, model gateway, OPA, observability |  | later; transcripts and checkpoints on a local volume, merge policy as a switch; the API is guarded by one bearer token (`TEND_API_TOKEN`) until OIDC (ADR 0014 (interim-bearer-token-on-the-control-plane-api)), from milestone 1b plus a read-only token for chat agents (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)) |
 | tend CLI | second client on the same API | yes, minimal: tend status, tend run list/get, tend agent list, tend trigger list, tend notification list, tend approval list/approve, tend run logs [--follow], tend chat <profile> [--repo <url>], tend chat list/get/attach/end |
 | Docker socket proxy | the only way the sandbox adapter reaches the Docker API; exposes only `/_ping`, `/version`, `/containers`, `/exec`, `/volumes` and `/networks` (writes allowed; networks for creating the sandbox network once), not images, so sandbox images must already be on the host. It filters paths, not request bodies: whoever reaches it can still create a privileged container, so only the worker may reach it | yes |
-| web UI | run list, run detail, notifications, chat | milestone 1c |
+| web UI | React + Vite SPA under `/ui/` of the server, on the generated API client; status, runs with live transcripts, approvals, notifications, chats (ADR 0018 (the-web-ui-is-a-same-origin-spa-signed-in-with-an-api-token)) | milestone 1c |
 
 ## Walking skeleton: build order (milestone 1)
 
@@ -210,5 +210,5 @@ The chat path with the real harness (ADR 0015, ADR 0016, ADR 0017): the `assista
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
 - [ ] Create the playground repository and its fine-grained token
 - [x] Design review for milestone 1b (chat session model) once S2 works (ADR 0015, ADR 0016, ADR 0017)
-- [ ] Design review for milestone 1c (web UI)
+- [x] Design review for milestone 1c (web UI) (ADR 0018)
 - [ ] Linux: an address at which sandboxes reach the platform MCP server; compose publishes the API on `127.0.0.1` only, which sandboxes on Linux do not reach (Platform MCP server)
