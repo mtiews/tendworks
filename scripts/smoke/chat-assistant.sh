@@ -252,6 +252,7 @@ sleep 2
 kill "$FOLLOW_PID" 2>/dev/null || true
 wait "$FOLLOW_PID" 2>/dev/null || true
 RUN_FINISHED=$(api_get "/runs/$RUN_ID" | field 'r.finishedAt')
+RUN_TASKS=$(run_tasks "$RUN_ID")
 CHAT_JSON=$(api_get "/chats/$CHAT")
 TRANSCRIPT=$(chat_transcript)
 TYPES=$(field 'r.items.map((e) => e.type).join(" ")' <<<"$TRANSCRIPT")
@@ -301,8 +302,9 @@ check "the chat answered all four turns" test "$(field "r.items.filter((e) => e.
 check "the chat ended" test "$(field 'r.status' <<<"$CHAT_JSON")" = ended
 check "the chat has a cost" has_cost
 check "the ended chat's transcript stays readable" test -n "$SESSION" -a -n "$TYPES"
-check "no volume of the chat is left" test "$(docker volume ls -q --filter "name=tendworks-volume-$CHAT" | wc -l)" -eq 0
-check_no_leftovers
+check "the run's agent step names its task" test -n "$RUN_TASKS"
+# The chat's and the run's sandboxes and volumes; $RUN_TASKS unquoted: one argument per task id.
+check_no_leftovers "$CHAT" $RUN_TASKS
 ALL_OUTPUT="$TRANSCRIPT$CHAT_JSON$(cat "$TMP/asker.log" "$TMP/watcher.log" "$TMP/follow.log")"
 check "no credential shape in the chat, its transcript or the clients' output" no_token_in "$ALL_OUTPUT"
 check "the read-only token appears nowhere" test "$(grep -cF "$READ_TOKEN" <<<"$ALL_OUTPUT")" -eq 0

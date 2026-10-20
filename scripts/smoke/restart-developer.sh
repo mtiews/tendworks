@@ -48,5 +48,5 @@ check "no failed resume" test "$(count_entries "$TRANSCRIPT" session-resume-fail
 check "output counts one resumption" test "$(field 'r.resumed' <<<"$OUTPUT")" = 1
 check "agent finished both files" grep -q "after.txt" <<<"$OUTPUT"
 check_no_tokens "$TRANSCRIPT" "$RUN_ID"
-check_no_leftovers
+check_no_leftovers $(run_tasks "$RUN_ID")
 finish "the run survived the worker restart and resumed ACP session $SESSION (run $RUN_ID)"

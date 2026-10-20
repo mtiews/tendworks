@@ -78,10 +78,28 @@ check() {
   fi
 }
 
-# Checks that no sandbox container or session volume was left behind.
+# Prints the task ids of run $1's agent steps, space-separated.
+run_tasks() { api_get "/runs/$1" | field 'r.steps?.filter((s) => s.taskId).map((s) => s.taskId).join(" ")'; }
+
+# The sandboxes and volumes of tasks $@ (run steps' task ids or chat ids): a task's volumes
+# are tendworks-volume-<task>-workspace and -session, its sandbox mounts them. Only these
+# count, so debris of other runs on the Docker daemon (e.g. integration tests) does not.
+task_sandboxes() {
+  local task
+  for task in "$@"; do
+    docker ps -aq --filter "volume=tendworks-volume-$task-workspace" --filter "volume=tendworks-volume-$task-session"
+  done | sort -u | wc -l
+}
+task_volumes() {
+  local task
+  for task in "$@"; do docker volume ls -q --filter "name=tendworks-volume-$task-"; done | sort -u | wc -l
+}
+
+# Checks that no sandbox or volume of tasks $@ is left: check_no_leftovers $(run_tasks "$RUN_ID")
 check_no_leftovers() {
-  check "no leftover sandbox" test "$(docker ps -aq --filter label=dev.tendworks.sandbox | wc -l)" -eq 0
-  check "no leftover session volume" test "$(docker volume ls -q --filter label=dev.tendworks.volume | wc -l)" -eq 0
+  check "the tasks to check for leftovers are known" test "$#" -gt 0
+  check "no leftover sandbox" test "$(task_sandboxes "$@")" -eq 0
+  check "no leftover session volume" test "$(task_volumes "$@")" -eq 0
 }
 
 # Shapes of GitHub and Anthropic credentials that must never show up in runs or transcripts.

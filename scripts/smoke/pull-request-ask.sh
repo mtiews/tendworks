@@ -70,5 +70,5 @@ else
   check "nothing merged (merged: false)" test "$(field 'r.merged' <<<"$OUTPUT")" = false
   check "pull request is still open on GitHub" test "$(pr_field "$PR" state)" = OPEN
 fi
-check_no_leftovers
+check_no_leftovers $(run_tasks "$RUN_ID")
 finish "merge: ask waited across a restart and the run followed the decision '$DECISION' (run $RUN_ID, $PR)"

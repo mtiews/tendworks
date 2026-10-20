@@ -48,5 +48,5 @@ if [ -n "$PR" ]; then
 fi
 check "transcript shows the workspace checkout" test "$(count_entries "$TRANSCRIPT" workspace-checkout)" -ge 1
 check_no_tokens "$TRANSCRIPT" "$RUN_ID"
-check_no_leftovers
+check_no_leftovers $(run_tasks "$RUN_ID")
 finish "issue #$ISSUE became merged pull request ${PR:-?} without manual steps (run $RUN_ID)"
