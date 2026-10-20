@@ -17,6 +17,7 @@ type Item =
   | { kind: "message"; key: string; time: string; text: string }
   | { kind: "thought"; key: string; time: string; text: string }
   | { kind: "tool"; key: string; call: Of<"tool-call">; result?: Of<"tool-result"> }
+  /** A turn ended: what that turn cost (the difference to the running total when the previous turn ended). */
   | { kind: "turn"; key: string; entry: Of<"turn-ended">; cost?: Cost }
   /** The agent waits for the next message: what the turn that just ended cost, and the total so far. */
   | { kind: "waiting"; key: string; entry: Of<"input-required">; turn?: Cost }
@@ -30,12 +31,15 @@ function difference(total: Cost, before: Cost | undefined): Cost | undefined {
 
 /**
  * Joins consecutive message and thought chunks, pairs tool calls with their results, gives
- * each turn end the cost so far and each wait for the next message its turn's cost.
+ * each turn end its turn's cost and each wait for the next message its turn's cost and the
+ * total so far. Usage entries carry the session's running total, not a turn's.
  */
 function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, Extract<Item, { kind: "tool" }>>();
   let cost: Cost | undefined;
+  // The running total when the previous turn ended, where the next turn's cost starts.
+  let endedAt: Cost | undefined;
   // The running total when the agent last waited for a message, where the next turn starts.
   let waitedAt: Cost | undefined;
   for (const entry of entries) {
@@ -52,7 +56,9 @@ function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
     } else if (entry.type === "usage") {
       cost = entry.cost;
     } else if (entry.type === "turn-ended") {
-      items.push({ kind: "turn", key, entry, ...(cost ? { cost } : {}) });
+      const turn = cost && difference(cost, endedAt);
+      endedAt = cost;
+      items.push({ kind: "turn", key, entry, ...(turn ? { cost: turn } : {}) });
     } else if (entry.type === "input-required") {
       const turn = entry.cost && difference(entry.cost, waitedAt);
       if (entry.cost) cost = waitedAt = entry.cost;

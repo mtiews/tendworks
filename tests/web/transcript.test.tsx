@@ -158,4 +158,34 @@ describe("transcript", () => {
     ]);
     expect(within(transcript).getByRole("link", { name: "pull-request" }).getAttribute("href")).toBe("https://example.test/acme/playground/pull/8");
   });
+
+  it("gives each turn end the cost of that turn, not the session's total so far", async () => {
+    const message = (text: string) => ({ type: "message-received", message: { messageId: text, role: "ROLE_USER", parts: [{ text }] } });
+    const { transcript } = await showTranscript([
+      message("First"),
+      { type: "usage", cost: { amount: 0.1, currency: "USD" } },
+      { type: "turn-ended", reason: "completed" },
+      { type: "input-required", message: "Done.", cost: { amount: 0.1, currency: "USD" } },
+      message("Second"),
+      { type: "usage", cost: { amount: 0.2, currency: "USD" } },
+      { type: "usage", cost: { amount: 0.35, currency: "USD" } },
+      { type: "turn-ended", reason: "cancelled" },
+      { type: "input-required", message: "Stopped.", cost: { amount: 0.35, currency: "USD" } },
+      message("Third"),
+      { type: "usage", cost: { amount: 0.4, currency: "USD" } },
+      { type: "turn-ended", reason: "completed" },
+    ]);
+
+    const text = [...transcript.children].map((item) => item.textContent?.replace(/\s+/g, " ").trim());
+    expect(text).toEqual([
+      "First",
+      "Turn completed · 0.1 USD",
+      "Waiting for the next message · turn 0.1 USD · 0.1 USD so far",
+      "Second",
+      "Turn cancelled · 0.25 USD",
+      "Waiting for the next message · turn 0.25 USD · 0.35 USD so far",
+      "Third",
+      "Turn completed · 0.05 USD",
+    ]);
+  });
 });
