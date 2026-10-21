@@ -239,7 +239,7 @@ The web UI with the real harness in a browser (ADR 0018). The regular suites cov
 - [x] Write the concrete `compose.yaml`
 - [x] Example configuration for the existing issue agent (profile, skills, sandbox template, workflow `develop-issue`, the suspended playground trigger binding `playground-ready-for-agent`)
 - [x] Check which ACP adapter is used for Claude Code and how sessions are resumed
-- [ ] Create the playground repository and its fine-grained token
+- [x] Create the playground repository and its fine-grained token (`mtiews/tendworks-playground`)
 - [x] Design review for milestone 1b (chat session model) once S2 works (ADR 0015, ADR 0016, ADR 0017)
 - [x] Design review for milestone 1c (web UI) (ADR 0018)
 - [ ] Linux: an address at which sandboxes reach the platform MCP server; compose publishes the API on `127.0.0.1` only, which sandboxes on Linux do not reach (Platform MCP server)
