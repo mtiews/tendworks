@@ -23,6 +23,7 @@ Types in `packages/shared` are generated from `contracts/` and never committed o
 | [docs/platform-architecture.md](docs/platform-architecture.md) | domains, seams/standards, data model, event catalog, security, scaling, roadmap, decisions |
 | [docs/platform-implementation.md](docs/platform-implementation.md) | tech stack, repo structure, walking skeleton components, open items |
 | [docs/software-factory.md](docs/software-factory.md) | first application on Tendworks: value stream, roles, quality gates, autonomy levels |
+| [docs/operator-guide.md](docs/operator-guide.md) | running Tendworks on your own Linux host: install, configuration, secrets, access, known gaps, operations |
 
 Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision changes, update the docs in the same change.
 
