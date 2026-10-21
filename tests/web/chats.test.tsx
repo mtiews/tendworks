@@ -385,3 +385,99 @@ describe("chat window", () => {
     expect(await within(conversation()).findByText("From the CLI")).toBeTruthy();
   });
 });
+
+/**
+ * A page with layout, which jsdom lacks: each transcript item is 200px high under a 400px
+ * head, the viewport 600px. `window.scrollTo` moves at once, as the browser does at the end
+ * of a smooth scroll, and both it and the operator's scrolling fire `scroll`.
+ */
+function pageWithLayout({ reducedMotion = false } = {}) {
+  const viewport = 600;
+  const root = document.documentElement;
+  const height = () => 400 + 200 * document.querySelectorAll('[aria-label="Transcript"] > *').length;
+  let top = 0;
+  const behaviors: (ScrollBehavior | undefined)[] = [];
+  const moveTo = (to: number) => {
+    top = Math.max(0, Math.min(to, height() - viewport));
+    window.dispatchEvent(new Event("scroll"));
+  };
+  Object.defineProperty(root, "scrollHeight", { configurable: true, get: height });
+  Object.defineProperty(root, "clientHeight", { configurable: true, get: () => viewport });
+  Object.defineProperty(root, "scrollTop", { configurable: true, get: () => top });
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: reducedMotion && query === "(prefers-reduced-motion: reduce)", media: query }));
+  vi.spyOn(window, "scrollTo").mockImplementation(((options: ScrollToOptions) => {
+    behaviors.push(options.behavior);
+    moveTo(options.top ?? top);
+  }) as typeof window.scrollTo);
+  return {
+    /** How far the operator is from the end of the page. */
+    belowView: () => height() - viewport - top,
+    /** The operator scrolls to `to`. */
+    scrollTo: moveTo,
+    behaviors,
+  };
+}
+
+describe("chat window scrolling", () => {
+  afterEach(() => {
+    for (const property of ["scrollHeight", "clientHeight", "scrollTop"]) Reflect.deleteProperty(document.documentElement, property);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("opens at the end of the history", async () => {
+    const page = pageWithLayout();
+    await openChat();
+
+    expect(page.belowView()).toBe(0);
+  });
+
+  it("follows the agent's output while the operator is at or near the end", async () => {
+    const page = pageWithLayout();
+    const { agentRuntime, chat } = await openChat();
+    // The history is three items: the page is 1000px high; the operator is 40px above its end.
+    page.scrollTo(1000 - 600 - 40);
+
+    await agentRuntime.sendChatMessage(chat.id, "From the CLI");
+    agentRuntime.finishTurn(chat.id, "Answer", USD(0.02));
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("Waiting for the next message · turn 0.01 USD · 0.02 USD so far"));
+    expect(page.belowView()).toBe(0);
+    expect(page.behaviors.at(-1)).toBe("smooth");
+  });
+
+  it("leaves the operator where they scrolled up to read", async () => {
+    const page = pageWithLayout();
+    const { agentRuntime, chat } = await openChat();
+    page.scrollTo(0);
+
+    await agentRuntime.sendChatMessage(chat.id, "From the CLI");
+    agentRuntime.finishTurn(chat.id, "Answer", USD(0.02));
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("Waiting for the next message · turn 0.01 USD · 0.02 USD so far"));
+    expect(page.belowView()).toBe(1000 + 3 * 200 - 600);
+  });
+
+  it("goes to the end when the operator sends a message, even after scrolling up", async () => {
+    const page = pageWithLayout();
+    const { user } = await openChat();
+    page.scrollTo(0);
+
+    await user.type(input(), "And the last runs?");
+    await user.click(within(conversation()).getByRole("button", { name: "Send" }));
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("And the last runs?"));
+    expect(page.belowView()).toBe(0);
+  });
+
+  it("does not scroll smoothly when the operator prefers reduced motion", async () => {
+    const page = pageWithLayout({ reducedMotion: true });
+    const { agentRuntime, chat } = await openChat();
+
+    await agentRuntime.sendChatMessage(chat.id, "From the CLI");
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("From the CLI"));
+    expect(page.belowView()).toBe(0);
+    expect(page.behaviors).not.toContain("smooth");
+  });
+});

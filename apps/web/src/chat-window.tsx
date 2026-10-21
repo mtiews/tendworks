@@ -7,6 +7,7 @@ import { formatCost } from "@tendworks/platform";
 import { TranscriptOf } from "./live-transcript.js";
 import { Time } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
+import { useFollowEnd } from "./use-follow-end.js";
 import { usePolling } from "./use-polling.js";
 import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
 
@@ -94,6 +95,8 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
   const open = useCallback<OpenTranscriptStream>((header) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream" }), [client, chatId]);
   const view = useTranscript({ read, open, live: isOpen(chat), onEnded: changed });
   const turn = turnOf(view.phase === "shown" ? view.entries : []);
+  // The page follows the transcript's end while the operator is there; the input stays in view (`chats.css`).
+  const toEnd = useFollowEnd(view.phase === "shown" ? view.entries : undefined, view.phase === "shown");
 
   // A turn that starts or ends changes the chat's status and cost: read it again at once.
   useEffect(() => {
@@ -109,14 +112,14 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
       ) : !canChange ? (
         <p className="muted">Read-only access: you can follow this chat but not write to it.</p>
       ) : (
-        <ChatActions chatId={chatId} turn={turn} following={view.phase === "shown"} changed={changed} />
+        <ChatActions chatId={chatId} turn={turn} following={view.phase === "shown"} changed={changed} sent={toEnd} />
       )}
     </section>
   );
 }
 
 /** The next message while the agent waits, cancelling the turn while it works, and ending the chat. */
-function ChatActions({ chatId, turn, following, changed }: { chatId: string; turn: Turn; following: boolean; changed: () => void }) {
+function ChatActions({ chatId, turn, following, changed, sent }: { chatId: string; turn: Turn; following: boolean; changed: () => void; sent: () => void }) {
   const { client } = useApi();
   const inputId = useId();
   const [text, setText] = useState("");
@@ -137,6 +140,7 @@ function ChatActions({ chatId, turn, following, changed }: { chatId: string; tur
     setSending(true);
     setFailure(undefined);
     setSentAfter(turn.position);
+    sent();
     try {
       await answer(client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text } }));
       setText("");
