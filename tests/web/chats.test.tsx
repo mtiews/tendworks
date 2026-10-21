@@ -1,5 +1,5 @@
 import { createInMemoryAgentRuntime, type Configuration } from "@tendworks/control-plane";
-import { screen, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
 import { rows } from "./support/table.js";
@@ -169,6 +169,13 @@ describe("chats in read-only mode", () => {
 const conversation = () => screen.getByRole("region", { name: "Conversation" });
 const transcriptItems = () => [...within(conversation()).getByRole("list", { name: "Transcript" }).children].map((item) => item.textContent?.replace(/\s+/g, " ").trim());
 const input = () => within(conversation()).getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+/** The text of the elements that describe `element` (`aria-describedby`). */
+const description = (element: Element) =>
+  (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
 /** What a field of the chat's summary says, times as their exact timestamp. */
 const field = (label: string) => {
   const value = screen.getByText(label, { selector: "dt" }).nextElementSibling!.cloneNode(true) as Element;
@@ -214,6 +221,92 @@ describe("chat window", () => {
     await vi.waitFor(() => expect(input().disabled).toBe(false));
     await vi.waitFor(() => expect(field("Cost")).toBe("0.03 USD"));
     expect(field("Status")).toBe("input-required");
+  });
+
+  it("sends with Enter", async () => {
+    const { user, platform: running, chat } = await openChat();
+
+    await user.type(input(), "Next{Enter}");
+
+    await vi.waitFor(() => expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(1));
+    expect(await posts(running.requests, `/chats/${chat.id}/messages`)[0]!.json()).toEqual({ text: "Next" });
+  });
+
+  it("inserts a line break with Shift+Enter instead of sending", async () => {
+    const { user, platform: running, chat } = await openChat();
+
+    await user.type(input(), "First{Shift>}{Enter}{/Shift}second");
+
+    expect(input().value).toBe("First\nsecond");
+    expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(0);
+  });
+
+  it("does not send with the Enter that ends an input method's composition", async () => {
+    const { user, platform: running, chat } = await openChat();
+    await user.type(input(), "日本");
+
+    fireEvent.keyDown(input(), { key: "Enter", isComposing: true });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(0);
+    expect(input().disabled).toBe(false);
+
+    // Browsers that leave `isComposing` unset report the key as 229 while composing.
+    fireEvent.keyDown(input(), { key: "Enter", keyCode: 229 });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(0);
+    expect(input().value).toBe("日本");
+  });
+
+  it("says next to Send how Enter works, as the input's description", async () => {
+    await openChat();
+
+    expect(description(input())).toBe("Enter to send · Shift+Enter for a new line");
+  });
+
+  it("does not send an empty message with Enter, nor while the agent works", async () => {
+    const { user, platform: running, chat } = await openChat();
+
+    await user.type(input(), "   {Enter}");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(0);
+
+    await user.clear(input());
+    await user.type(input(), "Next{Enter}");
+    await vi.waitFor(() => expect(input().disabled).toBe(true));
+    // The agent works on it: an Enter that still reaches the disabled input sends nothing.
+    fireEvent.change(input(), { target: { value: "Another" } });
+    fireEvent.keyDown(input(), { key: "Enter" });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(1);
+  });
+
+  it("inserts a line break with Enter on a touch screen, whose keyboard has no Shift, and sends with the button", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", media: query }));
+    try {
+      const { user, platform: running, chat } = await openChat();
+
+      await user.type(input(), "First{Enter}second");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(input().value).toBe("First\nsecond");
+      expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(0);
+
+      await user.click(within(conversation()).getByRole("button", { name: "Send" }));
+      await vi.waitFor(() => expect(posts(running.requests, `/chats/${chat.id}/messages`)).toHaveLength(1));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("has no Enter hint on a touch screen", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", media: query }));
+    try {
+      await openChat();
+
+      expect(description(input())).toBe("");
+      expect(screen.queryByText(/Enter to send/)).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("sends with Ctrl+Enter", async () => {

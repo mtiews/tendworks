@@ -78,3 +78,7 @@ a.button.primary {
 .chat-buttons .chat-end {
   margin-left: auto;
 }
+
+.chat-hint {
+  font-size: var(--text-sm);
+}

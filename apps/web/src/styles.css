@@ -237,15 +237,42 @@ select {
   padding: var(--space-6) var(--space-4);
 }
 
-/* Phone width: the navigation gets a row of its own and scrolls sideways. */
+/*
+ * Phone width: the brand, the access scope and sign-out share the first row; the navigation
+ * gets rows of its own below, three entries per row, so every entry stays in view and nothing
+ * scrolls sideways. Entries and sign-out are at least 44px high for touch.
+ */
 @media (max-width: 40rem) {
   .main-nav {
     order: 3;
     flex-basis: 100%;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    overflow-x: visible;
   }
 
-  .top-bar {
-    justify-content: space-between;
+  .main-nav a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    border: 1px solid var(--color-border);
+  }
+
+  .main-nav a[aria-current="page"] {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+  }
+
+  .scope {
+    margin-left: auto;
+  }
+
+  .top-bar button {
+    min-height: 44px;
   }
 
   .content {

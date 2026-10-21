@@ -14,6 +14,8 @@ import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
 type Chat = ControlPlane.components["schemas"]["chat"];
 
 const messageOf = (error: unknown) => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
+/** A touch screen: its keyboard has no Shift for a new line. */
+const coarsePointer = () => typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
 const isOpen = (chat: Chat) => chat.status === "working" || chat.status === "input-required";
 
 /**
@@ -122,6 +124,9 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
 function ChatActions({ chatId, turn, following, changed, sent }: { chatId: string; turn: Turn; following: boolean; changed: () => void; sent: () => void }) {
   const { client } = useApi();
   const inputId = useId();
+  const hintId = useId();
+  // Touch screens keep Enter for a new line (see the input's key handling) and show no hint.
+  const [touch] = useState(coarsePointer);
   const [text, setText] = useState("");
   // The turn position when the last message went out: until the transcript moves past it,
   // the agent is taken to work on it, so the input does not reopen in between.
@@ -195,16 +200,28 @@ function ChatActions({ chatId, turn, following, changed, sent }: { chatId: strin
           rows={3}
           value={text}
           disabled={!waiting}
+          aria-describedby={waiting && !touch ? hintId : undefined}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
-            // Ctrl+Enter (Cmd+Enter) sends, as in most chat clients; Enter alone is a new line.
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void send(event);
+            // Enter sends and Shift+Enter is a new line; Ctrl+Enter (Cmd+Enter) sends too. Phone
+            // keyboards have no Shift, so on touch screens Enter stays a new line and the button sends.
+            // The Enter that ends an input method's composition never sends.
+            if (event.key !== "Enter" || event.shiftKey) return;
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (!event.ctrlKey && !event.metaKey && touch) return;
+            event.preventDefault();
+            void send(event);
           }}
         />
         <div className="chat-buttons">
           <button type="submit" className="primary" disabled={!waiting || text.trim() === ""}>
             Send
           </button>
+          {waiting && !touch && (
+            <span id={hintId} className="muted chat-hint">
+              Enter to send · Shift+Enter for a new line
+            </span>
+          )}
           {!waiting && following && (
             <button type="button" disabled={cancelling} onClick={() => void cancel()}>
               Cancel turn
