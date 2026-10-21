@@ -1,0 +1,77 @@
+/* Runs: the run list and the run detail. */
+
+code.value {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.row-failed td {
+  background: var(--color-error-bg);
+}
+
+.status {
+  font-weight: 600;
+}
+
+.status-completed {
+  color: var(--color-ok);
+}
+
+.status-failed {
+  color: var(--color-error);
+}
+
+.status-running,
+.status-pending {
+  color: var(--color-warn);
+}
+
+.failure {
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
+}
+
+table + h2,
+.fields + h2 {
+  margin-top: var(--space-6);
+}
+
+.fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-4);
+}
+
+.fields dt {
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
+.fields dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.step {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+}
+
+.step h2 {
+  margin-top: 0;
+  overflow-wrap: anywhere;
+}
+
+.step-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.artifacts {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-6);
+}

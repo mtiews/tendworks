@@ -10,7 +10,7 @@ function configuration() {
   const dir = mkdtempSync(join(tmpdir(), "tend-agents-"));
   mkdirSync(join(dir, "agents"));
   const profile = (name: string, spec: string) => `---\napiVersion: tendworks.dev/v1\nkind: AgentProfile\nmetadata:\n  name: ${name}\nspec:\n${spec}\n---\nRole.\n`;
-  writeFileSync(join(dir, "agents", "reviewer.md"), profile("reviewer", "  harness: fake\n  chat: {}"));
+  writeFileSync(join(dir, "agents", "reviewer.md"), profile("reviewer", "  harness: fake\n  chat: { idleMinutes: 3 }\n  mcp: [tendworks]"));
   writeFileSync(
     join(dir, "agents", "developer.md"),
     profile(
@@ -63,7 +63,7 @@ describe("tend agent list", () => {
     ]);
   });
 
-  it("prints the agent profiles with their sessions as a document with -o json and -o yaml, naming secrets but never their values", async () => {
+  it("prints the agent profiles with chat settings, MCP servers and sessions as a document with -o json and -o yaml, naming secrets but never their values", async () => {
     const { api, step, chat } = await busy();
     const agents = [
       {
@@ -74,7 +74,13 @@ describe("tend agent list", () => {
         secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"],
         sessions: [{ kind: "run-step", agent: "developer", taskId: step.taskId, status: "working", startedAt: step.startedAt, run: "run-1", step: "/do/0/implement" }],
       },
-      { name: "reviewer", harness: "fake", sessions: [{ kind: "chat", agent: "reviewer", taskId: chat.id, status: "working", startedAt: chat.startedAt, chat: chat.id }] },
+      {
+        name: "reviewer",
+        harness: "fake",
+        chat: { idleMinutes: 3 },
+        mcp: ["tendworks"],
+        sessions: [{ kind: "chat", agent: "reviewer", taskId: chat.id, status: "working", startedAt: chat.startedAt, chat: chat.id }],
+      },
     ];
 
     const json = await tend(api, ["agent", "list", "-o", "json"]);

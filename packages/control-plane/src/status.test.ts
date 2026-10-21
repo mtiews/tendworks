@@ -120,3 +120,27 @@ describe("GET /status", () => {
     ]);
   });
 });
+
+describe("GET /status: overview", () => {
+  const run = (id: string, status: "pending" | "running" | "completed" | "failed") => ({ id, workflow: "hello-agent", status, input: {}, steps: [], createdAt: "2026-10-18T10:00:00.000Z" });
+
+  it("reports the number of active (pending or running) runs", async () => {
+    const runs = createInMemoryRuns();
+    for (const fixture of [run("r-1", "running"), run("r-2", "pending"), run("r-3", "completed"), run("r-4", "failed")]) runs.runs.set(fixture.id, fixture);
+    const api = createControlPlaneApi({ ...noRuns, probes: [healthy("store")], runs });
+
+    const response = await api.fetch(new Request("http://tend.test/status"));
+
+    expect(await response.json()).toMatchObject({ status: "healthy", activeRuns: 2 });
+  });
+
+  it("leaves the number out when runs cannot be read, without making the platform unhealthy", async () => {
+    const runs = { ...createInMemoryRuns(), list: () => Promise.reject(new Error("orchestration down")) };
+    const api = createControlPlaneApi({ ...noRuns, probes: [healthy("store")], runs });
+
+    const response = await api.fetch(new Request("http://tend.test/status"));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).not.toHaveProperty("activeRuns");
+  });
+});

@@ -1,6 +1,7 @@
 // Code quality rules on top of the type checker and the architecture rules (dependency-cruiser).
 // Type-aware rules catch async mistakes (floating or misused promises) that tests easily miss.
 import js from "@eslint/js";
+import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -21,7 +22,7 @@ export default tseslint.config(
   {
     languageOptions: {
       parserOptions: {
-        project: ["./packages/*/tsconfig.json", "./apps/*/tsconfig.json", "./tsconfig.test.json"],
+        project: ["./packages/*/tsconfig.json", "./apps/*/tsconfig.json", "./tests/web/tsconfig.json", "./tsconfig.test.json"],
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -39,8 +40,13 @@ export default tseslint.config(
     },
   },
   {
+    // The web UI (and the view tests that render it) follow the rules of hooks.
+    files: ["apps/web/src/**/*.{ts,tsx}", "tests/web/**/*.{ts,tsx}"],
+    extends: [reactHooks.configs.flat.recommended],
+  },
+  {
     // Tests read untyped JSON from APIs on purpose and assert its shape.
-    files: ["**/*.test.ts", "**/*.suite.ts", "**/*.stub.ts", "tests/**/*.ts"],
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/*.suite.ts", "**/*.stub.ts", "tests/**/*.ts", "tests/**/*.tsx"],
     rules: {
       "@typescript-eslint/no-unsafe-assignment": "off",
       "@typescript-eslint/no-unsafe-member-access": "off",

@@ -10,5 +10,9 @@ packages/shared/src/generated/
 .env
 .claude/settings.local.json
 
+# Playwright output
+tests/browser/test-results/
+tests/browser/playwright-report/
+
 # Agent worktrees
 .claude/worktrees/

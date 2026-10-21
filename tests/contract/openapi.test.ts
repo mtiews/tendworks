@@ -405,6 +405,8 @@ describe("control plane: agents", () => {
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
     expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+    expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("chat");
+    expect(data?.items.find((agent) => agent.name === "assistant")).toMatchObject({ chat: { idleMinutes: 5 }, mcp: ["tendworks"] });
   });
 
   it("shows the active agent sessions of a run's step and of a chat under their profiles, and leaves out finished ones", async () => {
@@ -486,10 +488,11 @@ describe("control plane: the API token", () => {
       client.GET("/chats/{chatId}", { params: { path: { chatId: "c-1" } } }),
       client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: "c-1" } } }),
       client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId: "c-1" } } }),
+      client.GET("/access"),
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {
@@ -498,6 +501,19 @@ describe("control plane: the API token", () => {
     const answers = await Promise.all([client.GET("/runs"), client.GET("/agents"), client.GET("/triggers"), client.GET("/notifications"), client.GET("/approval-requests")]);
 
     expect(answers.map(({ response }) => response.status)).toEqual([200, 200, 200, 200, 200]);
+  });
+
+  it("tells the full access of the API token and the read access of the read-only token", async () => {
+    const full = await controlPlane({}, { token: API_TOKEN }).GET("/access");
+    const read = await controlPlane({}, { token: READ_TOKEN }).GET("/access");
+
+    expect([full.data, read.data]).toEqual([{ scope: "full" }, { scope: "read" }]);
+  });
+
+  it("reserves paths under /ui/ for the web UI", () => {
+    const document = readContract("openapi/control-plane.yaml") as { paths: Record<string, unknown> };
+
+    expect(Object.keys(document.paths).filter((path) => path === "/" || path === "/ui" || path.startsWith("/ui/"))).toEqual([]);
   });
 
   it("declares the API token for every operation but the status, and the read-only token for reading only", () => {

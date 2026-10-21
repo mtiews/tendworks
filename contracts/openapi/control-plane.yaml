@@ -37,6 +37,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PlatformStatus"
+  /access:
+    get:
+      operationId: getAccess
+      summary: The access the presented token grants
+      description: >-
+        Whether the presented bearer token may only read (`read`, the read-only token) or
+        also change state (`full`, the API token), so that a client can offer only what it
+        may do, e.g. the web UI's read-only mode or a script that checks before it acts.
+        The API stays the guard: operations that change state refuse the read-only token
+        regardless.
+      responses:
+        "200":
+          description: The access of the presented token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Access"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /runs:
     post:
       operationId: startRun
@@ -1138,6 +1166,19 @@ components:
           items:
             type: string
           description: Names of the secrets the profile passes into its sandbox (never their values).
+        chat:
+          description: >-
+            The profile's chat settings (ADR 0015), defaults filled in; missing when the
+            profile allows no chats, so `POST /chats` refuses it.
+          $ref: "../schemas/agent-profile.schema.yaml#/$defs/chatSettings"
+        mcp:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+          description: >-
+            MCP servers the platform configures for its sessions, as the profile lists them
+            (e.g. `tendworks`, the platform MCP server); missing when it lists none.
         sessions:
           type: array
           description: >-
@@ -1183,6 +1224,15 @@ components:
     HealthState:
       type: string
       enum: [healthy, unhealthy]
+    Access:
+      type: object
+      required: [scope]
+      additionalProperties: false
+      properties:
+        scope:
+          type: string
+          enum: [read, full]
+          description: "`read`: reading only; `full`: reading and changing state."
     PlatformStatus:
       type: object
       required: [status, components, checkedAt]
@@ -1203,6 +1253,11 @@ components:
           description: >-
             Number of approval requests waiting for a decision; absent when approval
             requests cannot be read.
+        activeRuns:
+          type: integer
+          minimum: 0
+          description: >-
+            Number of runs that are pending or running; absent when runs cannot be read.
     ComponentStatus:
       type: object
       required: [name, status]

@@ -1,4 +1,4 @@
-import { newTraceparent } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, newTraceparent } from "@tendworks/platform";
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
@@ -124,8 +124,6 @@ interface OpenChat {
   suspending?: Promise<void>;
 }
 
-const DEFAULT_IDLE_MINUTES = 5;
-
 /**
  * Accepts A2A tasks and hands each to the harness its agent profile names, recording
  * the session's transcript and cost. A message whose task exists already returns that
@@ -200,7 +198,7 @@ export function createAgentRuntime({
    */
   function idleAfterwards(chat: OpenChat, since: Date): void {
     const wait = ++chat.waits;
-    const idleMs = (chat.profile.spec.chat?.idleMinutes ?? DEFAULT_IDLE_MINUTES) * 60_000;
+    const idleMs = (chat.profile.spec.chat?.idleMinutes ?? DEFAULT_CHAT_IDLE_MINUTES) * 60_000;
     void idle(Math.max(0, idleMs - (now().getTime() - since.getTime()))).then(async () => {
       const id = chat.task.id;
       if (chat.waits !== wait || chat.ending || busy.has(id) || chats.get(id) !== chat) return;

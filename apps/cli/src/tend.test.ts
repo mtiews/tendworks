@@ -12,6 +12,7 @@ async function tend(args: string[], probes: HealthProbe[]) {
     probes,
     configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
     apiToken: "test-token",
+    readToken: "read-token",
     runs: createInMemoryRuns(),
   });
   let stdout = "";
@@ -33,6 +34,31 @@ describe("tend status", () => {
     expect(stdout).toMatch(/^COMPONENT\s+STATUS\s+MESSAGE$/m);
     expect(stdout).toMatch(/^store\s+healthy$/m);
     expect(stdout).toMatch(/^execution-engine\s+healthy$/m);
+  });
+
+  it("shows the access of the presented token: full, read, or none without a valid one", async () => {
+    const full = await tend(["--token", "test-token", "status"], [probe("store", "healthy")]);
+    const read = await tend(["--token", "read-token", "status"], [probe("store", "healthy")]);
+    const none = await tend(["status"], [probe("store", "healthy")]);
+    const wrong = await tend(["--token", "wrong-token", "status"], [probe("store", "healthy")]);
+
+    expect([full, read, none, wrong].map(({ exitCode }) => exitCode)).toEqual([0, 0, 0, 0]);
+    expect(full.stdout).toMatch(/^ACCESS\s+full$/m);
+    expect(read.stdout).toMatch(/^ACCESS\s+read$/m);
+    expect(none.stdout).toMatch(/^ACCESS\s+none$/m);
+    expect(wrong.stdout).toMatch(/^ACCESS\s+none$/m);
+  });
+
+  it("shows the number of active runs", async () => {
+    const { stdout } = await tend(["status"], [probe("store", "healthy")]);
+
+    expect(stdout).toMatch(/^ACTIVE RUNS\s+0$/m);
+  });
+
+  it("leaves the access out of the status document, which is the platform's", async () => {
+    const { stdout } = await tend(["--token", "test-token", "status", "-o", "json"], [probe("store", "healthy")]);
+
+    expect(JSON.parse(stdout)).not.toHaveProperty("access");
   });
 
   it("exits 2 and shows the reason when the platform is unhealthy", async () => {

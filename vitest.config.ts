@@ -20,9 +20,10 @@ export default defineConfig({
     // without a reason in the pull request.
     coverage: {
       provider: "v8",
-      include: ["packages/*/src/**/*.ts", "apps/*/src/**/*.ts"],
+      include: ["packages/*/src/**/*.ts", "apps/*/src/**/*.{ts,tsx}"],
       exclude: [
         "**/*.test.ts",
+        "apps/web/src/main.tsx", // the browser entry point, covered by the browser end-to-end tests
         "**/*.suite.ts",
         "**/*.stub.ts",
         "packages/shared/**", // generated types only
@@ -37,6 +38,7 @@ export default defineConfig({
         // Every domain package must stay well covered on its own, not only on average.
         "packages/*/src/**": { lines: 88, branches: 72 },
         "apps/cli/src/**": { lines: 88, branches: 72 },
+        "apps/web/src/**": { lines: 88, branches: 72 },
       },
     },
     projects: [
@@ -46,6 +48,17 @@ export default defineConfig({
           name: "unit",
           include: ["packages/*/src/**/*.test.ts", "apps/*/src/**/*.test.ts", "tests/architecture/**/*.test.ts", "tests/contract/**/*.test.ts"],
           exclude: ["**/*.integration.test.ts", "**/node_modules/**"],
+        },
+      },
+      {
+        // View tests: the whole web app in jsdom against the real control plane in process.
+        extends: true,
+        test: {
+          name: "web",
+          include: ["tests/web/**/*.test.tsx"],
+          environment: "jsdom",
+          environmentOptions: { jsdom: { url: "http://tend.test/ui/" } },
+          setupFiles: ["tests/web/support/setup.ts"],
         },
       },
       {

@@ -8,15 +8,16 @@
   },
   "scripts": {
     "generate": "pnpm --filter @tendworks/shared generate",
-    "build": "pnpm generate && tsc -b",
-    "typecheck": "pnpm generate && tsc -b && tsc -p tsconfig.test.json",
+    "build": "pnpm generate && tsc -b && tsc -p apps/web && pnpm --filter @tendworks/web build",
+    "typecheck": "pnpm generate && tsc -b && tsc -p tsconfig.test.json && tsc -p apps/web && tsc -p tests/web",
     "lint": "depcruise packages apps tests && eslint . --max-warnings 0",
-    "test": "vitest run --project unit",
+    "test": "vitest run --project unit --project web",
     "test:integration": "vitest run --project integration",
-    "e2e": "docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp && docker compose -f deploy/compose.yaml up -d --build --wait && vitest run --project e2e",
+    "e2e": "docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp && docker compose -f deploy/compose.yaml up -d --build --wait && vitest run --project e2e && pnpm e2e:browser",
+    "e2e:browser": "pnpm --filter @tendworks/browser-tests test",
     "check": "pnpm typecheck && pnpm lint && pnpm test",
     "prepare": "node scripts/install-git-hooks.mjs",
-    "coverage": "vitest run --project unit --project integration --coverage"
+    "coverage": "vitest run --project unit --project web --project integration --coverage"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -24,6 +25,7 @@
     "@vitest/coverage-v8": "5.0.3",
     "dependency-cruiser": "18.5.0",
     "eslint": "10.12.0",
+    "eslint-plugin-react-hooks": "7.1.1",
     "typescript": "6.0.3",
     "typescript-eslint": "8.71.0",
     "vite": "8.3.4",
