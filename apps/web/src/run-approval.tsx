@@ -2,6 +2,7 @@ import { useCallback, useId } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
 import { Age, DecisionActions, DecisionFailure, useDecision } from "./approvals.js";
+import { LinkedText } from "./linked-text.js";
 import { usePolling } from "./use-polling.js";
 
 /**
@@ -35,7 +36,9 @@ export function RunApprovalRequest({ runId }: { runId: string }) {
       {loaded?.request && (
         <section className="approval panel" aria-labelledby={headingId}>
           <h2 id={headingId}>Approval request</h2>
-          <p>{loaded.request.question}</p>
+          <p>
+            <LinkedText text={loaded.request.question} />
+          </p>
           <p className="muted">
             {loaded.request.action} · {loaded.request.policy} · requested <Age value={loaded.request.createdAt} now={loaded.readAt} />
           </p>

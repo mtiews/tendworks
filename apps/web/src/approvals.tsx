@@ -4,6 +4,7 @@ import { useApi } from "./api.js";
 import { answer } from "./answers.js";
 import { Confirmation } from "./confirm.js";
 import { Pending } from "./pending.js";
+import { LinkedText } from "./linked-text.js";
 import { Link } from "./router.js";
 import { Time } from "./time.js";
 import { usePolling } from "./use-polling.js";
@@ -69,7 +70,7 @@ export function ApprovalRequestsPage() {
                   <span className={`status status-${request.status}`}>{request.status}</span>
                 </td>
                 <td>
-                  {request.question}
+                  <LinkedText text={request.question} />
                   <div className="muted">
                     {request.action} · {request.policy}
                   </div>

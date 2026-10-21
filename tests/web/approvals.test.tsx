@@ -4,13 +4,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
 import { rows } from "./support/table.js";
 
+const PULL_REQUEST = "https://github.com/acme/playground/pull/13";
+
 // The request of `tend approval`'s tests, so the page shows what `tend approval list` shows.
 const pending: ApprovalRequest = {
   id: "5e1f-approval-pending",
   runId: "0b6c4c1e-run",
   workflow: "develop-issue",
   action: "merge",
-  pullRequest: "https://github.com/acme/playground/pull/13",
+  pullRequest: PULL_REQUEST,
   policy: "ask-before-merge",
   question: "Merge https://github.com/acme/playground/pull/13 for run 0b6c4c1e-run of develop-issue?",
   status: "pending",
@@ -128,6 +130,29 @@ describe("approval requests page", () => {
     expect(await screen.findByText("rejected")).toBeTruthy();
   });
 
+  it("links the URLs in the question, opening them in a new tab", async () => {
+    openApprovals([pending]);
+
+    const table = await screen.findByRole("table", { name: "Approval requests" });
+    const link = within(table).getByRole("link", { name: PULL_REQUEST });
+    expect(link.getAttribute("href")).toBe(PULL_REQUEST);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+  });
+
+  it("keeps trailing punctuation out of links and leaves other URL schemes as text", async () => {
+    const question = "Merge (https://github.com/acme/playground/pull/13), see https://example.test/notes. Or javascript:alert(1)?";
+    openApprovals([{ ...pending, question }]);
+
+    const table = await screen.findByRole("table", { name: "Approval requests" });
+    const links = within(table)
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("target") === "_blank");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
+    expect(links.map((link) => link.textContent)).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
+    expect(rows(table)[1]?.[1]).toBe(`${question}merge · ask-before-merge`);
+  });
+
   it("offers no actions in read-only mode", async () => {
     openApprovals([pending, approved], READ_TOKEN);
 
@@ -199,6 +224,16 @@ describe("pending approval request on the run detail", () => {
     await waitFor(() => expect(platform.requests.some((request) => new URL(request.url).pathname === "/approval-requests")).toBe(true));
     await act(() => Promise.resolve());
     expect(screen.queryByRole("region", { name: "Approval request" })).toBeNull();
+  });
+
+  it("links the URLs in the question, opening them in a new tab", async () => {
+    openRun([pending]);
+
+    const region = await screen.findByRole("region", { name: "Approval request" });
+    const link = within(region).getByRole("link", { name: PULL_REQUEST });
+    expect(link.getAttribute("href")).toBe(PULL_REQUEST);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
   });
 
   it("shows the pending request without actions in read-only mode", async () => {
