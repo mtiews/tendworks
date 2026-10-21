@@ -18,7 +18,7 @@ Results come back as A2A artifacts: the agent writes a JSON array of `{ name, ur
 
 ## Consequences
 
-- The agent token can still merge (accepted risk until a GitHub App token per run, see #2); the role description tells the agent never to merge.
+- The agent token can still merge (accepted risk until a GitHub App token per run, see #2); the role description tells the agent never to merge. How far token permissions and a ruleset reduce this before then: [GitHub access for agents](../github-agent-access.md).
 - `gh` is pinned with its checksum in the sandbox image (`images/sandbox-claude-code`); the image tag gained a revision suffix (`0.85.1-1`), so the image must be rebuilt.
 - Reporting a result depends on the agent writing the file; a run whose agent reported no pull request completes with `pullRequest: null`. The merge step (#14) should treat that as a failure, or look the pull request up by the branch, which is in the run's output too.
 - Every profile that lists a secret needs it set, also for unrelated smoke tests (`hello-developer` now needs `TENDWORKS_AGENT_GITHUB_TOKEN`).
