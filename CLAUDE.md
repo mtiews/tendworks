@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** walking skeleton milestones 1 (spec: issue #1) and 1b (chat path, spec: issue #24) are done. Milestone 1c (web UI, spec: issue #38, ADR 0018) is implemented; its manual acceptance (#46) is pending.
+**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0020) is designed; its tickets follow.
 
 ## Commands
 
@@ -78,6 +78,8 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 1. **Milestone 1 – automated:** GitHub issue labeled `ready-for-agent` (playground repo) → time trigger → workflow → `developer` agent (Claude Code via ACP in a sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run. Clients: API and `tend` only.
 2. **Milestone 1b – chat path:** a chat (API and `tend chat`) starts an agent session without a run (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`); agent output followed live (ADR 0015–0017).
 3. **Milestone 1c – web UI:** React + Vite SPA under `/ui/` of the server, signed in with an API token until OIDC (ADR 0018): status, runs with live transcripts, approvals, notifications, chats; localhost only.
+
+After the skeleton, **milestone 2 – clean single-host deployment on Linux** (Ubuntu 24.04, Docker Engine): tagged releases, no default tokens, restart policies, versioned schema migrations per domain, backup and restore scripts, sandboxes named per installation with orphan clean-up, the platform MCP server through an MCP-only gateway (ADR 0019), remote access only through a TLS layer in front of localhost (ADR 0020).
 
 Build order (slices S0–S5) and skeleton rules: [docs/platform-implementation.md](docs/platform-implementation.md#walking-skeleton-build-order-milestone-1).
 

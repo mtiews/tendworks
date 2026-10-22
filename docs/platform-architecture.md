@@ -426,7 +426,7 @@ The starting point is an existing project in which an agent in a Docker containe
 
 1. **Milestone 1 – automated, end to end:** GitHub issue (label or webhook) → trigger gateway → workflow → agent in sandbox → commit, pull request, merge → notification. The merge initially goes through a gate that can be switched to automatic via policy. Clients are the API and the `tend` CLI only.
 2. **Milestone 1b – chat path:** A chat starts an agent session without a workflow or trigger; same agent runtime, same sandbox, same harness. The same mechanism later serves to intervene in running automated runs. Clients are the API and `tend chat`; agent output of chats and run steps can be followed live. Design review of 19 Oct 2026: ADR 0015 (a-chat-is-an-a2a-task-without-a-run), ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token), ADR 0017 (live-agent-output-streams-through-the-api-not-the-event-bus).
-3. **Milestone 1c – web UI:** the first web UI views as a client of the APIs from milestones 1 and 1b: status overview, run list, run detail with live transcript, cost and an inline approval decision, approval requests, notifications, and chats (list, new chat, chat window). Lists poll; transcripts and chats stream. Responsive, but reachable on localhost only; remote access waits for TLS and OIDC. Design review of 20 Oct 2026: ADR 0018 (the-web-ui-is-a-same-origin-spa-signed-in-with-an-api-token).
+3. **Milestone 1c – web UI:** the first web UI views as a client of the APIs from milestones 1 and 1b: status overview, run list, run detail with live transcript, cost and an inline approval decision, approval requests, notifications, and chats (list, new chat, chat window). Lists poll; transcripts and chats stream. Responsive, but reachable on localhost only; remote access waits for TLS and OIDC. Design review of 20 Oct 2026: ADR 0018 (the-web-ui-is-a-same-origin-spa-signed-in-with-an-api-token). Milestone 2 adds remote access through a TLS layer in front of localhost (ADR 0020 (remote-access-only-through-a-tls-layer-in-front-of-localhost)).
 
 The walking skeleton uses GitHub instead of Forgejo; the connection goes through the same integration port. End-to-end runs target a dedicated playground repository, not `tendworks` itself, so the existing container agent and the platform never pick up the same issues; the existing agent is switched off once milestone 1 is met.
 
@@ -456,12 +456,39 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 
 **Success criterion (milestone 1b):** A chat can be started with `tend chat`, work in the workspace and survive being left and attached again (also from a second client), an idle sandbox and a platform restart mid-turn without loss; the three example questions are answered correctly from the platform's live state; an agent in a workflow cannot read the platform API; `tend run logs <id> --follow` streams a running agent step.
 
+**Milestone 2 – clean single-host deployment on Linux (design review of 22 Oct 2026, spec #54)**
+
+The walking skeleton runs on the developer's laptop. Before broadening, the platform must run unattended on the operator's own Linux host, Ubuntu 24.04 with Docker Engine:
+
+- **Releases:** tagged releases (`v0.2.0` onwards), built on the host.
+- **Configuration:** the operator's configuration lives apart from the code. The starter configuration has no test fakes.
+- **Secure defaults:** no default tokens, the workflow engine's UI only on request.
+- **Running unattended:** restart policies, so the stack survives a host reboot.
+- **Updates:** versioned schema migrations per domain; backup and restore scripts.
+- **Sandboxes:** named per installation, with a clean-up of orphans.
+- **Chat agents on Linux:** sandboxes reach the platform MCP server through an MCP-only gateway (ADR 0019 (sandboxes-reach-the-platform-mcp-server-through-an-mcp-only-gateway)).
+- **Access:** from the operator's devices only through a TLS layer in front of the localhost-bound server (ADR 0020 (remote-access-only-through-a-tls-layer-in-front-of-localhost)).
+
+The former roadmap steps 2–6 move back by one.
+
+**Success criterion (milestone 2):** Following only the operator guide, a fresh installation on Ubuntu:
+
+- runs `hello-developer`;
+- runs `develop-issue` with `merge: ask` on a private repository with the narrowed agent token;
+- answers an `assistant` chat from live state;
+- serves the web UI to the operator's phone over HTTPS;
+- continues a run across a host reboot;
+- updates to a new tag with a migration;
+- restores from a backup;
+- leaves no orphaned sandboxes or volumes.
+
 1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
-2. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display.
-3. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
-4. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
-5. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
-6. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
+2. **Clean single-host deployment on Linux (milestone 2).** As refined below: tagged releases, secure defaults, schema migrations, backup and restore, sandbox clean-up, the platform MCP server on Linux, access from the operator's devices through a TLS layer.
+3. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
+4. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
+5. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
+6. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
+7. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
 
 **Fitness functions (run in CI, protect openness)**
 
