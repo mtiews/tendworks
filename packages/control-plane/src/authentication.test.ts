@@ -127,37 +127,25 @@ describe("reading", () => {
 
 describe("checking the tokens before the server starts", () => {
   const long = "0123456789abcdef";
+  const other = "fedcba9876543210";
+  const setup = "set it in deploy/.env; scripts/setup-env.sh creates one with random tokens";
 
-  it("accepts an API token of at least 16 characters, with or without a different read-only token of at least 16", () => {
-    expect(apiTokenProblems({ apiToken: long })).toEqual([]);
-    expect(apiTokenProblems({ apiToken: long, readToken: "fedcba9876543210" })).toEqual([]);
+  it("accepts an API token and a different read-only token of at least 16 characters each", () => {
+    expect(apiTokenProblems({ apiToken: long, readToken: other })).toEqual([]);
+  });
+
+  it("refuses to start without tokens and names the variable to set", () => {
+    expect(apiTokenProblems({})).toEqual([`TEND_API_TOKEN is not set; ${setup}`, `TEND_API_READ_TOKEN is not set; ${setup}`]);
+    expect(apiTokenProblems({ apiToken: long })).toEqual([`TEND_API_READ_TOKEN is not set; ${setup}`]);
+    expect(apiTokenProblems({ readToken: other })).toEqual([`TEND_API_TOKEN is not set; ${setup}`]);
   });
 
   it("refuses tokens that are too short, and a read-only token that is the API token", () => {
-    expect(apiTokenProblems({ apiToken: "short" })).toEqual(["TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`"]);
+    expect(apiTokenProblems({ apiToken: "short", readToken: other })).toEqual(["TEND_API_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`"]);
     expect(apiTokenProblems({ apiToken: long, readToken: "0123456789abcde" })).toEqual([
       "TEND_API_READ_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`",
     ]);
     expect(apiTokenProblems({ apiToken: long, readToken: long })).toEqual(["TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state"]);
-  });
-
-  it("requires the read-only token when an agent profile lists the platform MCP server", () => {
-    const profile = (name: string, mcp?: "tendworks"[]) => ({
-      apiVersion: "tendworks.dev/v1" as const,
-      kind: "AgentProfile" as const,
-      metadata: { name },
-      spec: { harness: "fake" as const, ...(mcp ? { mcp } : {}) },
-    });
-    const agentProfiles = [profile("developer"), profile("assistant", ["tendworks"])];
-
-    expect(apiTokenProblems({ apiToken: long, agentProfiles })).toEqual([
-      "TEND_API_READ_TOKEN must be set: agent profile assistant lists the platform MCP server (mcp: [tendworks]), which reads with it",
-    ]);
-    expect(apiTokenProblems({ apiToken: long, readToken: "short", agentProfiles })).toEqual([
-      "TEND_API_READ_TOKEN must be at least 16 characters; generate one with `openssl rand -hex 32`",
-    ]);
-    expect(apiTokenProblems({ apiToken: long, readToken: "fedcba9876543210", agentProfiles })).toEqual([]);
-    expect(apiTokenProblems({ apiToken: long, agentProfiles: [profile("developer")] })).toEqual([]);
   });
 });
 

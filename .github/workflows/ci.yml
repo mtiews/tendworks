@@ -24,6 +24,8 @@ jobs:
         run: pnpm coverage
       - name: Browser for the web UI's end-to-end flows
         run: pnpm --filter @tendworks/browser-tests exec playwright install --with-deps chromium
+      - name: Create deploy/.env with random tokens, as an operator does
+        run: scripts/setup-env.sh
       - name: End-to-end tests on the compose stack, API and browser
         run: pnpm e2e
         env:

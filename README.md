@@ -35,7 +35,7 @@ Needs Node.js 24 and pnpm (`corepack enable pnpm`).
 | `pnpm check` | generates types from `contracts/`, typechecks, lints, checks architecture rules, runs unit and view tests |
 | `pnpm coverage` | unit and integration tests with coverage thresholds |
 | `pnpm build` | builds all packages, the `tend` CLI and the web UI |
-| `pnpm e2e` | builds and starts the compose stack, then runs the end-to-end tests (API and browser) against it |
+| `pnpm e2e` | builds and starts the compose stack, then runs the end-to-end tests (API and browser) against it; needs `deploy/.env` from `scripts/setup-env.sh` |
 | `node apps/cli/dist/main.js status` | the `tend` CLI against `http://localhost:8080` (after `pnpm build`) |
 
 Contribution rules (contract-first, ports and adapters, no cross-domain imports) are in [CLAUDE.md](CLAUDE.md).

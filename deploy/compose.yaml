@@ -1,5 +1,9 @@
 # Laptop profile of Tendworks: `docker compose -f deploy/compose.yaml up --wait`.
-# Only the control plane API is published, and only on localhost.
+# Create deploy/.env first with scripts/setup-env.sh; the server refuses to start without
+# its tokens. After changing deploy/.env, `up -d` again (`restart` keeps the old values).
+# Only the control plane API is published, and only on localhost. The workflow engine's
+# web UI runs only with `--profile debug`.
+# Long-running services restart by themselves (unless-stopped), also after a host reboot.
 # Parallel stacks (e.g. one per worktree): set COMPOSE_PROJECT_NAME, TEND_PORT and
 # TEND_ENGINE_UI_PORT, and point TEND_URL at http://localhost:$TEND_PORT.
 # Configuration (workflows, agent profiles, ...) is read from TEND_CONFIG_PATH,
@@ -9,6 +13,7 @@ name: tendworks
 services:
   postgres:
     image: postgres:18.6-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: tend
       POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-tend}
@@ -22,18 +27,34 @@ services:
       retries: 30
 
   # Durable execution engine in dev mode; state persists in a volume so runs survive restarts.
+  # Headless: its web UI has no login, so it runs only in the profile debug (temporal-ui).
   temporal:
     image: temporalio/temporal:1.9.1
-    command: ["server", "start-dev", "--ip", "0.0.0.0", "--db-filename", "/home/temporal/temporal.db"]
+    restart: unless-stopped
+    command: ["server", "start-dev", "--headless", "--ip", "0.0.0.0", "--db-filename", "/home/temporal/temporal.db"]
     volumes:
       - temporal-data:/home/temporal # mounted on the existing home so the volume is owned by the engine user
-    ports:
-      - "127.0.0.1:${TEND_ENGINE_UI_PORT:-8233}:8233" # engine web UI for debugging
     healthcheck:
       test: ["CMD", "temporal", "operator", "cluster", "health", "--address", "127.0.0.1:7233"]
       interval: 2s
       timeout: 5s
       retries: 30
+
+  # The workflow engine's web UI for debugging, without authentication: every local user of
+  # the host can open it while it runs. Start it with
+  #   docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui
+  # and stop it again with `stop temporal-ui`.
+  temporal-ui:
+    profiles: [debug]
+    image: temporalio/ui:2.55.0
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    ports:
+      - "127.0.0.1:${TEND_ENGINE_UI_PORT:-8233}:8080"
+    depends_on:
+      temporal:
+        condition: service_healthy
 
   # The only way to the Docker API (ADR 0001). Only what the sandbox adapter needs is open:
   # /_ping, /version, /containers/** (create, start, archive, delete), /exec/**,
@@ -49,6 +70,7 @@ services:
   # ACP stream alive with a request every minute.
   docker-proxy:
     image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
@@ -68,6 +90,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: server
+    restart: unless-stopped
     environment:
       TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend # betterleaks:allow laptop default password
       TEND_WORKER_URL: http://worker:8081
@@ -78,9 +101,9 @@ services:
       # API token: every operation but GET /status needs a token, operations that change
       # state need this one (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
       # The read-only token is accepted for reading only (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
-      # The defaults are for the laptop profile only: set your own in deploy/.env.
-      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
-      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-laptop-only-insecure-read-token}
+      # There are no defaults: the server refuses to start without both (scripts/setup-env.sh).
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-}
+      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
     ports:
@@ -102,6 +125,7 @@ services:
       context: ..
       dockerfile: deploy/Dockerfile
       target: worker
+    restart: unless-stopped
     environment:
       TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
       TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
@@ -111,13 +135,13 @@ services:
       # Workflows reach the control plane API (and only it) from here, e.g. the merge step,
       # with the API token. The token is no agent secret, so it never enters a sandbox.
       TEND_CONTROL_PLANE_URL: http://server:8080
-      TEND_API_TOKEN: ${TEND_API_TOKEN:-laptop-only-insecure-api-token}
+      TEND_API_TOKEN: ${TEND_API_TOKEN:-}
       # The platform MCP server (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)):
       # its address as sandboxes reach the server's published port, and the read-only token
       # it is read with. Only sessions of agent profiles that list it (mcp: [tendworks]) get
       # both, from the agent runtime itself; no profile can reference them.
       TEND_PLATFORM_MCP_URL: ${TEND_PLATFORM_MCP_URL:-http://host.docker.internal:${TEND_PORT:-8080}/mcp}
-      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-laptop-only-insecure-read-token}
+      TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
       # Sandboxes run on their own Docker network, not on this stack's networks, so they
       # cannot reach the server, worker, store or socket proxy by name or address.
       TEND_SANDBOX_NETWORK: tendworks-sandboxes

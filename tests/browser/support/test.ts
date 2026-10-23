@@ -2,9 +2,19 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { expect, test as base, type Page } from "@playwright/test";
 
-/** The compose stack's tokens: deploy/.env, or the laptop profile's defaults in deploy/compose.yaml. */
-export const API_TOKEN = process.env.TEND_API_TOKEN || "laptop-only-insecure-api-token";
-export const READ_TOKEN = process.env.TEND_API_READ_TOKEN || "laptop-only-insecure-read-token";
+/**
+ * A token of the compose stack, as compose reads it: from the environment, or else from
+ * deploy/.env, which scripts/setup-env.sh creates. The stack has no default tokens.
+ */
+function stackToken(name: string): string {
+  const env = fileURLToPath(new URL("../../../deploy/.env", import.meta.url));
+  const value = process.env[name] || (existsSync(env) ? new RegExp(`^${name}=(.*)$`, "m").exec(readFileSync(env, "utf8"))?.[1]?.trim() : undefined);
+  if (!value) throw new Error(`${name} is set neither in the environment nor in deploy/.env; create deploy/.env with scripts/setup-env.sh`);
+  return value;
+}
+
+export const API_TOKEN = stackToken("TEND_API_TOKEN");
+export const READ_TOKEN = stackToken("TEND_API_READ_TOKEN");
 
 /**
  * Every flow fails on a Content Security Policy violation or an uncaught error in the page:
