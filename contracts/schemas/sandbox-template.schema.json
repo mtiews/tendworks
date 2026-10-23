@@ -29,7 +29,7 @@
         "image": {
           "type": "string",
           "minLength": 1,
-          "description": "OCI image reference, pinned to an exact tag or digest. The image must provide `sleep` and must already be present on the sandbox host; the platform does not pull images at runtime."
+          "description": "OCI image reference, pinned to an exact tag or digest. An image the platform deployment builds and pins itself is named by its repository without a tag; the platform fills in its pin, so a configuration never carries a stale one. The image must provide `sleep` and must already be present on the sandbox host; the platform does not pull images at runtime."
         },
         "isolationClass": {
           "type": "string",

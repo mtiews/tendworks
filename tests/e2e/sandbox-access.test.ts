@@ -12,8 +12,8 @@ const field = (text: string, name: string) => new RegExp(`^\\s*${name}:\\s*(\\S+
 // TEND_SANDBOX_NETWORK). What is checked here is the network and the token, not the
 // harness, so the image is the one of the scripted-assistant profile, which `pnpm e2e`
 // builds (images/sandbox-scripted-acp); every sandbox image has node.
-const template = field(read("examples/config/agents/scripted-assistant.md"), "sandbox");
-const image = field(read(`examples/config/sandboxes/${template}.yaml`), "image")!;
+const template = field(read("tests/fixtures/config/agents/scripted-assistant.md"), "sandbox");
+const image = field(read(`tests/fixtures/config/sandboxes/${template}.yaml`), "image")!;
 const network = field(read("deploy/compose.yaml"), "TEND_SANDBOX_NETWORK")!;
 const port = new URL(process.env.TEND_URL ?? "http://localhost:8080").port || "80";
 

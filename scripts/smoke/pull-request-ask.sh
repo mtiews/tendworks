@@ -5,7 +5,8 @@
 # Acceptance #18: "The same with merge: ask after approving via tend approval approve".
 #
 # Before: as for pull-request-auto.sh, but develop-issue listed under `workflows` in
-# examples/config/policies/ask-before-merge.yaml and the server restarted.
+# policies/ask-before-merge.yaml of the configuration (TEND_CONFIG_PATH; the starter
+# configuration lists it) and the server restarted.
 # Usage: scripts/smoke/pull-request-ask.sh <issue number> [approve|reject]
 #   Without a decision argument the script asks you before it decides.
 source "$(dirname "$0")/lib.sh"
@@ -14,7 +15,7 @@ ISSUE=${1:?usage: $0 <issue number in $PLAYGROUND> [approve|reject]}
 DECISION=${2:-}
 if ! asks_for_develop_issue; then
   echo "ask-before-merge does not list develop-issue, so the merge would not ask."
-  echo "Add it under workflows in examples/config/policies/ask-before-merge.yaml and restart the server."
+  echo "Add it under workflows in $CONFIG/policies/ask-before-merge.yaml and restart the server."
   exit 1
 fi
 

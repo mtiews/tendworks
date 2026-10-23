@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { createAgentRuntime } from "@tendworks/agent-runtime";
 import { createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration } from "@tendworks/control-plane";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
@@ -12,6 +11,7 @@ import {
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * Both sides of the trigger APIs in one process: the trigger gateway starts runs through
@@ -25,7 +25,7 @@ const API_TOKEN = "contract-test-token";
 const READ_TOKEN = "contract-test-read-token";
 
 function platform() {
-  const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+  const configuration = loadConfiguration(fixtureConfiguration());
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
   const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() })) });

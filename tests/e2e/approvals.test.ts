@@ -12,7 +12,7 @@ const compose = (...args: string[]) =>
   promisify(execFile)("docker", ["compose", "-f", fileURLToPath(new URL("../../deploy/compose.yaml", import.meta.url)), ...args], {
     timeout: 120_000,
   });
-const PR = "https://git.example/example/playground/pull/1"; // examples/config/agents/fake-pr-developer.md
+const PR = "https://git.example/example/playground/pull/1"; // tests/fixtures/config/agents/fake-pr-developer.md
 
 async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -43,14 +43,14 @@ const ended = (runId: string) =>
 const decide = (approvalRequestId: string, decision: "approve" | "reject") =>
   client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId } }, body: { decision } });
 
-// Fakes only: the policy ask-before-merge asks before merging fake-develop-and-ask's pull
+// Fakes only: the policy ask-before-merge-fakes asks before merging fake-develop-and-ask's pull
 // request, which the server merges in its fake integration once approved.
 describe("approval requests on the compose stack", () => {
   it("asks before merging, keeps waiting across a platform restart, and merges once approved", { timeout: 240_000 }, async () => {
     const runId = await start();
 
     const approval = await pendingApproval(runId);
-    expect(approval).toMatchObject({ action: "merge", pullRequest: PR, policy: "ask-before-merge", workflow: "fake-develop-and-ask" });
+    expect(approval).toMatchObject({ action: "merge", pullRequest: PR, policy: "ask-before-merge-fakes", workflow: "fake-develop-and-ask" });
     const notification = await waitFor("notification about the approval request", async () =>
       (await client.GET("/notifications")).data?.items.find((item) => item.runId === runId && item.kind === "approval.requested"),
     );

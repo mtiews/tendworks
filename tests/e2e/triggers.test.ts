@@ -4,7 +4,7 @@ import { client } from "./support/control-plane.js";
 
 type Run = ControlPlane.components["schemas"]["run"];
 
-const BINDING = "issue-ready-for-agent"; // examples/config/triggers, fake integration
+const BINDING = "issue-ready-for-agent"; // tests/fixtures/config/triggers, fake integration
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

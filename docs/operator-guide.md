@@ -78,7 +78,7 @@ All commands run from the repository root; `deploy/.env` is picked up automatica
    docker compose -f deploy/compose.yaml --profile sandbox-images build
    ```
 
-   This builds `tendworks/sandbox-claude-code:0.85.1-1` (Claude Code, its ACP adapter, git and `gh`). The tag must match `spec.image` in your sandbox template.
+   This builds `tendworks/sandbox-claude-code` with the tag pinned in `deploy/compose.yaml` (`x-sandbox-images`; Claude Code, its ACP adapter, git and `gh`). Sandbox templates name it by repository alone (`image: tendworks/sandbox-claude-code`); the worker fills in the pin.
 
 4. **Build and start the stack**
 
@@ -109,7 +109,7 @@ All commands run from the repository root; `deploy/.env` is picked up automatica
    | `tend agent list`, `tend trigger list` | the profiles and trigger bindings of your configuration |
    | `http://localhost:8080/` in a browser (see [Access](#access)) | redirects to `/ui/` and asks for a token; the API token signs in with full access |
 
-With the example configuration, the fake trigger bindings (`issue-ready-for-agent`, `fake-issue-ready-to-merge`) start a few runs with fake agents within seconds of the first start. That is expected and costs nothing; see [Configuration](#configuration) to get rid of them.
+The starter configuration starts no run by itself: its only trigger binding (`playground-ready-for-agent`) is suspended.
 
 ## Configuration
 
@@ -128,7 +128,7 @@ Two places, strictly separated:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TEND_CONFIG_PATH` | `../examples/config` | configuration directory on the host; relative paths resolve against `deploy/`, so prefer an absolute path |
+| `TEND_CONFIG_PATH` | `../examples/config` (the starter configuration) | configuration directory on the host; relative paths resolve against `deploy/`, so prefer an absolute path |
 | `TEND_PORT` | `8080` | API, UI and MCP port, published on `127.0.0.1` only |
 | `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only and only with `--profile debug` |
 | `COMPOSE_PROJECT_NAME` | `tendworks` | only for parallel stacks; volume and image names follow it |
@@ -137,7 +137,7 @@ Two places, strictly separated:
 
 ### Your own configuration directory
 
-`examples/config` is the example and the fixture of the end-to-end tests: it contains fake agents, fake trigger bindings, a fake pull request integration and test workflows. For real workloads, copy it into a repository of your own (the planned `tendworks-config`) and point `TEND_CONFIG_PATH` at the checkout:
+`examples/config` is the starter configuration: the `developer` and `assistant` agents, the `claude-code` sandbox, the workflows `develop-issue`, `hello-developer` and `restart-developer`, the suspended binding `playground-ready-for-agent`, the GitHub pull request integration and two policies (`ask-before-merge` asks before merging `develop-issue`'s pull requests). It holds no fakes; the test fixtures live in `tests/fixtures/config`. Copy it into a repository of your own (the planned `tendworks-config`) and point `TEND_CONFIG_PATH` at the checkout:
 
 ```sh
 cp -r examples/config ~/tendworks-config      # then git init, commit, push to a private repo
@@ -145,11 +145,11 @@ echo "TEND_CONFIG_PATH=$HOME/tendworks-config" >> deploy/.env
 docker compose -f deploy/compose.yaml up -d --wait
 ```
 
-What to remove from the copy for a real setup: `agents/fake-*.md`, `agents/scripted-*.md`, `triggers/issue-ready-for-agent.yaml`, `triggers/fake-issue-ready-to-merge.yaml`, `integrations/pull-requests/fake.yaml`, `sandboxes/scripted-acp.yaml` and the workflows that use them (`hello-agent`, `slow-agent`, `fake-*`, `restart-scripted`). The server refuses to start when a workflow calls a profile that is gone or a binding names a missing workflow, so remove consistently. Keep the scripted ones if you want to run the chat or web UI smoke tests (they use `restart-scripted`).
+The chat and web UI smoke tests need the scripted test workflow `restart-scripted` from the fixture configuration; see `scripts/smoke/chat-assistant.sh`.
 
 Rules the loader enforces:
 
-- Every `*.yaml`, `*.yml` and `*.md` file below the directory is read, recursively, including hidden directories. Each YAML file must be a workflow (has `document`) or a known `kind`; anything else stops the server (`neither a workflow nor a document with a kind`). So a `.github/workflows/*.yml` in your config repository breaks startup; keep CI files out of the mounted directory or mount a subdirectory.
+- Every `*.yaml`, `*.yml` and `*.md` file below the directory is read, recursively; hidden files and directories (`.git`, `.github`) are skipped, so your configuration repository can carry its own CI. Each YAML file must be a workflow (has `document`) or a known `kind`; anything else stops the server (`neither a workflow nor a document with a kind`).
 - `.md` files count only under `agents/`; other Markdown (e.g. `skills/README.md`, `SKILL.md`) is not configuration.
 - Names are unique per kind; invalid configuration stops server or worker before they accept requests, with every issue in the log.
 - Server and worker run as user `node` (uid 1000 in the Node.js image); the files must be readable by it.
@@ -162,8 +162,8 @@ Rules the loader enforces:
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>` | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
-| `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: add `develop-issue` to `ask-before-merge` to approve every merge yourself | server |
-| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (must match the built tag), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb` | worker (server validates) |
+| `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: the starter's `ask-before-merge` lists `develop-issue`, so you approve every merge yourself; remove it there to let `merge-gate` merge automatically | server |
+| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb` | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
 | `PullRequestIntegration` | `integrations/pull-requests/*.yaml` | one per host; `github` on `github.com` with the platform token | server |
 
@@ -284,15 +284,15 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | --- | --- | --- | --- | --- |
 | 1 | Claude Code answers in a sandbox, cost and transcript visible | `scripts/smoke/hello-developer.sh` (steps 3–4) | sandbox image, Claude credential, agent token | not yet recorded |
 | 2 | Restart mid-run resumes the agent session | `scripts/smoke/restart-developer.sh` (steps 5–7) | as 1 | not yet recorded |
-| 3 | Labelled issue → pull request → merged with `merge: auto` | open an issue in your target repository, then `scripts/smoke/pull-request-auto.sh <issue>` (steps 8–12) | platform token; `suspend: true` removed from `playground-ready-for-agent`; `develop-issue` not in `ask-before-merge`; server restarted | not yet recorded |
-| 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` (step 14) | as 3, with `develop-issue` added to `ask-before-merge` | not yet recorded |
-| 5 | `assistant` chat answers from the live platform state | `scripts/smoke/chat-assistant.sh` (steps 15–18) | scripted ACP image, binding not suspended, read token | **fails** (MCP, issue #50); the script checks the MCP address first and stops |
+| 3 | Labelled issue → pull request → merged with `merge: auto` | open an issue in your target repository, then `scripts/smoke/pull-request-auto.sh <issue>` (steps 8–12) | platform token; `suspend: true` removed from `playground-ready-for-agent`; `develop-issue` removed from `ask-before-merge`; server restarted | not yet recorded |
+| 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` (step 14) | as 3, with `develop-issue` in `ask-before-merge` (as in the starter configuration) | not yet recorded |
+| 5 | `assistant` chat answers from the live platform state | `scripts/smoke/chat-assistant.sh` (steps 15–18) | scripted ACP image, the fixture configuration (`restart-scripted`), binding not suspended, read token | **fails** (MCP, issue #50); the script checks the MCP address first and stops |
 | 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (steps 19–23) | as 4 and 5 | not yet recorded; the `assistant` chat fails as in 5 |
 
 Before you start:
 
 - **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried automatically; start it again by hand with `POST /runs` (`docs/platform-implementation.md`, "Triggers: one firing per issue").
-- The scripts check configuration in `examples/config` (`scripts/smoke/lib.sh`); with your own `TEND_CONFIG_PATH`, make the same changes there and expect the scripts' hints to name the example paths.
+- The scripts check the configuration the stack mounts: `TEND_CONFIG_PATH` from the shell or `deploy/.env`, else `examples/config` (`scripts/smoke/lib.sh`).
 - Revert configuration changes after the tests (binding suspended again, `ask-before-merge` back), or keep them deliberately.
 - Watch a run live: `tend run logs <id> --follow`, or the run detail in the UI.
 
@@ -340,7 +340,7 @@ docker compose -f deploy/compose.yaml up -d --build --wait
 pnpm install && pnpm build                                                 # for the tend CLI
 ```
 
-- If the sandbox image tag changed, update `spec.image` in your own configuration's sandbox template too; `examples/config` and `deploy/compose.yaml` change together, your copy does not.
+- The sandbox image pin lives only in `deploy/compose.yaml`; a template that names `tendworks/sandbox-claude-code` without a tag follows it. Rebuild the sandbox images when the pin changed.
 - Check `git log` for configuration schema changes; an invalid configuration stops the server (see the log).
 - Server and worker migrate their database tables at startup. There is no documented downgrade path; back up first and prefer updating while no run is active.
 
@@ -405,7 +405,7 @@ These labels are shared by every Tendworks stack and test run on the same Docker
 | `TEND_API_TOKEN is not set; ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits and restarts | no `deploy/.env`, or the token is empty in it; create the file with `scripts/setup-env.sh` (or fill in `openssl rand -hex 32`), then `up -d --wait` |
 | `TEND_API_TOKEN must be at least 16 characters; generate one with ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits | token too short; `openssl rand -hex 32`, then `up -d --wait` |
 | `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state` | server log, server exits | use two different values |
-| `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML (e.g. `.github/`) in the configuration directory counts |
+| `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML in the configuration directory counts (hidden directories such as `.github/` are skipped) |
 | `missing environment variable <NAME>` | server or worker log | a bundle setting is missing; only happens with a modified compose file |
 | `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; its tasks will fail until this is fixed` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
 | run fails: `no harness credential configured: set TEND_CLAUDE_CODE_CREDENTIAL to oauth-token or api-key and the matching variable in deploy/.env` | `tend run get` | as above |
