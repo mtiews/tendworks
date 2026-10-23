@@ -1,11 +1,13 @@
 # Sandbox for agents with harness claude-code: Claude Code and its ACP adapter, non-root.
 # Build the image once: docker compose -f deploy/compose.yaml --profile sandbox-images build
+# The image is named by its repository alone: the worker fills in the tag deploy/compose.yaml
+# pins (x-sandbox-images), so a copy of this file follows every update.
 apiVersion: tendworks.dev/v1
 kind: SandboxTemplate
 metadata:
   name: claude-code
 spec:
-  image: tendworks/sandbox-claude-code:0.85.1-1
+  image: tendworks/sandbox-claude-code
   isolationClass: container
   resources:
     cpus: 2

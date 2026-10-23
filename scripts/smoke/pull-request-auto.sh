@@ -5,16 +5,17 @@
 # Acceptance #18: "An issue in the playground repository matching the trigger binding leads
 # to a merged pull request without manual intervention (merge: auto)".
 #
-# Before: TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env; `suspend: true` removed from
-# examples/config/triggers/playground-ready-for-agent.yaml; develop-issue NOT listed in
-# examples/config/policies/ask-before-merge.yaml; server restarted after config changes.
+# Before: TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env; in the configuration
+# (TEND_CONFIG_PATH, by default examples/config) `suspend: true` removed from
+# triggers/playground-ready-for-agent.yaml and develop-issue removed from
+# policies/ask-before-merge.yaml; server restarted after config changes.
 # Usage: scripts/smoke/pull-request-auto.sh <issue number in the playground repository>
 source "$(dirname "$0")/lib.sh"
 
 ISSUE=${1:?usage: $0 <issue number in $PLAYGROUND>}
 if asks_for_develop_issue; then
   echo "ask-before-merge lists develop-issue, so the merge would wait for approval."
-  echo "Remove it there and restart the server, or use scripts/smoke/pull-request-ask.sh."
+  echo "Remove it in $CONFIG/policies/ask-before-merge.yaml and restart the server, or use scripts/smoke/pull-request-ask.sh."
   exit 1
 fi
 

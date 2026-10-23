@@ -1,6 +1,6 @@
 import { API_TOKEN, expect, expectNoHorizontalScroll, signIn, test } from "./support/test.js";
 
-// Fakes only: the policy ask-before-merge asks before merging fake-develop-and-ask's pull
+// Fakes only: the policy ask-before-merge-fakes asks before merging fake-develop-and-ask's pull
 // request, which the server merges in its fake integration once approved (tests/e2e/approvals.test.ts).
 test("a run waiting on an approval request continues after approving it in the browser", async ({ page, request }) => {
   const started = await request.post("/runs", {

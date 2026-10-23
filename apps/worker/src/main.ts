@@ -39,7 +39,8 @@ let templates;
 let skills;
 try {
   profiles = loadAgentProfiles(env("TEND_CONFIG_DIR"));
-  templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"));
+  // The deployment's own sandbox images with their pins; templates name them by repository.
+  templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"), { pinnedImages: env("TEND_SANDBOX_IMAGES", "").split(/[\s,]+/).filter(Boolean) });
   skills = loadSkills(env("TEND_CONFIG_DIR"));
 } catch (error) {
   if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError)) throw error;

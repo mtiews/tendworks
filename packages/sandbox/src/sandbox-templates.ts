@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import { Ajv2020, type ErrorObject } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 import type { SandboxTemplate } from "./sandbox-api.js";
@@ -19,13 +19,15 @@ let validate: ((data: unknown) => boolean) & { errors?: ErrorObject[] | null };
  * Reads every `kind: SandboxTemplate` document (YAML) from a configuration folder,
  * validated against its schema, by name. Throws a {@link SandboxTemplateError} listing
  * every issue by file.
+ *
+ * `pinnedImages` are the deployment's own images with their pins (tag or digest): a
+ * template that names one of them by its repository alone gets the pin filled in, so a
+ * copied configuration follows the deployment's updates.
  */
-export function loadSandboxTemplates(configDir: string): Map<string, SandboxTemplate> {
+export function loadSandboxTemplates(configDir: string, { pinnedImages = [] }: { pinnedImages?: string[] } = {}): Map<string, SandboxTemplate> {
+  const pins = new Map(pinnedImages.map((image) => [repositoryOf(image), image]));
   validate ??= new Ajv2020({ allErrors: true, strict: true }).compile(JSON.parse(readFileSync(SCHEMA, "utf8")));
-  const files = readdirSync(configDir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.ya?ml$/.test(entry.name))
-    .map((entry) => relative(configDir, join(entry.parentPath, entry.name)).split(sep).join("/"))
-    .sort();
+  const files = yamlFiles(configDir);
   const issues: string[] = [];
   const templates = new Map<string, { file: string; template: SandboxTemplate }>();
 
@@ -42,6 +44,7 @@ export function loadSandboxTemplates(configDir: string): Map<string, SandboxTemp
       continue;
     }
     const template = document as SandboxTemplate;
+    template.spec.image = pins.get(template.spec.image) ?? template.spec.image;
     const existing = templates.get(template.metadata.name);
     if (existing) issues.push(`${file}: sandbox template '${template.metadata.name}' is already defined in ${existing.file}`);
     else templates.set(template.metadata.name, { file, template });
@@ -49,4 +52,23 @@ export function loadSandboxTemplates(configDir: string): Map<string, SandboxTemp
 
   if (issues.length > 0) throw new SandboxTemplateError(issues);
   return new Map([...templates].map(([name, { template }]) => [name, template]));
+}
+
+/** An image reference without its tag or digest; a registry port (`host:5000/name`) is no tag. */
+function repositoryOf(image: string): string {
+  const name = image.split("@")[0]!;
+  const tag = name.lastIndexOf(":");
+  return tag > name.lastIndexOf("/") ? name.slice(0, tag) : name;
+}
+
+/** YAML files by path relative to `dir`, sorted; hidden files and directories (`.git`, `.github`) are skipped. */
+function yamlFiles(dir: string, prefix = ""): string[] {
+  return readdirSync(join(dir, prefix), { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith("."))
+    .flatMap((entry) => {
+      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) return yamlFiles(dir, path);
+      return entry.isFile() && /\.ya?ml$/.test(entry.name) ? [path] : [];
+    })
+    .sort();
 }

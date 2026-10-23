@@ -31,6 +31,36 @@ describe("loadSandboxTemplates", () => {
     expect(templates.get("claude-code")?.spec).toEqual({ image: "tendworks/sandbox-claude-code:0.85.1" });
   });
 
+  it("skips hidden directories, so a configuration repository can carry .git and its own CI", () => {
+    const dir = configWith({
+      "sandboxes/claude-code.yaml": template("claude-code"),
+      ".git/refs/claude-code.yaml": template("claude-code", "tendworks/sandbox-claude-code:0.1.0"),
+      ".github/workflows/ci.yml": "name: CI\non: [push]\njobs: {}\n",
+    });
+
+    expect(loadSandboxTemplates(dir).get("claude-code")?.spec).toEqual({ image: "tendworks/sandbox-claude-code:0.85.1" });
+  });
+
+  it("fills in the deployment's pin for an image named by its repository alone", () => {
+    const dir = configWith({
+      "sandboxes/claude-code.yaml": template("claude-code", "tendworks/sandbox-claude-code"),
+      "sandboxes/own.yaml": template("own", "registry.example:5000/team/agent"),
+      "sandboxes/tagged.yaml": template("tagged", "tendworks/sandbox-claude-code:0.1.0"),
+      "sandboxes/unknown.yaml": template("unknown", "busybox"),
+    });
+
+    const templates = loadSandboxTemplates(dir, {
+      pinnedImages: ["tendworks/sandbox-claude-code:0.85.1-1", "registry.example:5000/team/agent@sha256:0123abcd"],
+    });
+
+    expect(Object.fromEntries([...templates].map(([name, { spec }]) => [name, spec.image]))).toEqual({
+      "claude-code": "tendworks/sandbox-claude-code:0.85.1-1",
+      own: "registry.example:5000/team/agent@sha256:0123abcd",
+      tagged: "tendworks/sandbox-claude-code:0.1.0",
+      unknown: "busybox",
+    });
+  });
+
   it("names the file and field of an invalid template and of a duplicate name", () => {
     const dir = configWith({
       "sandboxes/a.yaml": template("twin"),

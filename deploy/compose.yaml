@@ -3,8 +3,14 @@
 # Parallel stacks (e.g. one per worktree): set COMPOSE_PROJECT_NAME, TEND_PORT and
 # TEND_ENGINE_UI_PORT, and point TEND_URL at http://localhost:$TEND_PORT.
 # Configuration (workflows, agent profiles, ...) is read from TEND_CONFIG_PATH,
-# by default the example folder in this repository.
+# by default the starter configuration examples/config (copy it for your own).
 name: tendworks
+
+# The deployment's own sandbox images, pinned once here: the service that builds an image
+# and the worker, which fills the pin into sandbox templates that name the image by its
+# repository alone, both read this value.
+x-sandbox-images:
+  claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-1
 
 services:
   postgres:
@@ -121,6 +127,8 @@ services:
       # Sandboxes run on their own Docker network, not on this stack's networks, so they
       # cannot reach the server, worker, store or socket proxy by name or address.
       TEND_SANDBOX_NETWORK: tendworks-sandboxes
+      # Pins of the deployment's sandbox images (x-sandbox-images above).
+      TEND_SANDBOX_IMAGES: *sandbox-claude-code-image
       # Harness credentials from deploy/.env. Only the one TEND_CLAUDE_CODE_CREDENTIAL
       # selects (oauth-token or api-key) is passed into sandboxes, never both.
       TEND_CLAUDE_CODE_CREDENTIAL: ${TEND_CLAUDE_CODE_CREDENTIAL:-}
@@ -156,7 +164,7 @@ services:
   #   docker compose -f deploy/compose.yaml --profile sandbox-images build
   sandbox-claude-code:
     profiles: [sandbox-images]
-    image: tendworks/sandbox-claude-code:0.85.1-1
+    image: *sandbox-claude-code-image
     build:
       context: ../images/sandbox-claude-code
 

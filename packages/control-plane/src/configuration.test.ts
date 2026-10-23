@@ -269,10 +269,32 @@ do:
     expect(() => loadConfiguration(join(tmpdir(), "tend-config-missing"))).toThrow(/cannot read configuration folder/);
   });
 
-  it("accepts the example configuration shipped with the repository", () => {
-    const examples = fileURLToPath(new URL("../../../examples/config", import.meta.url));
+  it("skips hidden directories, so a configuration repository can carry .git and its own CI", () => {
+    const dir = folder({
+      "workflows/hello.sw.yaml": workflow("hello"),
+      "agents/developer.md": agent("developer"),
+      ".git/config.yaml": "not: [a configuration document",
+      ".github/workflows/ci.yml": "name: CI\non: [push]\njobs: {}\n",
+      "agents/.drafts/broken.md": "no frontmatter",
+    });
 
-    expect(loadConfiguration(examples).workflowNames.length).toBeGreaterThan(0);
+    expect(loadConfiguration(dir).workflowNames).toEqual(["hello"]);
+  });
+
+  it("loads the starter configuration with real profiles only and no binding that fires by itself", () => {
+    const starter = loadConfiguration(fileURLToPath(new URL("../../../examples/config", import.meta.url)));
+
+    expect(starter.workflowNames).toEqual(["develop-issue", "hello-developer", "restart-developer"]);
+    expect(starter.agentProfiles.map((profile) => [profile.metadata.name, profile.spec.harness]).sort()).toEqual([
+      ["assistant", "claude-code"],
+      ["developer", "claude-code"],
+    ]);
+    expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([["playground-ready-for-agent", true]]);
+    expect(starter.pullRequestIntegrations.map((integration) => integration.metadata.name)).toEqual(["github"]);
+    expect(starter.policies.map((policy) => [policy.metadata.name, policy.spec.workflows, policy.spec.merge])).toEqual([
+      ["ask-before-merge", ["develop-issue"], "ask"],
+      ["merge-gate", undefined, "auto"],
+    ]);
   });
 
   it("gives the platform MCP server only to the example assistant, never to an agent with push rights", () => {

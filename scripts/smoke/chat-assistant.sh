@@ -12,6 +12,10 @@
 #   harness credential, TEND_API_TOKEN and TEND_API_READ_TOKEN, stack up), `pnpm build` (for
 #   the tend CLI) and the scripted ACP image for the active run:
 #   docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp
+# - the stack on the fixture configuration, which adds the active run's workflow
+#   (restart-scripted) to the starter configuration: `node tests/fixtures/fixture-configuration.ts`
+#   assembles it, then TEND_CONFIG_PATH=../tests/fixtures/assembled-config in deploy/.env and
+#   `docker compose -f deploy/compose.yaml up -d --wait`.
 # - the developer agent's binding scheduled: playground-ready-for-agent without
 #   `suspend: true` and TENDWORKS_PLATFORM_GITHUB_TOKEN set (pull request smoke test, step 9),
 #   with no open playground issue labelled ready-for-agent (each would start a paid run).
@@ -19,7 +23,7 @@
 # - Linux: TEND_PLATFORM_MCP_URL set to an address sandboxes reach the server's port at
 #   (docs); the script checks it from a sandbox before the chat starts.
 # - Optional: lower the idle wait. The script waits for the assistant's idle time
-#   (spec.chat.idleMinutes, 5 in examples/config/agents/assistant.md). To wait less, set it
+#   (spec.chat.idleMinutes, 5 in agents/assistant.md of the configuration). To wait less, set it
 #   to 1 there, restart server and worker, and run with TEND_SMOKE_IDLE_MINUTES=1. Revert
 #   afterwards.
 #
@@ -122,14 +126,18 @@ has_cost() { [ "$(field 'String((r.cost?.amount ?? r.cost?.usd ?? 0) > 0)' <<<"$
 
 [ -f apps/cli/dist/main.js ] || { echo "The tend CLI is not built; run pnpm build first."; exit 1; }
 api_get /agents | field 'r.items.map((a) => a.name).join(" ")' | grep -qw assistant ||
-  { echo "The control plane lists no agent profile assistant (examples/config/agents/assistant.md)."; exit 1; }
+  { echo "The control plane lists no agent profile assistant ($CONFIG/agents/assistant.md)."; exit 1; }
+api_get /agents | field 'r.items.map((a) => a.name).join(" ")' | grep -qw scripted-developer ||
+  { echo "The active run needs the fixture configuration (workflow restart-scripted): run"; \
+    echo "node tests/fixtures/fixture-configuration.ts, set TEND_CONFIG_PATH=../tests/fixtures/assembled-config"; \
+    echo "in deploy/.env and docker compose -f deploy/compose.yaml up -d --wait."; exit 1; }
 docker image inspect tendworks/sandbox-scripted-acp:test >/dev/null 2>&1 ||
   { echo "Build the scripted ACP image first: docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp"; exit 1; }
 
 BINDING_STATE=$(api_get /triggers | field "(() => { const t = r.items.find((t) => t.name === '$BINDING'); return t ? (t.suspended ? 'suspended' : 'scheduled') : 'missing'; })()")
 if [ "$BINDING_STATE" != scheduled ]; then
   echo "The trigger binding $BINDING is ${BINDING_STATE:-unknown}; question 3 needs it scheduled."
-  echo "Remove 'suspend: true' in examples/config/triggers/$BINDING.yaml, set its token in deploy/.env and restart the server."
+  echo "Remove 'suspend: true' in $CONFIG/triggers/$BINDING.yaml, set its token in deploy/.env and restart the server."
   exit 1
 fi
 if [ "$BINDING" = playground-ready-for-agent ] && command -v gh >/dev/null; then
@@ -146,7 +154,9 @@ fi
 MCP_URL=$(worker_env TEND_PLATFORM_MCP_URL)
 READ_TOKEN=$(worker_env TEND_API_READ_TOKEN)
 NETWORK=$(worker_env TEND_SANDBOX_NETWORK)
-IMAGE=$(grep -E '^[[:space:]]*image:' examples/config/sandboxes/claude-code.yaml | awk '{print $2}')
+# The template names the image by its repository; the worker holds the pin (TEND_SANDBOX_IMAGES).
+TEMPLATE_IMAGE=$(grep -E '^[[:space:]]*image:' "$CONFIG/sandboxes/claude-code.yaml" | awk '{print $2}')
+IMAGE=$(worker_env TEND_SANDBOX_IMAGES | tr ', ' '\n\n' | grep -m 1 -E "^$TEMPLATE_IMAGE[:@]" || echo "$TEMPLATE_IMAGE")
 [ -n "$MCP_URL" ] && [ -n "$READ_TOKEN" ] || { echo "The worker has no TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN."; exit 1; }
 docker network inspect "$NETWORK" >/dev/null 2>&1 ||
   docker network create --driver bridge --opt com.docker.network.bridge.enable_icc=false "$NETWORK" >/dev/null

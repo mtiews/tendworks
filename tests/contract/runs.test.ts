@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
 import { createAgentRuntimeClient, createControlPlaneApi, createOrchestrationClient, loadConfiguration } from "@tendworks/control-plane";
 import {
@@ -12,6 +11,7 @@ import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * Both sides of the internal orchestration and agent runtime APIs in one process: the
@@ -27,7 +27,7 @@ type Run = ControlPlane.components["schemas"]["run"];
 const API_TOKEN = "contract-test-token";
 
 function platform(sleep: (ms: number) => Promise<void> = async () => {}) {
-  const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+  const configuration = loadConfiguration(fixtureConfiguration());
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep });
   const agentRuntime = createAgentRuntimeApi({ runtime: agents });
   const store = createInMemoryRunStore();

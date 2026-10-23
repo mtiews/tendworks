@@ -5,7 +5,7 @@ import { client } from "./support/control-plane.js";
 type Run = ControlPlane.components["schemas"]["run"];
 type Notification = ControlPlane.components["schemas"]["notification"];
 
-const BINDING = "fake-issue-ready-to-merge"; // examples/config/triggers, fake integration
+const BINDING = "fake-issue-ready-to-merge"; // tests/fixtures/config/triggers, fake integration
 
 async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;

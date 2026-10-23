@@ -13,6 +13,21 @@ FAILED=0
 
 compose() { docker compose -f deploy/compose.yaml "$@"; }
 
+# The configuration folder the stack mounts, as compose resolves it: TEND_CONFIG_PATH from
+# the shell, else from deploy/.env, else the starter configuration; relative to deploy/.
+config_dir() {
+  local path="${TEND_CONFIG_PATH:-}"
+  if [ -z "$path" ] && [ -f deploy/.env ]; then
+    path=$(sed -n 's/^[[:space:]]*TEND_CONFIG_PATH=//p' deploy/.env | tail -n 1 | tr -d "\r\"'")
+  fi
+  path="${path:-../examples/config}"
+  case "$path" in
+    /* | [A-Za-z]:*) echo "$path" ;;
+    *) echo "deploy/$path" ;;
+  esac
+}
+CONFIG=$(config_dir)
+
 # Prints one field of the JSON on stdin, e.g. `field 'r.steps?.[0]?.transcript'`; prints
 # nothing for empty or non-JSON input, so polling loops keep waiting instead of failing.
 field() {
@@ -148,7 +163,7 @@ wait_triggered_run() {
   suspended=$(api_get /triggers | field 'r.items.find((t) => t.name === "playground-ready-for-agent")?.suspended')
   if [ "$suspended" = true ]; then
     echo "The binding playground-ready-for-agent is suspended. Remove 'suspend: true' in" >&2
-    echo "examples/config/triggers/playground-ready-for-agent.yaml and restart the server." >&2
+    echo "$CONFIG/triggers/playground-ready-for-agent.yaml and restart the server." >&2
     exit 1
   fi
   while [ $SECONDS -lt $deadline ]; do
@@ -171,7 +186,7 @@ pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
 # True when the policy ask-before-merge lists develop-issue under spec.workflows (comments
 # in the file do not count).
 asks_for_develop_issue() {
-  grep -E '^[[:space:]]*workflows:' examples/config/policies/ask-before-merge.yaml | grep -q 'develop-issue'
+  grep -E '^[[:space:]]*workflows:' "$CONFIG/policies/ask-before-merge.yaml" | grep -q 'develop-issue'
 }
 
 # Fails early with a hint when the control plane does not answer, e.g. because server or

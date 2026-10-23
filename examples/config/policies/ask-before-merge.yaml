@@ -1,10 +1,10 @@
 # Asks the human before merging the pull requests of the listed workflows. It is stricter
-# than merge-gate, which also applies to them, so it wins. To be asked for the developer
-# agent's pull requests too, add develop-issue here.
+# than merge-gate, which also applies to them, so it wins. To let the platform merge the
+# developer agent's pull requests without asking, remove develop-issue here (or this file).
 apiVersion: tendworks.dev/v1
 kind: Policy
 metadata:
   name: ask-before-merge
 spec:
-  workflows: [fake-develop-and-ask]
+  workflows: [develop-issue]
   merge: ask

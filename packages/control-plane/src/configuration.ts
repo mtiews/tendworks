@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 import type { AgentProfile, Policy, PullRequestIntegration, TriggerBinding, Workflow } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
@@ -179,10 +179,19 @@ export function loadConfiguration(dir: string): Configuration {
   };
 }
 
-function listFiles(dir: string): string[] {
-  return readdirSync(dir, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile() && /\.(ya?ml|md)$/.test(entry.name))
-    .map((entry) => relative(dir, join(entry.parentPath, entry.name)).split(sep).join("/"))
+/**
+ * Configuration files by path relative to `dir` (`/`-separated), sorted. Hidden files and
+ * directories (`.git`, `.github`) are skipped, so a configuration repository can carry its
+ * own history and CI.
+ */
+function listFiles(dir: string, prefix = ""): string[] {
+  return readdirSync(join(dir, prefix), { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith("."))
+    .flatMap((entry) => {
+      const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+      if (entry.isDirectory()) return listFiles(dir, path);
+      return entry.isFile() && /\.(ya?ml|md)$/.test(entry.name) ? [path] : [];
+    })
     .sort();
 }
 

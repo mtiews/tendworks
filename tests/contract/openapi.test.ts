@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
 import { createAgentRuntimeClient, createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
@@ -21,6 +20,7 @@ import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
 import { readContract } from "./support/contracts.js";
 import { openApiContract } from "./support/openapi-contract.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * Each HTTP API against its OpenAPI contract, in process: the control plane (public),
@@ -49,7 +49,7 @@ afterAll(() => {
   }
 });
 
-const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+const configuration = loadConfiguration(fixtureConfiguration());
 const PR = "https://git.example/example/playground/pull/1";
 const API_TOKEN = "contract-test-token";
 const READ_TOKEN = "contract-test-read-token";

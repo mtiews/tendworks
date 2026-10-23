@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { createAgentRuntime, createInMemoryTaskStore } from "@tendworks/agent-runtime";
 import { loadConfiguration } from "@tendworks/control-plane";
 import { createApprovals, createFakePullRequests, createInMemoryApprovalStore, createMergeGate } from "@tendworks/human-interaction";
@@ -7,6 +6,7 @@ import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationAp
 import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "@tendworks/trigger-gateway";
 import { afterAll, describe, expect, it } from "vitest";
 import { contractFiles, contractSchema, describeErrors, readContract } from "./support/contracts.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * Every CloudEvent the platform emits against its JSON Schema (contracts/events). The
@@ -68,7 +68,7 @@ describe("the event catalog", () => {
   });
 });
 
-const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+const configuration = loadConfiguration(fixtureConfiguration());
 
 describe("events the domains emit", () => {
   it("orchestration: run and step events of a completed and a failed run", async () => {
