@@ -255,7 +255,7 @@ Then on the laptop: `http://localhost:8080/` in the browser, and `tend` with its
 | Platform MCP server from sandboxes | works through the MCP-only gateway (ADR 0019): the end-to-end tests on Linux CI call a platform tool from a scripted chat and check that sandboxes reach only `/mcp`. The `assistant` chat with real Claude Code is not yet recorded on a Linux host |
 | Chats without the MCP server | the chat mechanics are covered by the end-to-end tests on Linux. A profile with `spec.chat` and without `spec.mcp` chats without the platform's tools (below) |
 | `gvisor` isolation class | **not verified** (issue #17). The adapter asks Docker for the runtime `runsc`, which must be installed and registered in the Docker daemon; there are no setup instructions yet |
-| Cleanup | session volumes, the sandbox network and old images are never cleaned up automatically (issue #48, see [Reset](#reset)) |
+| Cleanup | the worker removes orphaned sandboxes and session volumes ([Clean-up of sandboxes and session volumes](#clean-up-of-sandboxes-and-session-volumes)); the sandbox network and old images are never removed automatically (see [Reset](#reset)) |
 | Approvals vs. pull requests changed on GitHub | a pull request merged or closed on GitHub while its run waits is not reflected on the approval request; reject then ends the run with `merged: false` even though the code is merged (issue #51) |
 | Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes. Mitigated only by the `developer` role description (issue #23) |
 
@@ -325,8 +325,8 @@ Before you start:
 | platform state (runs, tasks, chats, approvals, notifications, event outbox) | volume `tendworks_postgres-data` | yes |
 | workflow execution history | volume `tendworks_temporal-data` | yes |
 | transcripts | volume `tendworks_transcripts` | yes |
-| agent sessions (workspace, harness home) | volumes `<installation>-volume-<task>-workspace` and `-session`, labels `dev.tendworks.volume`, `dev.tendworks.installation` and `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open | **no** |
-| sandboxes | containers `<installation>-sandbox-<id>`, labels `dev.tendworks.sandbox`, `dev.tendworks.installation` and `dev.tendworks.owner` | **no** |
+| agent sessions (workspace, harness home) | volumes `<installation>-volume-<task>-workspace` and `-session`, labels `dev.tendworks.volume`, `dev.tendworks.installation` and `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open; orphans go with the [clean-up](#clean-up-of-sandboxes-and-session-volumes) | **no** |
+| sandboxes | containers `<installation>-sandbox-<id>`, labels `dev.tendworks.sandbox`, `dev.tendworks.installation` and `dev.tendworks.owner`; orphans go with the [clean-up](#clean-up-of-sandboxes-and-session-volumes) | **no** |
 | sandbox network | `<installation>-sandboxes`, labels `dev.tendworks.sandbox-network` and `dev.tendworks.installation` | **no** |
 | MCP gateway network | `<installation>_platform-mcp` (compose) | yes, once no sandbox is attached ([Reset](#reset)) |
 | images | `tendworks-server`, `tendworks-worker`, `tendworks/sandbox-claude-code:<tag>` | **no** |
@@ -335,7 +335,17 @@ Names assume the default project name `tendworks`; with another `COMPOSE_PROJECT
 
 Updating from before `v0.2.0`: sandboxes and session volumes had fixed names (`tendworks-sandbox-*`, `tendworks-volume-*`) and no installation label. With the default project name these are the installation's names, so open chats resume and nothing needs to be done. With another project name, end open chats before the update: afterwards their old volumes are no longer found, the chats start over with an empty workspace, and the old `tendworks-volume-*` volumes stay behind (remove them as under [Reset](#reset)).
 
-Nothing ages out: Postgres, transcripts and the volumes of chats nobody ends grow forever (issue #48). Watch the disk (`docker system df -v`).
+Nothing ages out: Postgres, transcripts and the volumes of chats nobody ends grow forever (store retention is a follow-up of issue #48). Watch the disk (`docker system df -v`).
+
+### Clean-up of sandboxes and session volumes
+
+When the worker starts and every 5 minutes, it removes the sandboxes and session volumes of its installation that belong to no live task and no open chat: tasks and chats that ended while a removal failed, leftovers of a worker that died, or of a store that was reset or restored. The owner label (`dev.tendworks.owner`) names the task; a session volume from before `v0.2.0` without one is matched by its name (`<task>-workspace`, `<task>-session`), and a sandbox without one is always removed, since no worker can reattach to it. Sandboxes go before their volumes.
+
+- It touches only its own installation's resources (label `dev.tendworks.installation`, or the installation's names for resources from before `v0.2.0`), never those of another stack on the same engine.
+- It keeps everything of running tasks and open chats, including the volumes of an idle chat and of a run's task that waits to be resumed after a restart.
+- Each removal is logged: `sandbox clean-up: removed sandbox <id> of <task>, ...` (`docker compose -f deploy/compose.yaml logs worker`).
+- A failed removal is logged (`sandbox clean-up: cannot remove ...`), and `GET /status` shows the component `sandbox-cleanup` unhealthy with the reason until a later pass gets it done; every pass retries. A removal that fails while a task or chat ends is recorded as an `error` entry in its transcript; the clean-up retries it once the task or chat has ended.
+- It does not remove the sandbox network, the gateway's network, images or store data.
 
 ### Update
 
@@ -382,7 +392,7 @@ docker volume rm $(docker volume ls -q --filter label=dev.tendworks.installation
 docker network rm tendworks-sandboxes
 ```
 
-`down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images (issue #48), hence the other commands. Remove the sandboxes before `down` (with the worker stopped, so it starts none meanwhile): while a sandbox of an MCP profile is still attached to the gateway's network, `down` cannot remove that network and leaves it behind ("Resource is still in use").
+`down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images, hence the other commands. A stack started again on an empty store would remove the leftover sandboxes and session volumes with its [clean-up](#clean-up-of-sandboxes-and-session-volumes), since no task owns them any more, but a reset should leave nothing behind without it. Remove the sandboxes before `down` (with the worker stopped, so it starts none meanwhile): while a sandbox of an MCP profile is still attached to the gateway's network, `down` cannot remove that network and leaves it behind ("Resource is still in use").
 
 Replace `tendworks` with your project name if you set one. Sandboxes and volumes created before `v0.2.0` have no installation label; find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks and test runs on the same engine used the same names then.
 
@@ -424,4 +434,5 @@ Replace `tendworks` with your project name if you set one. Sandboxes and volumes
 | `The control plane at http://localhost:8080 does not answer.` | smoke scripts | stack down or server exited; `docker compose ... ps` and `logs server --tail 20`; after code or contract changes rebuild with `up -d --build --wait` |
 | `The tend CLI is not built; run pnpm build first.` | `chat-assistant.sh` | `pnpm install && pnpm build` on the host |
 | `/ui/` answers 404, log says `web UI: no build at ...` | server log | the image has no UI build; rebuild with `up -d --build` |
-| sandboxes or volumes left after tests | `docker ps`, `docker volume ls` | [Reset](#reset); issue #48 |
+| sandboxes or volumes left after tests | `docker ps`, `docker volume ls` | a running stack of that installation removes its own with the [clean-up](#clean-up-of-sandboxes-and-session-volumes); for a stack that is gone, [Reset](#reset) |
+| `sandbox clean-up: cannot remove ...`; `tend status` shows `sandbox-cleanup` unhealthy | worker log; `GET /status` | the sandbox backend refused a removal (e.g. a volume still mounted by a container outside the platform); the next pass retries every 5 minutes. Check the named resource with `docker inspect`, remove what holds it, or restart the worker for a pass at once |

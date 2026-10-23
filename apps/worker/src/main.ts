@@ -7,6 +7,7 @@ import {
   createClaudeCodeHarness,
   createFileTranscriptStore,
   createPostgresTaskStore,
+  createSandboxCleanup,
   loadAgentProfiles,
   loadSkills,
   migrateAgentRuntimeStore,
@@ -79,12 +80,13 @@ for (const profile of profiles) {
   }
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
+const sandboxes = createDockerSandboxApi({
+  url: sandboxBackendUrl,
+  ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}),
+  networks: platformMcpNetwork ? [platformMcpNetwork] : [],
+});
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({
-    url: sandboxBackendUrl,
-    ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}),
-    networks: platformMcpNetwork ? [platformMcpNetwork] : [],
-  }),
+  sandboxes,
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
@@ -122,12 +124,17 @@ try {
 const bus = createPostgresEventBus({ pool });
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
 // Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
+const tasks = createPostgresTaskStore({ pool, publisher: bus });
 const agents = createAgentRuntime({
   profiles,
   harnesses: { "claude-code": claudeCode },
-  store: createPostgresTaskStore({ pool, publisher: bus }),
+  store: tasks,
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
+// Sandboxes and session volumes of this installation that belong to no live task or open
+// chat go, on start and every 5 minutes; each removal is logged, failed ones are logged,
+// shown as the unhealthy component sandbox-cleanup and retried by the next pass.
+const sandboxCleanup = createSandboxCleanup({ sandboxes, store: tasks });
 const store = createPostgresRunStore({ pool, publisher: bus });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 // Other domains' events that name a run (e.g. approval.decided) go to that run, whose
@@ -148,7 +155,7 @@ const runWorker = await createTemporalRunWorker({ address: engineAddress, activi
 // Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml),
 // the agent runtime (contracts/openapi/agent-runtime.yaml) and orchestration (contracts/openapi/orchestration.yaml).
 const health = createHealthApi({
-  probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
+  probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl), sandboxCleanup],
 });
 const orchestration = createOrchestrationApi({ store, engine, runtime });
 const agentRuntime = createAgentRuntimeApi({ runtime: agents });
@@ -165,6 +172,7 @@ const server = serve({ fetch, port }, () => console.log(`worker internal API lis
 // Chats have no run whose engine would resend their message after a restart: the agent
 // runtime takes up their interrupted turns and idle times itself (ADR 0015).
 agents.resumeChats().catch((error: unknown) => console.error("cannot resume chats:", error));
+sandboxCleanup.start();
 
 const stopped = runWorker.run().catch((error: unknown) => {
   console.error("run worker failed:", error);
@@ -172,6 +180,7 @@ const stopped = runWorker.run().catch((error: unknown) => {
 });
 
 async function shutdown() {
+  await sandboxCleanup.stop();
   runWorker.shutdown();
   server.close();
   // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.

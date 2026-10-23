@@ -291,8 +291,14 @@ export function createDockerSandboxApi({
         throw new Error(`creating the sandbox failed: ${created.status} ${message}`);
       }
 
+      // A container that cannot be discarded is named in the error; it is listed, so a clean-up removes it later.
       const discard = async (error: Error) => {
-        await call("DELETE", `/containers/${containerName(id)}?force=true&v=true`);
+        const removed = await call("DELETE", `/containers/${containerName(id)}?force=true&v=true`);
+        if (removed.ok || removed.status === 404) {
+          await removed.body?.cancel();
+          return error;
+        }
+        error.message += `; removing the sandbox ${id} failed as well: ${(await failure(removed, "removing the sandbox")).message}`;
         return error;
       };
       // Joined before it starts, so nothing in it runs before it is on every network.

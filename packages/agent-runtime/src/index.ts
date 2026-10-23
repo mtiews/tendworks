@@ -10,7 +10,8 @@ export { createClaudeCodeHarness, type ClaudeCodeHarnessOptions } from "./claude
 export { claudeCodeCredentialFromEnv, type ClaudeCodeCredential } from "./claude-code/credentials.js";
 export { createFakeHarness } from "./fake-agent.js";
 export type { Cost, Harness, HarnessObserver, HarnessResult, HarnessSession, HarnessSessionTask, HarnessTask, HarnessTurn, OpenSession } from "./harness.js";
-export type { Sandboxes, SandboxProcess, SandboxTemplate } from "./sandboxes.js";
+export type { ListedSandbox, ListedVolume, Sandboxes, SandboxProcess, SandboxTemplate } from "./sandboxes.js";
+export { createSandboxCleanup, type CleanupPass, type CleanupSandboxes, type SandboxCleanup, type SandboxCleanupOptions } from "./sandbox-cleanup.js";
 export { createInMemoryTaskStore, type StoredTask, type TaskKind, type TaskStore } from "./task-store.js";
 export { createPostgresTaskStore, migrateAgentRuntimeStore, type PostgresTaskStoreOptions, type SqlTransaction } from "./adapters/postgres-task-store.js";
 export { createFileTranscriptStore, type FileTranscriptStoreOptions } from "./transcripts/file-transcript-store.js";

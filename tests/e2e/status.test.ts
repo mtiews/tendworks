@@ -11,6 +11,7 @@ describe("platform status on the compose stack", () => {
       ["store", "healthy"],
       ["execution-engine", "healthy"],
       ["sandbox-backend", "healthy"],
+      ["sandbox-cleanup", "healthy"],
     ]);
   });
 });

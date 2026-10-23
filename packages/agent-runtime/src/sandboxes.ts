@@ -6,6 +6,10 @@ export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type ExecRequest = Schemas["ExecRequest"];
 export type ExecResult = Schemas["ExecResult"];
 export type VolumeMount = Schemas["VolumeMount"];
+/** A sandbox as the installation lists it, with the owner it was created with. */
+export type ListedSandbox = Pick<Schemas["Sandbox"], "id" | "owner">;
+/** A volume as the installation lists it, with the owner of the sandbox that created it. */
+export type ListedVolume = Schemas["Volume"];
 
 /** A process in a sandbox with its standard streams open. */
 export interface SandboxProcess {
@@ -29,6 +33,10 @@ export interface Sandboxes {
    * The sandbox also joins the given networks (only those the installation allows).
    */
   create(template: SandboxTemplate, options?: { volumes?: VolumeMount[]; owner?: string; networks?: string[] }): Promise<{ id: string }>;
+  /** The installation's sandboxes, also stopped ones and those nobody remembers. */
+  list(): Promise<ListedSandbox[]>;
+  /** The installation's volumes. */
+  listVolumes(): Promise<ListedVolume[]>;
   /** Runs a command and waits for it to finish; a non-zero exit code is not an error. */
   exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
   attach(sandboxId: string, request: ExecRequest): Promise<SandboxProcess>;

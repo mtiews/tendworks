@@ -6,6 +6,7 @@ import {
   createInMemoryTaskStore,
   createInMemoryTranscriptStore,
   createPostgresTaskStore,
+  createSandboxCleanup,
   type ChatEventPublisher,
   type Harness,
   type Sandboxes,
@@ -133,6 +134,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
     store: createStoreProbe,
     "execution-engine": createExecutionEngineProbe,
     "sandbox-backend": createSandboxBackendProbe,
+    "sandbox-cleanup": createSandboxCleanup,
     static: createStaticHealthProbe,
   }),
 };

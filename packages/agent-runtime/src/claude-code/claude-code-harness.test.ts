@@ -15,7 +15,7 @@ import {
 } from "../index.js";
 import type { Sandboxes } from "../sandboxes.js";
 import type { TranscriptRecord } from "../transcripts/transcript-store.js";
-import { dyingWorker, encode, scriptedSandboxes, scriptedTemplate as template, type AgentScript } from "./scripted-acp-agent.stub.js";
+import { dyingWorker, encode, refusingRemovals, scriptedSandboxes, scriptedTemplate as template, type AgentScript } from "./scripted-acp-agent.stub.js";
 
 const profile = (sandbox: string | undefined = "claude-code"): AgentProfile.AgentProfile => ({
   apiVersion: "tendworks.dev/v1",
@@ -135,6 +135,46 @@ describe("Claude Code harness", () => {
 
     expect(sandboxes.destroyed).toEqual(["sandbox1"]);
     expect(sandboxes.deletedVolumes.sort()).toEqual(["task-1-session", "task-1-workspace"]);
+  });
+
+  it("keeps the task's result when its sandbox and volumes cannot be removed at the end, and records why", async () => {
+    const sandboxes = scriptedSandboxes({ reply: ["Hello"] });
+    const removals = refusingRemovals(sandboxes.api);
+    removals.refused.add("sandbox1").add("task-1-session");
+    const { observer, entries } = observe();
+
+    const result = await harness(removals.api).run(task(), observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_COMPLETED", message: "Hello" });
+    expect(entries.filter((entry) => entry.type === "error")).toEqual([
+      { type: "error", message: "cannot remove sandbox sandbox1: the backend cannot remove sandbox1; the sandbox clean-up retries it" },
+      { type: "error", message: "cannot remove volume task-1-session: the backend cannot remove task-1-session; the sandbox clean-up retries it" },
+    ]);
+    expect(sandboxes.deletedVolumes).toEqual(["task-1-workspace"]);
+  });
+
+  it("records an abandoned sandbox it cannot remove and goes on with the session in a new one", async () => {
+    const sandboxes = scriptedSandboxes({ reply: ["Finished."] });
+    const removals = refusingRemovals(sandboxes.api);
+    removals.refused.add("sandbox0");
+    const { observer, entries } = observe();
+
+    const result = await harness(removals.api).run(task({ session: { sessionId: "lost-session", sandboxId: "sandbox0" } }), observer);
+
+    expect(result.state).toBe("TASK_STATE_COMPLETED");
+    expect(entries).toContainEqual({ type: "error", message: "cannot remove sandbox sandbox0: the backend cannot remove sandbox0; the sandbox clean-up retries it" });
+  });
+
+  it("records volumes it cannot remove after a sandbox could not be created", async () => {
+    const sandboxes = scriptedSandboxes();
+    const removals = refusingRemovals({ ...sandboxes.api, create: () => Promise.reject(new Error("image not found")) });
+    removals.refused.add("task-1-workspace");
+    const { observer, entries } = observe();
+
+    const result = await harness(removals.api).run(task(), observer);
+
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("image not found") });
+    expect(entries).toContainEqual({ type: "error", message: "cannot remove volume task-1-workspace: the backend cannot remove task-1-workspace; the sandbox clean-up retries it" });
   });
 
   it("keeps the ACP session id and the sandbox with the task before the agent gets the prompt", async () => {

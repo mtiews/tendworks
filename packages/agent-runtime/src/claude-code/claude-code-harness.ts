@@ -96,6 +96,18 @@ export function createClaudeCodeHarness({
 }: ClaudeCodeHarnessOptions): Harness {
   const failed = (message: string): HarnessResult => ({ state: "TASK_STATE_FAILED", message });
 
+  /**
+   * Removes a sandbox or a volume; a failure is recorded in the transcript instead of
+   * failing the task, and the sandbox clean-up retries the removal once the task has ended.
+   */
+  async function remove(observer: HarnessObserver, what: string, removal: () => Promise<void>): Promise<void> {
+    try {
+      await removal();
+    } catch (error) {
+      observer.record({ type: "error", message: `cannot remove ${what}: ${error instanceof Error ? error.message : String(error)}; the sandbox clean-up retries it` });
+    }
+  }
+
   /** Validation: what the task needs before anything is started; a failure names what is missing. */
   function validate(profile: LoadedAgentProfile): { template: SandboxTemplate; credential: ClaudeCodeCredential } | { failure: HarnessResult } {
     if (!credential) {
@@ -152,14 +164,14 @@ export function createClaudeCodeHarness({
     const volumes = volumesOf(taskId);
     if (session?.sandboxId !== undefined) {
       observer.progress("removing the sandbox of the interrupted session");
-      await sandboxes.destroy(session.sandboxId).catch(() => {});
+      await remove(observer, `sandbox ${session.sandboxId}`, () => sandboxes.destroy(session.sandboxId!));
     }
     observer.progress("starting a sandbox");
     try {
       return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId, ...(networks.length === 0 ? {} : { networks }) })).id, volumes };
     } catch (error) {
       // The task fails for good, so volumes the backend may have created go too.
-      await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume).catch(() => {})));
+      await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
       return { failure: failed(`cannot create a sandbox from template ${template.metadata.name}: ${error instanceof Error ? error.message : String(error)}`) };
     }
   }
@@ -297,8 +309,8 @@ export function createClaudeCodeHarness({
       } finally {
         // Destroying the sandbox also ends background commands a cancel leaves running.
         // The session has ended, so its volumes go too; only an interrupted session keeps them.
-        await sandboxes.destroy(sandboxId);
-        await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume)));
+        await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
+        await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
       }
     },
 
@@ -334,7 +346,7 @@ export function createClaudeCodeHarness({
           // A workspace kept on its volume (e.g. after idle time) stays as it is.
           const checkoutFailure = await checkOut(sandboxId, workspace, prepared.env, observer, prepared.redact);
           if (checkoutFailure) {
-            await sandboxes.destroy(sandboxId).catch(() => {});
+            await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
             return { failure: checkoutFailure };
           }
         }
@@ -354,7 +366,7 @@ export function createClaudeCodeHarness({
           ...(kept?.sessionId === undefined ? {} : { resume: { sessionId: kept.sessionId } }),
         });
         if ("outcome" in acp) {
-          await sandboxes.destroy(sandboxId).catch(() => {});
+          await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
           return { failure: failed(prepared.redact(acp.error)) };
         }
         current = { sandboxId, acp };
@@ -395,8 +407,12 @@ export function createClaudeCodeHarness({
           const sandboxId = suspended?.sandboxId ?? kept?.sandboxId;
           current = undefined;
           if (sandboxId === undefined) return;
-          await sandboxes.destroy(sandboxId).catch(() => {});
-          await suspended?.acp.close();
+          // A sandbox that cannot be removed stays kept, so the next turn removes it.
+          try {
+            await sandboxes.destroy(sandboxId);
+          } finally {
+            await suspended?.acp.close();
+          }
           if (kept?.sandboxId === sandboxId) {
             const { sandboxId: _gone, ...rest } = kept;
             await keep(rest);
@@ -404,11 +420,21 @@ export function createClaudeCodeHarness({
         },
         async end() {
           // Destroying the sandbox first also ends a running turn and its background commands.
+          // Every removal is tried; those that fail are named together, for the sandbox clean-up to retry.
+          const failures: string[] = [];
+          const attempt = async (what: string, removal: () => Promise<void>) => {
+            try {
+              await removal();
+            } catch (error) {
+              failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          };
           const sandboxIds = new Set([current?.sandboxId, kept?.sandboxId].filter((id) => id !== undefined));
-          for (const sandboxId of sandboxIds) await sandboxes.destroy(sandboxId).catch(() => {});
+          for (const sandboxId of sandboxIds) await attempt(`sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
           await current?.acp.close();
           current = undefined;
-          await Promise.all(volumesOf(taskId).map(({ volume }) => sandboxes.deleteVolume(volume)));
+          await Promise.all(volumesOf(taskId).map(({ volume }) => attempt(`volume ${volume}`, () => sandboxes.deleteVolume(volume))));
+          if (failures.length > 0) throw new Error(`${failures.join("; ")}; the sandbox clean-up retries it`);
         },
       };
     },
