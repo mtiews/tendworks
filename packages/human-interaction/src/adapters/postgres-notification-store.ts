@@ -1,9 +1,19 @@
 import pg from "pg";
+import { migrate, type Migration } from "@tendworks/platform/migrations";
 import type { Notification } from "../notification-channel.js";
 import type { NotificationStore } from "../notification-store.js";
 
 // Human interaction owns the schema `human_interaction`; no other domain reads these tables.
-const SCHEMA = `
+/**
+ * Human interaction's schema, one migration per change (docs/platform-implementation.md,
+ * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
+ * migrations; its `if not exists` statements adopt such a store with its data.
+ */
+export const humanInteractionMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    name: "initial",
+    sql: `
 create schema if not exists human_interaction;
 create table if not exists human_interaction.notifications (
   position   bigserial unique,
@@ -31,18 +41,16 @@ create table if not exists human_interaction.approval_requests (
   unique (run_id, action, pull_request)
 );
 alter table human_interaction.approval_requests add column if not exists traceparent text;
-`;
+`,
+  },
+];
 
-/** Creates human interaction's tables if they do not exist yet. */
-export async function migrateHumanInteractionStore(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("select pg_advisory_lock(hashtext('human_interaction.migrate'))");
-    await client.query(SCHEMA);
-  } finally {
-    await client.query("select pg_advisory_unlock(hashtext('human_interaction.migrate'))").catch(() => {});
-    client.release();
-  }
+/**
+ * Brings human interaction's tables to the latest version under its advisory lock. Throws
+ * `MigrationError` when a migration fails (it is rolled back); the service must stop then.
+ */
+export function migrateHumanInteractionStore(pool: pg.Pool): Promise<{ from: number; to: number }> {
+  return migrate(pool, { schema: "human_interaction", migrations: humanInteractionMigrations });
 }
 
 interface NotificationRow {

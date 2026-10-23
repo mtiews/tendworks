@@ -220,6 +220,22 @@ The web UI with the real harness in a browser (ADR 0018). The regular suites cov
 22. Approval: label a playground issue `ready-for-agent` (step 9). The `develop-issue` run appears and streams; after the agent step it waits, the status page counts one pending approval, the notifications page shows `approval.requested` with a run link, and the approval requests page and the run detail show the request with the pull request as a link. Approve on the run detail and confirm: the run completes with `merged: true` and `decision: ask`, the pull request is merged by the platform token's owner, and the request shows as approved, also in a second tab without reload.
 23. Phone width (browser device emulation, e.g. Pixel 7) and both colour schemes (DevTools rendering, `prefers-color-scheme`): every page is usable without horizontal page scrolling; the navigation wraps into a grid, tables scroll inside themselves, and the chat input stays in view.
 
+## Schema migrations
+
+Every domain owns a Postgres schema (`orchestration`, `agent_runtime`, `event_bus`, `human_interaction`, `trigger_gateway`) and migrates it itself with the platform library `@tendworks/platform/migrations` (a subpath export, so the browser-safe entry point the web UI imports never pulls in a database client).
+
+- **Version table:** each schema has its own `<schema>.schema_migrations` (version, name, applied at). No domain reads another's.
+- **On start:** each bundle migrates the domains it runs (worker: orchestration, agent runtime, event bus; server: event bus, human interaction, trigger gateway; the event bus is migrated by both, which the lock makes safe). Under the domain's advisory lock (`hashtext('<schema>.migrate')`), every migration above the recorded version runs in its own transaction together with its row in the version table, so concurrent starts migrate once.
+- **Migration 1** is the schema as the stores created it before versioned migrations, with its `create … if not exists` and `alter … add column if not exists` statements. It adopts such a store with its data.
+- **Failure:** a failed migration is rolled back, so the store stays at the version before it. The bundle logs `schema <schema>: migration <n> (<name>) failed: <error>` and stops working: the server answers only `GET /status`, the worker only `GET /health` (every other request gets 503), and both report the component `<schema>-schema` (e.g. `orchestration-schema`) as unhealthy, so `GET /status` shows it either way. A store at a newer version than the release knows fails the same way (no downgrades). The next start tries again.
+
+To add a migration to a domain:
+
+1. Append an entry to the domain's list in its Postgres adapter (e.g. `orchestrationMigrations` in `packages/orchestration/src/adapters/postgres-run-store.ts`) with the next `version`, a short stable `name` and its `sql`. Never edit or reorder a released migration; versions count up from 1 without gaps.
+2. Write the SQL for the store at the previous version. It need not be idempotent (the version table guards it), and it may use the domain's own tables only.
+3. Extend the adapter's integration test (`*.integration.test.ts`), which migrates a fresh store and adopts one created by migration 1 with its data; add data the new migration must carry over.
+4. Name the migration in the release notes.
+
 ## Quality gates
 
 | Gate | Where | Enforced by |

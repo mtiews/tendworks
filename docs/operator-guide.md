@@ -338,7 +338,7 @@ pnpm install && pnpm build                                                 # for
 
 - If the sandbox image tag changed, update `spec.image` in your own configuration's sandbox template too; `examples/config` and `deploy/compose.yaml` change together, your copy does not.
 - Check `git log` for configuration schema changes; an invalid configuration stops the server (see the log).
-- Server and worker migrate their database tables at startup. There is no documented downgrade path; back up first and prefer updating while no run is active.
+- Server and worker migrate their database tables at startup, each change in its own transaction, and log `store <domain>: migrated from version <n> to <m>`. Downgrades are not supported; back up first and prefer updating while no run is active.
 
 ### Backup and restore
 
@@ -402,6 +402,7 @@ These labels are shared by every Tendworks stack and test run on the same Docker
 | `TEND_API_READ_TOKEN must be set: agent profile assistant lists the platform MCP server (mcp: [tendworks]), which reads with it` | server log, server exits | a profile lists `mcp: [tendworks]` and no read token reaches the server. With the compose defaults this cannot happen, only when the variable is set empty elsewhere |
 | `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state` | server log, server exits | use two different values |
 | `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML (e.g. `.github/`) in the configuration directory counts |
+| `schema <schema>: migration <n> (<name>) failed: ...` or `... newer than this release knows ...; downgrades are not supported`; `tend status` shows `<schema>-schema` unhealthy | server or worker log; `GET /status` | an update's migration failed and was rolled back, so the store is still at the previous version. The bundle keeps running but only answers `/status` (server) or `/health` (worker), every other request gets 503. Check out the previous tag (its store is unchanged) and `up -d --build`, or fix the cause and `up -d`; the next start retries. A store newer than the release needs the newer tag or the backup |
 | `missing environment variable <NAME>` | server or worker log | a bundle setting is missing; only happens with a modified compose file |
 | `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; its tasks will fail until this is fixed` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
 | run fails: `no harness credential configured: set TEND_CLAUDE_CODE_CREDENTIAL to oauth-token or api-key and the matching variable in deploy/.env` | `tend run get` | as above |

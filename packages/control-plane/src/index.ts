@@ -26,4 +26,5 @@ export {
 } from "./runs.js";
 export { createInMemoryTriggers, createTriggerGatewayClient, type Trigger, type TriggersPort } from "./triggers.js";
 export type { ComponentStatus, HealthProbe, PlatformStatus, RuntimeBundle } from "./status.js";
+export { createStoppedControlPlaneApi, type StoppedControlPlaneApiOptions } from "./stopped.js";
 export type { WebUiOptions } from "./web-ui.js";

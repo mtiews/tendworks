@@ -7,6 +7,7 @@ import {
   createAgentRuntimeClient,
   createControlPlaneApi,
   createOrchestrationClient,
+  createStoppedControlPlaneApi,
   createStoreProbe,
   createTriggerGatewayClient,
   loadConfiguration,
@@ -33,6 +34,7 @@ import {
 } from "@tendworks/trigger-gateway";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
+import { MigrationError } from "@tendworks/platform/migrations";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -71,9 +73,27 @@ if (tokenProblems.length > 0) {
 
 const databaseUrl = env("TEND_DATABASE_URL");
 const pool = new pg.Pool({ connectionString: databaseUrl });
-await migrateEventBus(pool);
-await migrateHumanInteractionStore(pool);
-await migrateTriggerGatewayStore(pool);
+// Each domain brings its own tables to the version this release needs (docs/platform-implementation.md,
+// "Schema migrations"). A failed migration was rolled back; the server then stops working
+// and only answers GET /status, which names it, so it never runs on a half-migrated store.
+try {
+  for (const [domain, migrateStore] of [["event bus", migrateEventBus], ["human interaction", migrateHumanInteractionStore], ["trigger gateway", migrateTriggerGatewayStore]] as const) {
+    const { from, to } = await migrateStore(pool);
+    if (from !== to) console.log(`store ${domain}: migrated from version ${from} to ${to}`);
+  }
+} catch (error) {
+  if (!(error instanceof MigrationError)) throw error;
+  console.error(`${error.message}; the server stopped and answers only GET /status until the store is fixed or restored and the server restarted`);
+  const stopped = createStoppedControlPlaneApi({
+    probes: [createStoreProbe(databaseUrl), { name: error.component, check: async () => ({ status: "unhealthy", message: error.message }) }],
+    bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
+    reason: error.message,
+  });
+  serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8080")) });
+  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => process.exit(0));
+  // The rest of this bundle never starts.
+  await new Promise<never>(() => {});
+}
 
 // Human interaction: run outcomes and approval requests from the event bus become
 // notifications, recorded before the notification channel (a log for now) delivers them.

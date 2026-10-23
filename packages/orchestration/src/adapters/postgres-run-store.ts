@@ -1,4 +1,5 @@
 import pg from "pg";
+import { migrate, type Migration } from "@tendworks/platform/migrations";
 import type { EventPublisher, RunEvent } from "../runs/run-events.js";
 import type { Run, RunPatch, RunStore, StepRecord, StepTask } from "../runs/run-store.js";
 
@@ -8,7 +9,16 @@ export interface SqlTransaction {
 }
 
 // Orchestration owns the schema `orchestration`; no other domain reads these tables.
-const SCHEMA = `
+/**
+ * Orchestration's schema, one migration per change (docs/platform-implementation.md,
+ * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
+ * migrations; its `if not exists` statements adopt such a store with its data.
+ */
+export const orchestrationMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    name: "initial",
+    sql: `
 create schema if not exists orchestration;
 create table if not exists orchestration.runs (
   position    bigserial unique,
@@ -48,19 +58,16 @@ create table if not exists orchestration.outbox (
   event      jsonb not null,
   created_at timestamptz not null default now()
 );
-`;
+`,
+  },
+];
 
-/** Creates orchestration's tables if they do not exist yet. */
-export async function migrateOrchestrationStore(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    // Serialises concurrent starts of several workers.
-    await client.query("select pg_advisory_lock(hashtext('orchestration.migrate'))");
-    await client.query(SCHEMA);
-  } finally {
-    await client.query("select pg_advisory_unlock(hashtext('orchestration.migrate'))").catch(() => {});
-    client.release();
-  }
+/**
+ * Brings orchestration's tables to the latest version under its advisory lock. Throws
+ * `MigrationError` when a migration fails (it is rolled back); the service must stop then.
+ */
+export function migrateOrchestrationStore(pool: pg.Pool): Promise<{ from: number; to: number }> {
+  return migrate(pool, { schema: "orchestration", migrations: orchestrationMigrations });
 }
 
 /**

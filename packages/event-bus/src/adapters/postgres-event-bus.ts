@@ -1,4 +1,5 @@
 import pg from "pg";
+import { migrate, type Migration } from "@tendworks/platform/migrations";
 import type { BusEvent, EventBus, EventHandler, RetryOptions, SubscribeOptions } from "../event-bus.js";
 import { Pump } from "../pump.js";
 
@@ -9,7 +10,16 @@ export interface SqlTransaction {
 
 // The event bus owns the schema `event_bus`. Producers never touch it directly; they hand
 // their open transaction to `publish`, which is why they must share the database.
-const SCHEMA = `
+/**
+ * The bus's schema, one migration per change (docs/platform-implementation.md,
+ * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
+ * migrations; its `if not exists` statements adopt such a store with its data.
+ */
+export const eventBusMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    name: "initial",
+    sql: `
 create schema if not exists event_bus;
 create table if not exists event_bus.events (
   position   bigserial primary key,
@@ -25,20 +35,19 @@ create table if not exists event_bus.subscriptions (
   name     text primary key,
   position bigint not null default 0
 );
-`;
+`,
+  },
+];
 
 const CHANNEL = "tend_events";
 
-/** Creates the bus's tables if they do not exist yet. Safe to call from every bundle. */
-export async function migrateEventBus(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("select pg_advisory_lock(hashtext('event_bus.migrate'))");
-    await client.query(SCHEMA);
-  } finally {
-    await client.query("select pg_advisory_unlock(hashtext('event_bus.migrate'))").catch(() => {});
-    client.release();
-  }
+/**
+ * Brings the bus's tables to the latest version under its advisory lock; safe to call from
+ * every bundle. Throws `MigrationError` when a migration fails (it is rolled back); the
+ * service must stop then.
+ */
+export function migrateEventBus(pool: pg.Pool): Promise<{ from: number; to: number }> {
+  return migrate(pool, { schema: "event_bus", migrations: eventBusMigrations });
 }
 
 export interface PostgresEventBusOptions extends RetryOptions {

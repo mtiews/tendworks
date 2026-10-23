@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
-import { afterAll, beforeAll } from "vitest";
+import { afterAll, beforeAll, expect, it } from "vitest";
 import type { ChatEvent, ChatEventPublisher } from "../chat-events.js";
 import { describeTaskStore } from "../task-store.suite.js";
-import { createPostgresTaskStore, migrateAgentRuntimeStore, type SqlTransaction } from "./postgres-task-store.js";
+import { agentRuntimeMigrations, createPostgresTaskStore, migrateAgentRuntimeStore, type SqlTransaction } from "./postgres-task-store.js";
 
 /* Runs the shared task store suite against a throwaway Postgres container. */
 
@@ -14,13 +14,14 @@ const docker = async (...args: string[]) => (await run("docker", args, { timeout
 const image = "postgres:18.6-alpine"; // as in deploy/compose.yaml
 let container: string;
 let pool: pg.Pool;
+let address: string;
 
 beforeAll(async () => {
   container = await docker(
     "run", "-d", "--rm", "--label", "dev.tendworks.test=agent-runtime-task-store",
     "-e", "POSTGRES_PASSWORD=test", "-p", "127.0.0.1::5432", image,
   );
-  const address = (await docker("port", container, "5432/tcp")).split("\n")[0]!;
+  address = (await docker("port", container, "5432/tcp")).split("\n")[0]!;
   pool = new pg.Pool({ connectionString: `postgres://postgres:test@${address}/postgres` });
   for (let attempt = 0; ; attempt++) {
     try {
@@ -50,4 +51,31 @@ describeTaskStore("Postgres", () => {
     },
   };
   return { store: createPostgresTaskStore({ pool, publisher }), published: async () => published };
+});
+
+it("adopts a store created before versioned migrations, with its tasks", async () => {
+  await pool.query("create database adopted");
+  const adopted = new pg.Pool({ connectionString: `postgres://postgres:test@${address}/adopted` });
+  try {
+    // Before versioned migrations, the store ran today's schema (migration 1) on every start.
+    await adopted.query(agentRuntimeMigrations[0]!.sql);
+    const messageId = crypto.randomUUID();
+    const task = {
+      messageId,
+      agent: "echo",
+      startedAt: "2026-10-18T10:00:00.000Z",
+      task: {
+        id: crypto.randomUUID(),
+        contextId: "context-1",
+        status: { state: "TASK_STATE_WORKING" as const, timestamp: "2026-10-18T10:00:00.000Z" },
+        history: [{ messageId, role: "ROLE_USER" as const, parts: [{ text: "Say hello" }] }],
+      },
+    };
+    const claimed = await createPostgresTaskStore({ pool: adopted }).claim(task);
+
+    expect(await migrateAgentRuntimeStore(adopted)).toEqual({ from: 0, to: agentRuntimeMigrations.length });
+    expect(await createPostgresTaskStore({ pool: adopted }).find(task.task.id)).toEqual(claimed);
+  } finally {
+    await adopted.end();
+  }
 });
