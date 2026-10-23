@@ -28,11 +28,12 @@ export interface ClaudeCodeHarnessOptions {
   /** How long one session may run before it is cancelled and the task fails. */
   timeoutMs?: number;
   /**
-   * The platform MCP server (ADR 0016): its address as sandboxes reach it and the read-only
-   * token it is read with. Only sessions of profiles that list it (`mcp: [tendworks]`) get
-   * either; without it, their tasks fail with a hint.
+   * The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
+   * token it is read with, and the network on which sandboxes reach that address (ADR 0019).
+   * Only sessions of profiles that list it (`mcp: [tendworks]`) get any of them; their
+   * sandboxes join the network. Without it, their tasks fail with a hint.
    */
-  platformMcp?: { url: string; token: string };
+  platformMcp?: { url: string; token: string; network?: string };
   /** How long a cancelled turn of a chat gets to stop before its harness process is given up; 10 s by default. */
   cancelGraceMs?: number;
 }
@@ -121,13 +122,19 @@ export function createClaudeCodeHarness({
     return { env };
   }
 
-  /** MCP servers: the platform MCP server, configured for the session only when the profile lists it. */
-  function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers } | { failure: HarnessResult } {
-    if (!listsPlatformMcpServer(profile)) return { mcpServers: [] };
+  /**
+   * MCP servers: the platform MCP server, configured for the session only when the profile
+   * lists it, with the network its sandbox reaches the server on.
+   */
+  function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers; networks: string[] } | { failure: HarnessResult } {
+    if (!listsPlatformMcpServer(profile)) return { mcpServers: [], networks: [] };
     if (!platformMcp) {
       return { failure: failed(`agent profile ${profile.metadata.name} lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker`) };
     }
-    return { mcpServers: [{ type: "http", name: PLATFORM_MCP_SERVER, url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }] };
+    return {
+      mcpServers: [{ type: "http", name: PLATFORM_MCP_SERVER, url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }],
+      networks: platformMcp.network === undefined ? [] : [platformMcp.network],
+    };
   }
 
   /**
@@ -138,7 +145,7 @@ export function createClaudeCodeHarness({
    */
   async function startSandbox(
     taskId: string,
-    template: SandboxTemplate,
+    { template, networks }: Pick<Prepared, "template" | "networks">,
     session: HarnessSession | undefined,
     observer: HarnessObserver,
   ): Promise<{ sandboxId: string; volumes: VolumeMount[] } | { failure: HarnessResult }> {
@@ -149,7 +156,7 @@ export function createClaudeCodeHarness({
     }
     observer.progress("starting a sandbox");
     try {
-      return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId })).id, volumes };
+      return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId, ...(networks.length === 0 ? {} : { networks }) })).id, volumes };
     } catch (error) {
       // The task fails for good, so volumes the backend may have created go too.
       await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume).catch(() => {})));
@@ -207,7 +214,7 @@ export function createClaudeCodeHarness({
     if ("failure" in servers) return servers;
     const hidden = [valid.credential.value, ...Object.values(resolved.env), platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
-    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, redact };
+    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, networks: servers.networks, redact };
   }
 
   /** ACP turn: the harness's ACP adapter over stdio, one prompt turn, resumed when the session was interrupted. */
@@ -271,7 +278,7 @@ export function createClaudeCodeHarness({
       const requested = workspaceOf(message);
       if ("problem" in requested) return failed(requested.problem);
 
-      const started = await startSandbox(taskId, valid.template, session, observer);
+      const started = await startSandbox(taskId, valid, session, observer);
       if ("failure" in started) return started.failure;
       const { sandboxId, volumes } = started;
       try {
@@ -317,7 +324,7 @@ export function createClaudeCodeHarness({
           await current.acp.close();
           current = undefined;
         }
-        const started = await startSandbox(taskId, prepared.template, kept, observer);
+        const started = await startSandbox(taskId, prepared, kept, observer);
         if ("failure" in started) return started;
         const { sandboxId } = started;
         await keep({ ...kept, sandboxId });
@@ -416,6 +423,8 @@ interface Prepared {
   credential: ClaudeCodeCredential;
   env: Record<string, string>;
   mcpServers: McpServers;
+  /** Networks the session's sandbox joins besides its own. */
+  networks: string[];
   redact: (text: string) => string;
 }
 

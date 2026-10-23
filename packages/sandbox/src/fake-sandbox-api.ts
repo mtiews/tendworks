@@ -1,4 +1,5 @@
 import {
+  allowedNetworks,
   assertAbsolutePath,
   assertInstallation,
   assertSandboxId,
@@ -50,6 +51,8 @@ export interface FakeSandboxApiOptions {
   /** Shared with other fakes to put several installations on one backend; a new one by default. */
   backend?: FakeSandboxBackend;
   installation?: string;
+  /** Networks sandboxes may join on request; none by default. */
+  networks?: readonly string[];
 }
 
 /** Where a file lives: in the sandbox itself or in a mounted volume, and under which key. */
@@ -67,7 +70,11 @@ function locate(sandbox: FakeSandbox, path: string): { files: Files; key: string
  * `attach` runs the same commands; `cat` without arguments echoes its input
  * until the input is closed. Volumes are kept in memory beyond their sandboxes.
  */
-export function createFakeSandboxApi({ backend = createFakeSandboxBackend(), installation = defaultInstallation }: FakeSandboxApiOptions = {}): SandboxApi {
+export function createFakeSandboxApi({
+  backend = createFakeSandboxBackend(),
+  installation = defaultInstallation,
+  networks: allowed = [],
+}: FakeSandboxApiOptions = {}): SandboxApi {
   assertInstallation(installation);
   const { sandboxes } = backend;
   const volumeKey = (volume: string) => `${installation}/${volume}`;
@@ -80,8 +87,9 @@ export function createFakeSandboxApi({ backend = createFakeSandboxBackend(), ins
   };
 
   return {
-    async create(template, { volumes: mounts = [], owner } = {}) {
+    async create(template, { volumes: mounts = [], owner, networks: requested = [] } = {}) {
       assertVolumeMounts(mounts);
+      const networks = allowedNetworks(requested, allowed);
       const user = sandboxUser(template);
       const sandbox: Sandbox = {
         id: newSandboxId(),
@@ -90,6 +98,7 @@ export function createFakeSandboxApi({ backend = createFakeSandboxBackend(), ins
         state: "running",
         createdAt: new Date().toISOString(),
         ...(owner === undefined ? {} : { owner }),
+        ...(networks.length === 0 ? {} : { networks }),
       };
       const mounted = new Map<string, Files>();
       for (const { volume, path } of mounts) {
@@ -98,10 +107,10 @@ export function createFakeSandboxApi({ backend = createFakeSandboxBackend(), ins
         mounted.set(mountPath(path), backend.volumes.get(key)!.files);
       }
       sandboxes.set(sandbox.id, { installation, sandbox, user, files: new Map(), mounts: mounted });
-      return { ...sandbox };
+      return structuredClone(sandbox);
     },
     async list() {
-      return [...sandboxes.values()].filter((found) => found.installation === installation).map(({ sandbox }) => ({ ...sandbox }));
+      return [...sandboxes.values()].filter((found) => found.installation === installation).map(({ sandbox }) => structuredClone(sandbox));
     },
     async listVolumes() {
       const prefix = volumeKey("");

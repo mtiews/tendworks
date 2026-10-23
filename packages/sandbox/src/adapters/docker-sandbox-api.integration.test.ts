@@ -58,12 +58,23 @@ afterAll(async () => {
 // neighbour's name starts like this installation's volume names, which must not confuse them.
 const installation = `tendworks-test-${crypto.randomUUID().slice(0, 8)}`;
 const neighbour = `${installation}-volume`;
+// A network sandboxes may join on request, like the platform MCP gateway's (created in the suite's setup).
+const gateway = `${installation}_gateway`;
 // Starting a sandbox on a network without traffic between its containers takes Docker
 // several times longer, so only the tests about the network use one.
 const createApi = (name = installation, { sandboxNetwork = false } = {}) =>
-  createDockerSandboxApi({ url: proxyUrl, installation: name, sandboxNetwork, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
+  createDockerSandboxApi({
+    url: proxyUrl,
+    installation: name,
+    sandboxNetwork,
+    networks: [gateway],
+    labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! },
+  });
 
-describeSandboxApi("Docker adapter through the socket proxy", () => ({ api: createApi(), neighbour: createApi(neighbour), image }));
+describeSandboxApi("Docker adapter through the socket proxy", async () => {
+  await docker("network", "create", "--internal", "--label", runLabel, gateway);
+  return { api: createApi(), neighbour: createApi(neighbour), image, network: gateway };
+});
 
 describe.concurrent("Docker adapter", () => {
   const created: string[] = [];
@@ -174,6 +185,16 @@ describe("Docker adapter resources of an installation", () => {
     }
     expect(await label("network", `${own}-sandboxes`, "dev.tendworks.installation")).toBe(own);
     expect(await docker("network", "inspect", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}', `${own}-sandboxes`)).toBe("false");
+  });
+
+  it("puts a sandbox that asks for an allowed network on it as well as on the sandbox network", async () => {
+    const api = createApi(own, { sandboxNetwork: true });
+    const { id } = await api.create(networked, { networks: [gateway] });
+    created.push({ api, id });
+
+    const networks = JSON.parse(await docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", `${own}-sandbox-${id}`)) as Record<string, unknown>;
+
+    expect(Object.keys(networks).sort()).toEqual([`${own}-sandboxes`, gateway].sort());
   });
 
   it("still lists and reaches sandboxes and volumes created before installations had labels", async () => {

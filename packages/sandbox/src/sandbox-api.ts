@@ -35,7 +35,8 @@ export interface SandboxApi {
   /**
    * Creates and starts a sandbox; it runs until it is destroyed. Volumes are created
    * on first use and outlive the sandbox until {@link SandboxApi.deleteVolume}. The
-   * owner (e.g. a task id) is recorded on the sandbox and the volumes it creates.
+   * owner (e.g. a task id) is recorded on the sandbox and the volumes it creates. The
+   * sandbox joins the requested networks only if the installation allows them.
    */
   create(template: SandboxTemplate, options?: CreateSandboxOptions): Promise<Sandbox>;
   /** The installation's sandboxes, also stopped ones and those nobody remembers. */
@@ -123,6 +124,15 @@ export function assertInstallation(installation: string): void {
       `not an installation name (lowercase letters, digits, "-" and "_", starting with a letter or digit): ${JSON.stringify(installation)}`,
     );
   }
+}
+
+/** Refuses networks the installation does not let sandboxes join; returns the requested ones, each once. */
+export function allowedNetworks(requested: readonly string[], allowed: readonly string[]): string[] {
+  const refused = requested.filter((network) => !allowed.includes(network));
+  if (refused.length > 0) {
+    throw new SandboxError("invalid-request", `sandboxes of this installation may not join the network(s) ${refused.map((network) => JSON.stringify(network)).join(", ")}`);
+  }
+  return [...new Set(requested)];
 }
 
 export function newSandboxId(): string {

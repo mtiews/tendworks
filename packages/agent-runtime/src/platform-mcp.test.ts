@@ -11,6 +11,7 @@ import { createAgentRuntime, createClaudeCodeHarness, type AgentRuntime, type Cl
 
 const READ_TOKEN = "read-token-for-the-mcp-server"; // betterleaks:allow test value
 const MCP_URL = "http://platform.test:8080/mcp";
+const MCP_NETWORK = "tendworks_platform-mcp";
 
 const profile = (name: string, spec: Partial<AgentProfile.AgentProfile["spec"]> = {}): AgentProfile.AgentProfile => ({
   apiVersion: "tendworks.dev/v1",
@@ -93,6 +94,17 @@ describe("the platform MCP server in agent sessions", () => {
     const everything = JSON.stringify({ attached: sandboxes.attached.map(({ request, files }) => ({ request, files: [...files] })), observed: sandboxes.observed, execs: sandboxes.execs });
     expect(everything).not.toContain(READ_TOKEN);
     expect(everything).not.toContain(MCP_URL);
+  });
+
+  it("puts the sandbox of a profile that lists it on the platform MCP server's network, and no other sandbox", async () => {
+    const { runtime, sandboxes } = setup({}, { platformMcp: { url: MCP_URL, token: READ_TOKEN, network: MCP_NETWORK } });
+
+    await chatTurn(runtime, "assistant");
+    await runtime.sendMessage("reader", { message: say("Summarize the last runs") });
+    await chatTurn(runtime, "chatter");
+    await runtime.sendMessage("developer", { message: say("Implement the issue") });
+
+    expect(sandboxes.created.map(({ networks }) => networks)).toEqual([[MCP_NETWORK], [MCP_NETWORK], [], []]);
   });
 
   it("never puts the read-only token into a sandbox's environment, not even for a profile that lists the server", async () => {

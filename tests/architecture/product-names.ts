@@ -24,6 +24,7 @@ export const PRODUCTS: readonly string[] = [
   "litellm",
   "minio",
   "nats",
+  "nginx",
   "ntfy",
   "openai",
   "opa",

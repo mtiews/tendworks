@@ -258,6 +258,20 @@ components:
             $ref: "#/components/schemas/VolumeMount"
         owner:
           $ref: "#/components/schemas/Owner"
+        networks:
+          type: array
+          uniqueItems: true
+          description: >-
+            Networks the sandbox joins in addition to the installation's own sandbox
+            network, e.g. the network of a gateway it needs. Only networks the
+            installation allows sandboxes to join; any other is refused
+            (`invalid-request`). Without it, the sandbox joins none.
+          items:
+            $ref: "#/components/schemas/NetworkName"
+    NetworkName:
+      type: string
+      pattern: "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$"
+      description: Name of a network on the backend.
     Owner:
       type: string
       minLength: 1
@@ -313,6 +327,11 @@ components:
         owner:
           $ref: "#/components/schemas/Owner"
           description: The owner it was created with; missing if it had none.
+        networks:
+          type: array
+          description: The additional networks it joined when it was created; missing if none.
+          items:
+            $ref: "#/components/schemas/NetworkName"
     ExecRequest:
       type: object
       required: [command]

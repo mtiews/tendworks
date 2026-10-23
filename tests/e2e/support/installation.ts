@@ -15,3 +15,5 @@ export const installation: string = JSON.parse(
 
 export const volumeOf = (volume: string) => `${installation}-volume-${volume}`;
 export const sandboxNetwork = `${installation}-sandboxes`;
+/** The MCP-only gateway's network (compose network platform-mcp), which sandboxes of MCP profiles join. */
+export const platformMcpNetwork = `${installation}_platform-mcp`;

@@ -189,7 +189,7 @@ export function scriptedSandboxes(
 ) {
   const sandboxes = new Map<string, FakeSandbox>();
   const volumes = new Map<string, Files>();
-  const created: { template: SandboxTemplate; volumes: VolumeMount[]; owner?: string }[] = [];
+  const created: { template: SandboxTemplate; volumes: VolumeMount[]; owner?: string; networks: string[] }[] = [];
   const destroyed: string[] = [];
   const deletedVolumes: string[] = [];
   const attached: Attached[] = [];
@@ -206,7 +206,7 @@ export function scriptedSandboxes(
   const api: Sandboxes = {
     async create(template, options = {}) {
       const id = `sandbox${created.length + 1}`;
-      created.push({ template, volumes: options.volumes ?? [], ...(options.owner === undefined ? {} : { owner: options.owner }) });
+      created.push({ template, volumes: options.volumes ?? [], ...(options.owner === undefined ? {} : { owner: options.owner }), networks: options.networks ?? [] });
       const mounts = (options.volumes ?? []).map(({ volume, path }) => {
         if (!volumes.has(volume)) volumes.set(volume, new Map());
         return { path, files: volumes.get(volume)! };
