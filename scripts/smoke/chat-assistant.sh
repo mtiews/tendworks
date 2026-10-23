@@ -145,7 +145,7 @@ fi
 # container of the assistant's sandbox image on the sandbox network, as a sandbox sees it.
 MCP_URL=$(worker_env TEND_PLATFORM_MCP_URL)
 READ_TOKEN=$(worker_env TEND_API_READ_TOKEN)
-NETWORK=$(worker_env TEND_SANDBOX_NETWORK)
+NETWORK="$INSTALLATION-sandboxes"
 IMAGE=$(grep -E '^[[:space:]]*image:' examples/config/sandboxes/claude-code.yaml | awk '{print $2}')
 [ -n "$MCP_URL" ] && [ -n "$READ_TOKEN" ] || { echo "The worker has no TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN."; exit 1; }
 docker network inspect "$NETWORK" >/dev/null 2>&1 ||
@@ -213,16 +213,16 @@ A3=$(chat_field 'r.message')
 sleep 3
 touch "$TMP/leave"
 wait "$WATCHER_PID" || true
-SANDBOX_WHILE_WAITING=$(docker ps -q --filter "volume=tendworks-volume-$CHAT-session" | wc -l)
+SANDBOX_WHILE_WAITING=$(docker ps -q --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)
 
 # --- Idle sandbox -------------------------------------------------------------------------
 
 echo
 echo "Waiting for the idle sandbox to go (idle time $IDLE_MINUTES minutes, up to $((IDLE_MINUTES + 3))) ..."
 deadline=$((SECONDS + (IDLE_MINUTES + 3) * 60))
-while [ $SECONDS -lt $deadline ] && [ "$(docker ps -aq --filter "volume=tendworks-volume-$CHAT-session" | wc -l)" -gt 0 ]; do sleep 10; done
-SANDBOX_WHILE_IDLE=$(docker ps -aq --filter "volume=tendworks-volume-$CHAT-session" | wc -l)
-VOLUMES_WHILE_IDLE=$(docker volume ls -q --filter "name=tendworks-volume-$CHAT" | wc -l)
+while [ $SECONDS -lt $deadline ] && [ "$(docker ps -aq --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)" -gt 0 ]; do sleep 10; done
+SANDBOX_WHILE_IDLE=$(docker ps -aq --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)
+VOLUMES_WHILE_IDLE=$(docker volume ls -q --filter "name=$INSTALLATION-volume-$CHAT" | wc -l)
 STATUS_WHILE_IDLE=$(chat_field 'r.status')
 
 # --- Platform restart mid-turn ------------------------------------------------------------

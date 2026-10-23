@@ -124,6 +124,7 @@ describe("Claude Code harness", () => {
       { volume: "task-1-workspace", path: "/workspace" },
       { volume: "task-1-session", path: "/session" },
     ]);
+    expect(sandboxes.created[0]?.owner).toBe("task-1");
     expect(sandboxes.attached[0]?.request.env).toMatchObject({ HOME: expect.stringMatching(/^\/session\//), CLAUDE_CONFIG_DIR: expect.stringMatching(/^\/session\//) });
   });
 

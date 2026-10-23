@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { ControlPlane } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { API_TOKEN, client } from "./support/control-plane.js";
+import { volumeOf } from "./support/installation.js";
 
 type Chat = ControlPlane.components["schemas"]["chat"];
 
@@ -148,7 +149,7 @@ describe("chats", () => {
       const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text: "chat: What is my name?" } });
       expect(sent.response.status).toBe(200);
       const answered = await waiting(chatId);
-      const volume = `tendworks-volume-${chatId}-session`;
+      const volume = volumeOf(`${chatId}-session`);
       const whileOpen = await docker("ps", "-q", "--filter", `volume=${volume}`);
       const { data: ended } = await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
 
@@ -156,7 +157,7 @@ describe("chats", () => {
       expect(whileOpen).not.toBe("");
       expect(ended).toMatchObject({ status: "ended" });
       expect(await docker("ps", "-aq", "--filter", `volume=${volume}`)).toBe("");
-      expect(await docker("volume", "ls", "-q", "--filter", `name=tendworks-volume-${chatId}`)).toBe("");
+      expect(await docker("volume", "ls", "-q", "--filter", `name=${volumeOf(chatId)}`)).toBe("");
       const { data: transcript } = await client.GET("/chats/{chatId}/transcript", { params: { path: { chatId } } });
       expect(transcript?.items.filter((entry) => entry.type === "session-started")).toHaveLength(1);
       expect(transcript?.items.at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED" });

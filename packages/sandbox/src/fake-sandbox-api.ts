@@ -1,8 +1,10 @@
 import {
   assertAbsolutePath,
+  assertInstallation,
   assertSandboxId,
   assertVolumeMounts,
   assertVolumeName,
+  defaultInstallation,
   defaultIsolationClass,
   mountPath,
   sandboxUser,
@@ -13,17 +15,41 @@ import {
   type ExecResult,
   type Sandbox,
   type SandboxApi,
+  type Volume,
 } from "./sandbox-api.js";
 
 type Files = Map<string, Uint8Array>;
 
 interface FakeSandbox {
+  installation: string;
   sandbox: Sandbox;
   user: string;
   /** Files outside volumes, by absolute path. */
   files: Files;
   /** Mounted volumes by mount path; their files by path relative to it. */
   mounts: Map<string, Files>;
+}
+
+interface FakeVolume {
+  files: Files;
+  owner?: string;
+}
+
+/** The state of a fake backend, which several installations may share. */
+export interface FakeSandboxBackend {
+  sandboxes: Map<string, FakeSandbox>;
+  /** Volumes by installation and name ("<installation>/<name>"). */
+  volumes: Map<string, FakeVolume>;
+}
+
+export function createFakeSandboxBackend(): FakeSandboxBackend {
+  return { sandboxes: new Map(), volumes: new Map() };
+}
+
+export interface FakeSandboxApiOptions {
+  /** Shared with other fakes to put several installations on one backend; a new one by default. */
+  backend?: FakeSandboxBackend;
+  installation?: string;
 }
 
 /** Where a file lives: in the sandbox itself or in a mounted volume, and under which key. */
@@ -41,19 +67,20 @@ function locate(sandbox: FakeSandbox, path: string): { files: Files; key: string
  * `attach` runs the same commands; `cat` without arguments echoes its input
  * until the input is closed. Volumes are kept in memory beyond their sandboxes.
  */
-export function createFakeSandboxApi(): SandboxApi {
-  const sandboxes = new Map<string, FakeSandbox>();
-  const volumes = new Map<string, Files>();
+export function createFakeSandboxApi({ backend = createFakeSandboxBackend(), installation = defaultInstallation }: FakeSandboxApiOptions = {}): SandboxApi {
+  assertInstallation(installation);
+  const { sandboxes } = backend;
+  const volumeKey = (volume: string) => `${installation}/${volume}`;
 
   const find = (sandboxId: string): FakeSandbox => {
     assertSandboxId(sandboxId);
     const found = sandboxes.get(sandboxId);
-    if (!found) throw new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`);
+    if (!found || found.installation !== installation) throw new SandboxError("sandbox-not-found", `no sandbox ${sandboxId}`);
     return found;
   };
 
   return {
-    async create(template, { volumes: mounts = [] } = {}) {
+    async create(template, { volumes: mounts = [], owner } = {}) {
       assertVolumeMounts(mounts);
       const user = sandboxUser(template);
       const sandbox: Sandbox = {
@@ -62,14 +89,25 @@ export function createFakeSandboxApi(): SandboxApi {
         isolationClass: template.spec.isolationClass ?? defaultIsolationClass,
         state: "running",
         createdAt: new Date().toISOString(),
+        ...(owner === undefined ? {} : { owner }),
       };
       const mounted = new Map<string, Files>();
       for (const { volume, path } of mounts) {
-        if (!volumes.has(volume)) volumes.set(volume, new Map());
-        mounted.set(mountPath(path), volumes.get(volume)!);
+        const key = volumeKey(volume);
+        if (!backend.volumes.has(key)) backend.volumes.set(key, { files: new Map(), ...(owner === undefined ? {} : { owner }) });
+        mounted.set(mountPath(path), backend.volumes.get(key)!.files);
       }
-      sandboxes.set(sandbox.id, { sandbox, user, files: new Map(), mounts: mounted });
-      return sandbox;
+      sandboxes.set(sandbox.id, { installation, sandbox, user, files: new Map(), mounts: mounted });
+      return { ...sandbox };
+    },
+    async list() {
+      return [...sandboxes.values()].filter((found) => found.installation === installation).map(({ sandbox }) => ({ ...sandbox }));
+    },
+    async listVolumes() {
+      const prefix = volumeKey("");
+      return [...backend.volumes]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, { owner }]): Volume => ({ name: key.slice(prefix.length), ...(owner === undefined ? {} : { owner }) }));
     },
     async exec(sandboxId, request) {
       return run(find(sandboxId), request);
@@ -95,15 +133,15 @@ export function createFakeSandboxApi(): SandboxApi {
       files.set(key, content.slice());
     },
     async destroy(sandboxId) {
-      sandboxes.delete(sandboxId);
+      if (sandboxes.get(sandboxId)?.installation === installation) sandboxes.delete(sandboxId);
     },
     async deleteVolume(volume) {
       assertVolumeName(volume);
-      const files = volumes.get(volume);
+      const files = backend.volumes.get(volumeKey(volume))?.files;
       if (files && [...sandboxes.values()].some(({ mounts }) => [...mounts.values()].includes(files))) {
         throw new SandboxError("volume-in-use", `volume ${volume} is mounted by a sandbox`);
       }
-      volumes.delete(volume);
+      backend.volumes.delete(volumeKey(volume));
     },
   };
 }

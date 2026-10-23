@@ -3,37 +3,62 @@ import type { Socket } from "node:net";
 import { posix } from "node:path";
 import {
   assertAbsolutePath,
+  assertInstallation,
   assertSandboxId,
   assertVolumeMounts,
   assertVolumeName,
+  defaultInstallation,
   defaultIsolationClass,
   mountPath,
+  sandboxIdPattern,
   sandboxUser,
   newSandboxId,
   SandboxError,
+  volumeNamePattern,
   type ExecRequest,
   type IsolationClass,
   type Sandbox,
   type SandboxApi,
+  type Volume,
 } from "../sandbox-api.js";
 import { firstTarEntry, tarSingleFile } from "./tar.js";
 
 export interface DockerSandboxApiOptions {
   /** Base URL of the container API, i.e. the restricted socket proxy (ADR 0001). */
   url: string;
-  /** Extra labels for every sandbox container, e.g. to find a test run's containers. */
+  /**
+   * The installation this adapter serves (the compose project name), `tendworks` by
+   * default. Its sandboxes, volumes and sandbox network are named and labelled after it:
+   * `<installation>-sandbox-<id>`, `<installation>-volume-<volume>` and
+   * `<installation>-sandboxes`. The adapter lists and touches nothing else.
+   */
+  installation?: string;
+  /** Extra labels for every sandbox container, volume and network, e.g. to find a test run's. */
   labels?: Record<string, string>;
   /**
-   * The Docker network sandboxes run on, created on first use as a bridge without
-   * traffic between its containers. Keep it apart from the platform's own networks, so
-   * a sandbox cannot reach the platform's services. Without it, Docker's default bridge.
+   * Whether sandboxes run on the installation's own network (the default). `false` puts
+   * them on Docker's default bridge, where starting one is several times faster; only
+   * for tests that do not care about the network.
    */
-  network?: string;
+  sandboxNetwork?: boolean;
 }
 
 const runtimes: Record<IsolationClass, string> = { container: "runc", gvisor: "runsc" };
-const containerName = (sandboxId: string) => `tendworks-sandbox-${sandboxId}`;
-const volumeName = (volume: string) => `tendworks-volume-${volume}`;
+const isolationClasses = Object.keys(runtimes) as IsolationClass[];
+
+const LABEL = {
+  installation: "dev.tendworks.installation",
+  owner: "dev.tendworks.owner",
+  sandbox: "dev.tendworks.sandbox",
+  template: "dev.tendworks.sandbox-template",
+  isolationClass: "dev.tendworks.sandbox-isolation-class",
+  volume: "dev.tendworks.volume",
+  network: "dev.tendworks.sandbox-network",
+} as const;
+
+type Labels = Record<string, string> | null | undefined;
+
+const filters = (label: string) => `filters=${encodeURIComponent(JSON.stringify({ label: [label] }))}`;
 
 /** Splits Docker's multiplexed attach stream: frames of [stream, 0, 0, 0, size (4 bytes, big endian)] + payload. */
 function demultiplex(raw: Uint8Array): { stdout: string; stderr: string } {
@@ -112,9 +137,28 @@ function upgrade(target: URL, body: unknown): Promise<Socket> {
 
 /**
  * Sandbox API on the Docker Engine API. Needs only the socket proxy sections
- * CONTAINERS, EXEC, VOLUMES and POST; images must already be on the host.
+ * CONTAINERS, EXEC, VOLUMES, NETWORKS and POST; images must already be on the host.
+ * Sandboxes run on the installation's own network, created on first use as a bridge
+ * without traffic between its containers, apart from the platform's networks, so a
+ * sandbox cannot reach the platform's services.
  */
-export function createDockerSandboxApi({ url, labels = {}, network }: DockerSandboxApiOptions): SandboxApi {
+export function createDockerSandboxApi({
+  url,
+  installation = defaultInstallation,
+  labels: extraLabels = {},
+  sandboxNetwork = true,
+}: DockerSandboxApiOptions): SandboxApi {
+  assertInstallation(installation);
+  const containerName = (sandboxId: string) => `${installation}-sandbox-${sandboxId}`;
+  const volumeName = (volume: string) => `${installation}-volume-${volume}`;
+  const network = `${installation}-sandboxes`;
+  const labels = { ...extraLabels, [LABEL.installation]: installation };
+  const ownerLabel = (owner: string | undefined) => (owner === undefined ? {} : { [LABEL.owner]: owner });
+  // Ours: named after this installation and labelled for it. Resources from before
+  // installation names have no installation label; their name alone decides.
+  const ours = (name: string, logical: string | undefined, found: Labels, nameOf: (logical: string) => string) =>
+    logical !== undefined && name === nameOf(logical) && [installation, undefined].includes(found?.[LABEL.installation]);
+
   const call = (method: string, path: string, init: { json?: unknown; body?: Uint8Array; contentType?: string } = {}) => {
     const headers: Record<string, string> = {};
     let body: RequestInit["body"];
@@ -158,7 +202,7 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
 
   // Created once per adapter; a failed attempt is retried with the next sandbox.
   let networkReady: Promise<void> | undefined;
-  const ensureNetwork = (name: string) =>
+  const ensureNetwork = (name = network) =>
     (networkReady ??= (async () => {
       const found = await call("GET", `/networks/${encodeURIComponent(name)}`);
       await found.body?.cancel();
@@ -170,7 +214,7 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
           Driver: "bridge",
           // No traffic between sandboxes; each one only reaches the outside.
           Options: { "com.docker.network.bridge.enable_icc": "false" },
-          Labels: { ...labels, "dev.tendworks.sandbox-network": "true" },
+          Labels: { ...labels, [LABEL.network]: "true" },
         },
       });
       // 409: another adapter created it meanwhile.
@@ -182,9 +226,9 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
     }));
 
   const api: SandboxApi = {
-    async create(template, { volumes = [] } = {}) {
+    async create(template, { volumes = [], owner } = {}) {
       assertVolumeMounts(volumes);
-      if (network !== undefined) await ensureNetwork(network);
+      if (sandboxNetwork) await ensureNetwork();
       const id = newSandboxId();
       const isolationClass = template.spec.isolationClass ?? defaultIsolationClass;
       const { cpus, memoryMb, pids = 1024 } = template.spec.resources ?? {};
@@ -195,7 +239,13 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
           Entrypoint: ["sleep", "infinity"],
           Cmd: [],
           User: sandboxUser(template),
-          Labels: { ...labels, "dev.tendworks.sandbox": id, "dev.tendworks.sandbox-template": template.metadata.name },
+          Labels: {
+            ...labels,
+            ...ownerLabel(owner),
+            [LABEL.sandbox]: id,
+            [LABEL.template]: template.metadata.name,
+            [LABEL.isolationClass]: isolationClass,
+          },
           HostConfig: {
             Runtime: runtimes[isolationClass],
             Init: true,
@@ -207,9 +257,9 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
               Type: "volume",
               Source: volumeName(volume),
               Target: mountPath(path),
-              VolumeOptions: { Labels: { ...labels, "dev.tendworks.volume": volume } },
+              VolumeOptions: { Labels: { ...labels, ...ownerLabel(owner), [LABEL.volume]: volume } },
             })),
-            ...(network === undefined ? {} : { NetworkMode: network }),
+            ...(sandboxNetwork ? { NetworkMode: network } : {}),
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],
             PidsLimit: pids,
@@ -245,8 +295,41 @@ export function createDockerSandboxApi({ url, labels = {}, network }: DockerSand
         isolationClass,
         state: "running",
         createdAt: new Date().toISOString(),
+        ...(owner === undefined ? {} : { owner }),
       };
       return sandbox;
+    },
+    async list() {
+      const response = await call("GET", `/containers/json?all=true&${filters(LABEL.sandbox)}`);
+      if (!response.ok) throw await failure(response, "listing the sandboxes");
+      const containers = (await response.json()) as { Names: string[]; Labels: Labels; State: string; Created: number }[];
+      return containers.flatMap(({ Names, Labels: found, State, Created }): Sandbox[] => {
+        const id = found?.[LABEL.sandbox];
+        if (!Names.some((name) => ours(name.replace(/^\//, ""), id, found, containerName)) || !sandboxIdPattern.test(id!)) return [];
+        const isolationClass = isolationClasses.find((candidate) => candidate === found?.[LABEL.isolationClass]) ?? defaultIsolationClass;
+        const owner = found?.[LABEL.owner];
+        return [
+          {
+            id: id!,
+            template: found?.[LABEL.template] ?? "",
+            isolationClass,
+            state: State === "running" ? "running" : "stopped",
+            createdAt: new Date(Created * 1000).toISOString(),
+            ...(owner === undefined ? {} : { owner }),
+          },
+        ];
+      });
+    },
+    async listVolumes() {
+      const response = await call("GET", `/volumes?${filters(LABEL.volume)}`);
+      if (!response.ok) throw await failure(response, "listing the volumes");
+      const { Volumes } = (await response.json()) as { Volumes: { Name: string; Labels: Labels }[] | null };
+      return (Volumes ?? []).flatMap(({ Name, Labels: found }): Volume[] => {
+        const volume = found?.[LABEL.volume];
+        if (!ours(Name, volume, found, volumeName) || !volumeNamePattern.test(volume!)) return [];
+        const owner = found?.[LABEL.owner];
+        return [{ name: volume!, ...(owner === undefined ? {} : { owner }) }];
+      });
     },
     async exec(sandboxId, request) {
       const execId = await createExec(sandboxId, request, { stdin: false });

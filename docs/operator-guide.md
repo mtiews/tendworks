@@ -26,7 +26,7 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 | `docker-proxy` | the worker's only way to the Docker API, restricted by path (ADR 0001) | no, internal network |
 | `server` | control plane API, trigger gateway, human interaction, platform MCP server (`/mcp`), web UI (`/ui/`) | `127.0.0.1:8080` (`TEND_PORT`) |
 | `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy | no |
-| sandboxes | one container per agent session (`tendworks-sandbox-<id>`), created by the worker, on the Docker network `tendworks-sandboxes` | no |
+| sandboxes | one container per agent session (`<installation>-sandbox-<id>`), created by the worker, on the Docker network `<installation>-sandboxes`; the installation is the compose project name, `tendworks` by default | no |
 
 Sandbox images are never pulled by the platform; you build them once (see [Install](#install)).
 
@@ -129,7 +129,7 @@ These are read by `deploy/compose.yaml` but not listed in `deploy/.env.example`:
 | `TEND_CONFIG_PATH` | `../examples/config` | configuration directory on the host; relative paths resolve against `deploy/`, so prefer an absolute path |
 | `TEND_PORT` | `8080` | API, UI and MCP port, published on `127.0.0.1` only |
 | `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only |
-| `COMPOSE_PROJECT_NAME` | `tendworks` | only for parallel stacks; volume and image names follow it |
+| `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; only for parallel stacks. Volume, image, sandbox, session volume and sandbox network names follow it |
 | `TEND_PLATFORM_MCP_URL` | `http://host.docker.internal:<TEND_PORT>/mcp` | where sandboxes reach the platform MCP server; no working value on Linux yet ([Known gaps](#known-gaps-on-linux)) |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code (listed in `.env.example`) |
 
@@ -319,11 +319,14 @@ Before you start:
 | platform state (runs, tasks, chats, approvals, notifications, event outbox) | volume `tendworks_postgres-data` | yes |
 | workflow execution history | volume `tendworks_temporal-data` | yes |
 | transcripts | volume `tendworks_transcripts` | yes |
-| agent sessions (workspace, harness home) | volumes `tendworks-volume-<task>-workspace` and `-session`, label `dev.tendworks.volume`; removed when a task or chat ends, kept while a chat is open | **no** |
-| sandbox network | `tendworks-sandboxes`, label `dev.tendworks.sandbox-network` | **no** |
+| agent sessions (workspace, harness home) | volumes `<installation>-volume-<task>-workspace` and `-session`, labels `dev.tendworks.volume`, `dev.tendworks.installation` and `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open | **no** |
+| sandboxes | containers `<installation>-sandbox-<id>`, labels `dev.tendworks.sandbox`, `dev.tendworks.installation` and `dev.tendworks.owner` | **no** |
+| sandbox network | `<installation>-sandboxes`, labels `dev.tendworks.sandbox-network` and `dev.tendworks.installation` | **no** |
 | images | `tendworks-server`, `tendworks-worker`, `tendworks/sandbox-claude-code:<tag>` | **no** |
 
-Volume names assume the default project name `tendworks`. Session volume names are not namespaced per installation: several stacks on one Docker engine (e.g. e2e stacks) share the `tendworks-volume-*` space (issue #48).
+Names assume the default project name `tendworks`; with another `COMPOSE_PROJECT_NAME`, replace `tendworks` (the installation) accordingly. Several stacks on one Docker engine (e.g. e2e stacks) never see or touch each other's sandboxes and session volumes.
+
+Updating from before `v0.2.0`: sandboxes and session volumes had fixed names (`tendworks-sandbox-*`, `tendworks-volume-*`) and no installation label. With the default project name these are the installation's names, so open chats resume and nothing needs to be done. With another project name, end open chats before the update: afterwards their old volumes are no longer found, the chats start over with an empty workspace, and the old `tendworks-volume-*` volumes stay behind (remove them as under [Reset](#reset)).
 
 Nothing ages out: Postgres, transcripts and the volumes of chats nobody ends grow forever (issue #48). Watch the disk (`docker system df -v`).
 
@@ -377,12 +380,12 @@ docker compose -f deploy/compose.yaml down -v
 Removes the containers and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images (issue #48). With the stack down, remove those by label:
 
 ```sh
-docker rm -f $(docker ps -aq --filter label=dev.tendworks.sandbox)
-docker volume rm $(docker volume ls -q --filter label=dev.tendworks.volume)
+docker rm -f $(docker ps -aq --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox)
+docker volume rm $(docker volume ls -q --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.volume)
 docker network rm tendworks-sandboxes
 ```
 
-These labels are shared by every Tendworks stack and test run on the same Docker engine; check the lists before removing.
+Replace `tendworks` with your project name if you set one. Sandboxes and volumes created before `v0.2.0` have no installation label; find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks and test runs on the same engine used the same names then.
 
 ### Cleaning images
 

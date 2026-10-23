@@ -76,7 +76,7 @@ for (const profile of profiles) {
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
+  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}) }),
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,

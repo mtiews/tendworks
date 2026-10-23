@@ -8,6 +8,8 @@ export type Sandbox = Schemas["Sandbox"];
 export type ExecRequest = Schemas["ExecRequest"];
 export type VolumeMount = Schemas["VolumeMount"];
 export type ExecResult = Schemas["ExecResult"];
+export type Volume = Schemas["Volume"];
+export type CreateSandboxOptions = Omit<Schemas["CreateSandboxRequest"], "template">;
 export type SandboxErrorCode = Schemas["Error"]["code"];
 
 /** A process started with {@link SandboxApi.attach}, with its standard streams open. */
@@ -23,16 +25,23 @@ export interface AttachedProcess {
 
 /**
  * The sandbox API (contracts/openapi/sandbox.yaml) as a port. Every backend
- * (Docker, a fake, later OpenSandbox or agent-sandbox) implements it.
+ * (Docker, a fake, later OpenSandbox or agent-sandbox) implements it. An
+ * implementation serves one installation: it lists, reaches and deletes only
+ * that installation's sandboxes and volumes, even when installations share a backend.
  *
  * @port
  */
 export interface SandboxApi {
   /**
    * Creates and starts a sandbox; it runs until it is destroyed. Volumes are created
-   * on first use and outlive the sandbox until {@link SandboxApi.deleteVolume}.
+   * on first use and outlive the sandbox until {@link SandboxApi.deleteVolume}. The
+   * owner (e.g. a task id) is recorded on the sandbox and the volumes it creates.
    */
-  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[] }): Promise<Sandbox>;
+  create(template: SandboxTemplate, options?: CreateSandboxOptions): Promise<Sandbox>;
+  /** The installation's sandboxes, also stopped ones and those nobody remembers. */
+  list(): Promise<Sandbox[]>;
+  /** The installation's volumes. */
+  listVolumes(): Promise<Volume[]>;
   /** Runs a command as the sandbox user and waits for it to finish. */
   exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
   /**
@@ -63,7 +72,7 @@ export class SandboxError extends Error {
 export const defaultIsolationClass: IsolationClass = "container";
 export const defaultSandboxUser = "1000:1000";
 
-const sandboxIdPattern = /^[a-z0-9]{1,32}$/;
+export const sandboxIdPattern = /^[a-z0-9]{1,32}$/;
 
 /** Rejects ids that are not sandbox ids, so they can never address anything else on the backend. */
 export function assertSandboxId(sandboxId: string): void {
@@ -78,7 +87,7 @@ export function sandboxUser(template: SandboxTemplate): string {
   return `${match[1]}:${match[2] ?? match[1]}`;
 }
 
-const volumeNamePattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+export const volumeNamePattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function assertVolumeName(volume: string): void {
   if (!volumeNamePattern.test(volume)) throw new SandboxError("invalid-request", `not a volume name: ${JSON.stringify(volume)}`);
@@ -100,6 +109,20 @@ export const mountPath = (path: string) => path.replace(/\/+$/, "") || "/";
 
 export function assertAbsolutePath(path: string): void {
   if (!path.startsWith("/")) throw new SandboxError("invalid-request", `path must be absolute: ${path}`);
+}
+
+/** Names an installation can have: they become part of resource names on the backend. */
+const installationPattern = /^[a-z0-9][a-z0-9_-]{0,62}$/;
+
+export const defaultInstallation = "tendworks";
+
+export function assertInstallation(installation: string): void {
+  if (!installationPattern.test(installation)) {
+    throw new SandboxError(
+      "invalid-request",
+      `not an installation name (lowercase letters, digits, "-" and "_", starting with a letter or digit): ${JSON.stringify(installation)}`,
+    );
+  }
 }
 
 export function newSandboxId(): string {
