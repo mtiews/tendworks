@@ -45,7 +45,7 @@ const neighbourSandbox = `${neighbour}-sandbox-${neighbourId}`;
 
 describe.skipIf(!credentialSelected())("installations on one Docker engine", () => {
   beforeAll(async () => {
-    const config = JSON.parse(await docker("compose", "-f", composeFile, "--profile", "test-images", "config", "--no-interpolate", "--format", "json"));
+    const config = JSON.parse(await docker("compose", "-f", composeFile, "--profile", "test-images", "config", "--format", "json"));
     const image = (config.services["sandbox-scripted-acp"] as { image: string }).image;
     const labels = ["--label", `dev.tendworks.installation=${neighbour}`, "--label", `dev.tendworks.owner=${neighbourId}`];
     await docker("volume", "create", ...labels, "--label", `dev.tendworks.volume=${neighbourId}-session`, neighbourVolume);
@@ -92,7 +92,7 @@ describe.skipIf(!credentialSelected())("installations on one Docker engine", () 
     const ours = ["--label", `dev.tendworks.installation=${installation}`, "--label", `dev.tendworks.owner=${orphan}`];
     await docker("volume", "create", ...ours, "--label", `dev.tendworks.volume=${orphan}-session`, orphanVolume);
     await docker("volume", "create", "--label", `dev.tendworks.volume=${legacyVolume.slice(`${installation}-volume-`.length)}`, legacyVolume);
-    const image = JSON.parse(await docker("compose", "-f", composeFile, "--profile", "test-images", "config", "--no-interpolate", "--format", "json")).services["sandbox-scripted-acp"].image as string;
+    const image = JSON.parse(await docker("compose", "-f", composeFile, "--profile", "test-images", "config", "--format", "json")).services["sandbox-scripted-acp"].image as string;
     await docker(
       "run", "-d", "--name", orphanSandbox, ...ours, "--label", `dev.tendworks.sandbox=${orphan}`,
       "--mount", `type=volume,source=${orphanVolume},target=/session`, "--entrypoint", "sleep", image, "infinity",

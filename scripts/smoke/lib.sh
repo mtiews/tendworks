@@ -43,7 +43,7 @@ field() {
 
 # The installation (the compose project name): sandboxes, session volumes and the sandbox
 # network are named after it.
-INSTALLATION=$(compose config --no-interpolate --format json | field 'r.name')
+INSTALLATION=$(compose config --format json | field 'r.name')
 
 # Every request sends the API token: reading needs a token too (ADR 0016).
 # Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.

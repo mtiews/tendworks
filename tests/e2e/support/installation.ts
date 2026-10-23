@@ -10,7 +10,7 @@ const composeFile = fileURLToPath(new URL("../../../deploy/compose.yaml", import
  * session volumes and sandbox network are named after it.
  */
 export const installation: string = JSON.parse(
-  (await promisify(execFile)("docker", ["compose", "-f", composeFile, "config", "--no-interpolate", "--format", "json"], { timeout: 60_000 })).stdout,
+  (await promisify(execFile)("docker", ["compose", "-f", composeFile, "config", "--format", "json"], { timeout: 60_000 })).stdout,
 ).name;
 
 export const volumeOf = (volume: string) => `${installation}-volume-${volume}`;
