@@ -1,8 +1,8 @@
 # Tendworks – Operator Guide
 
-How to run the current state of Tendworks (walking skeleton milestones 1, 1b and 1c) on your own Linux machine and try it with real workloads. Written for Ubuntu 24.04 LTS with Docker Engine from Docker's apt repository; other Linux distributions with Docker Engine should behave the same, Docker Desktop differs where noted.
+How to install, run and maintain Tendworks on your own Linux host: a single-host deployment for one operator. Written for **Ubuntu 24.04 LTS (x86-64) with Docker Engine** from Docker's apt repository; other Linux distributions with Docker Engine should behave the same, Docker Desktop differs where noted.
 
-The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machine, no identity, no TLS, no egress control. Treat it as a test installation.
+The stack (`deploy/compose.yaml`) has no identity (OIDC), no TLS of its own and no egress control: one operator, one host, the API bound to localhost. Read the [release notes](releases/) of the version you install.
 
 ## Contents
 
@@ -11,11 +11,13 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 - [Install](#install)
 - [Configuration](#configuration)
 - [Secrets](#secrets)
-- [Access](#access)
-- [Known gaps on Linux](#known-gaps-on-linux)
+- [Before the first real run: GitHub access](#before-the-first-real-run-github-access)
+- [Access from your devices](#access-from-your-devices)
+- [Known gaps](#known-gaps)
 - [First test workloads](#first-test-workloads)
 - [Operations](#operations)
 - [Troubleshooting](#troubleshooting)
+- [Acceptance checklist](#acceptance-checklist)
 
 ## What runs
 
@@ -26,45 +28,48 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 | `temporal-ui` | the engine's web UI, only with `--profile debug` (no login) | `127.0.0.1:8233` (`TEND_ENGINE_UI_PORT`) |
 | `docker-proxy` | the worker's only way to the Docker API, restricted by path (ADR 0001) | no, internal network |
 | `server` | control plane API, trigger gateway, human interaction, platform MCP server (`/mcp`), web UI (`/ui/`) | `127.0.0.1:8080` (`TEND_PORT`) |
-| `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy | no |
-| `agent-secrets` | runs once on `up` and ends (`Exited (0)` is normal): hands the worker the `TENDWORKS_AGENT_*` lines of `deploy/.env`, without network ([Secret references](#secret-references-adr-0008)) | no |
-| `mcp-gateway` | MCP-only gateway: forwards `/mcp` to the server and refuses every other path; sandboxes of profiles with `mcp: [tendworks]` reach it on the internal network `<installation>_platform-mcp` (ADR 0019) | no |
-| sandboxes | one container per agent session (`<installation>-sandbox-<id>`), created by the worker, on the Docker network `<installation>-sandboxes`; the installation is the compose project name, `tendworks` by default | no |
+| `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy and cleans up orphaned ones | no |
+| `agent-secrets` | runs once on `up` and ends (`Exited (0)` in `docker compose ps -a` is normal): hands the worker the `TENDWORKS_AGENT_*` lines of `deploy/.env`, without network ([Secret references](#secret-references-adr-0008)) | no |
+| `mcp-gateway` | MCP-only gateway: forwards `/mcp` to the server and refuses every other path; only sandboxes of profiles with `mcp: [tendworks]` reach it, on the internal network `<installation>_platform-mcp` (ADR 0019) | no |
+| sandboxes | one container per agent session (`<installation>-sandbox-<id>`), created by the worker on the Docker network `<installation>-sandboxes` | no |
 
-Sandbox images are never pulled by the platform; you build them once (see [Install](#install)).
-
-Every long-running service has the restart policy `unless-stopped`: it comes back after a crash and after a host reboot (as long as the Docker service starts at boot), unless you stopped it yourself.
+- **Installation** = the compose project name, `tendworks` by default. It prefixes containers, volumes, networks and images, so several stacks on one Docker engine never touch each other's sandboxes and session volumes.
+- **Restart policy** `unless-stopped` on every long-running service: the stack comes back after a crash and after a host reboot, unless you stopped it yourself. Runs that were working continue.
+- **Sandbox images** are never pulled by the platform; you build them once ([Install](#install)).
 
 ## Prerequisites
 
 | What | Why | Notes |
 | --- | --- | --- |
-| Docker Engine with the compose plugin | runs the whole stack; images build inside Docker (`deploy/Dockerfile` runs `pnpm install` and `pnpm build` itself) | rootful Docker: the socket proxy mounts `/var/run/docker.sock` (`deploy/compose.yaml`). Rootless Docker is not covered by the compose file |
-| git | clone the repo | |
-| curl | start runs, check `/status` | |
-| Node.js 24 and pnpm | only on the host for the `tend` CLI and the smoke test scripts (they call `node`); the stack itself does not need them | `package.json` requires Node ≥ 24 and pins pnpm via `packageManager`; enable it with `corepack enable pnpm` (may need `sudo` with a system-wide Node). Ubuntu's own `nodejs` package is older than 24, so install Node 24 another way |
+| Ubuntu 24.04 LTS, x86-64 | the tested target | **not supported yet:** ARM hosts, rootless Docker, several hosts, Kubernetes |
+| Docker Engine with the compose plugin, rootful, from [Docker's apt repository](https://docs.docker.com/engine/install/ubuntu/) | runs the whole stack; images build inside Docker (`deploy/Dockerfile` runs `pnpm install` and `pnpm build` itself) | the socket proxy mounts `/var/run/docker.sock`. The Docker service must start at boot (`systemctl is-enabled docker` says `enabled`, the package's default) |
+| git | install and update from release tags | |
+| curl | `/status`, starting runs by hand | |
+| Node.js 24 and pnpm | only on the host for the `tend` CLI and the smoke scripts; the stack does not need them | `corepack enable pnpm` (may need `sudo` with a system-wide Node). Ubuntu's own `nodejs` package is older than 24, so install Node 24 another way |
 | GitHub CLI `gh`, logged in | only for the pull request and chat smoke scripts | |
-| A GitHub repository to work on | the automated path targets a playground repository | the example binding uses `mtiews/tendworks-playground` |
-| Claude Code credential | the `developer` and `assistant` agents run Claude Code | see [Secrets](#secrets) |
+| A GitHub repository for the agent | `develop-issue` works on it | the starter binding targets `mtiews/tendworks-playground`; change it ([Target repository](#kinds-and-what-you-typically-change)) |
+| Claude Code credential | the `developer` and `assistant` agents run Claude Code | [Secrets](#secrets) |
+| Tailscale (recommended) or a reverse proxy with your own domain | access from your phone and laptop | [Access from your devices](#access-from-your-devices) |
 
-**The `docker` group.** Adding your user to `docker` (`sudo usermod -aG docker $USER`, then log in again) lets you run the commands below without `sudo`. Membership is equivalent to root on the host: any member can start a privileged container, read every volume (Postgres data, transcripts, agent workspaces) and read the secrets in the server's and worker's environment with `docker inspect`. Only put the operator in that group.
+**The `docker` group.** Adding your user to `docker` (`sudo usermod -aG docker $USER`, then log in again) lets you run the commands below without `sudo`. Membership is equivalent to root on the host: any member can start a privileged container, read every volume (store, transcripts, agent workspaces, the agent secrets file) and read the secrets in the services' environment with `docker inspect`. Only put the operator in that group.
 
-**Hardware.** The docs give no measured numbers for the laptop profile; how much RAM the core needs without agents is still to be measured (`docs/platform-architecture.md`, scaling). What is fixed:
+**Hardware.** No measured numbers yet (`docs/platform-architecture.md`, scaling). What is fixed:
 
 - Each Claude Code sandbox is limited to 2 CPUs and 4096 MB RAM (`examples/config/sandboxes/claude-code.yaml`); plan for that per concurrent agent session on top of the stack.
-- The server and worker images are about 0.9 GB each (issue #48); add the sandbox image and Postgres/Temporal.
-- The architecture's rule of thumb for a later two-VM setup (control plane 4 vCPU / 16 GB, worker 8 vCPU / 32 GB for a handful of parallel agents) is a target, not a requirement for this profile.
+- The server and worker images are about 0.9 GB each; add the sandbox image, Postgres and Temporal.
 
 ## Install
 
-All commands run from the repository root; `deploy/.env` is picked up automatically because compose uses `deploy/` as its project directory.
+All commands run from the repository root. Compose uses `deploy/` as its project directory, so it picks up `deploy/.env` by itself.
 
-1. **Clone**
+1. **Check out a release tag**
 
    ```sh
-   git clone https://github.com/mtiews/tendworks.git
+   git clone --branch v0.2.0 https://github.com/mtiews/tendworks.git
    cd tendworks
    ```
+
+   A tag says exactly which version runs (`git describe --tags`). Its release notes are in `docs/releases/`.
 
 2. **Create `deploy/.env`**
 
@@ -72,46 +77,58 @@ All commands run from the repository root; `deploy/.env` is picked up automatica
    scripts/setup-env.sh
    ```
 
-   It copies `deploy/.env.example` to `deploy/.env`, fills in a random `TEND_API_TOKEN` and a different random `TEND_API_READ_TOKEN`, makes the file readable by you only (mode 600) and refuses to overwrite an existing `deploy/.env`. It never prints the tokens. Fill in the rest as described in [Secrets](#secrets): at least `TEND_POSTGRES_PASSWORD` (`openssl rand -hex 32`) and a Claude Code credential. There are no default tokens: the server refuses to start without both and names the variable to set.
+   Copies `deploy/.env.example` to `deploy/.env`, fills in a random `TEND_API_TOKEN` and a different random `TEND_API_READ_TOKEN`, sets mode 600 and refuses to overwrite an existing file. It never prints the tokens. There are no default tokens: the server refuses to start without both and names the variable to set.
 
-3. **Build the sandbox image** (the platform never pulls it)
+3. **Fill in the rest of `deploy/.env`** ([Secrets](#secrets)) **before the first start**:
+   - `TEND_POSTGRES_PASSWORD` (`openssl rand -hex 32`): the store takes it only when it is created; changing it later needs the [rotation](#rotation) steps.
+   - `TEND_CLAUDE_CODE_CREDENTIAL` and the matching `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
+   - `TENDWORKS_AGENT_GITHUB_TOKEN` and `TENDWORKS_PLATFORM_GITHUB_TOKEN`, as in [GitHub access](#before-the-first-real-run-github-access).
+
+4. **Set up your own configuration** (directory or repository, [below](#your-own-configuration))
+
+   ```sh
+   cp -r examples/config ~/tendworks-config      # then git init, commit, push to a private repository
+   echo "TEND_CONFIG_PATH=$HOME/tendworks-config" >> deploy/.env
+   ```
+
+5. **Build the sandbox image** (the platform never pulls it)
 
    ```sh
    docker compose -f deploy/compose.yaml --profile sandbox-images build
    ```
 
-   This builds `tendworks/sandbox-claude-code` with the tag pinned in `deploy/compose.yaml` (`x-sandbox-images`; Claude Code, its ACP adapter, git and `gh`). Sandbox templates name it by repository alone (`image: tendworks/sandbox-claude-code`); the worker fills in the pin.
+   Builds `tendworks/sandbox-claude-code` with the tag pinned in `deploy/compose.yaml` (`x-sandbox-images`).
 
-4. **Build and start the stack**
+6. **Build and start the stack**
 
    ```sh
    docker compose -f deploy/compose.yaml up -d --build --wait
    ```
 
-   `--wait` returns when Postgres, Temporal, worker and server report healthy.
+   `--wait` returns when the services are up. It does not mean healthy: check step 8.
 
-5. **Build the `tend` CLI on the host** (optional, but the smoke tests and this guide use it)
+7. **Build the `tend` CLI on the host** (the smoke scripts and this guide use it)
 
    ```sh
    corepack enable pnpm
    pnpm install
    pnpm build
    alias tend='node "$PWD/apps/cli/dist/main.js"'
-   export TEND_API_TOKEN=<the value from deploy/.env>
+   export TEND_API_TOKEN=$(grep '^TEND_API_TOKEN=' deploy/.env | cut -d= -f2-)
    ```
 
-   `pnpm install` also sets `core.hooksPath` to `.githooks`; the pre-commit hook needs `betterleaks` only if you commit.
+   `pnpm install` also points git at the pre-commit hook in `.githooks`; it needs `betterleaks` only if you commit.
 
-6. **Verify**
+8. **Verify**
 
    | Check | Expected |
    | --- | --- |
-   | `curl -s http://localhost:8080/status` | a status document; HTTP 200 when healthy, 503 with the failing component otherwise. The only endpoint without a token |
-   | `tend status` | `PLATFORM healthy`, `ACCESS full`, a table of components |
+   | `curl -s http://localhost:8080/status` | HTTP 200 and `"status":"healthy"`; 503 names the failing component. The only endpoint without a token |
+   | `tend status` | `PLATFORM healthy`, `ACCESS full`, the components `store`, `execution-engine`, `sandbox-backend`, `sandbox-cleanup` |
    | `tend agent list`, `tend trigger list` | the profiles and trigger bindings of your configuration |
-   | `http://localhost:8080/` in a browser (see [Access](#access)) | redirects to `/ui/` and asks for a token; the API token signs in with full access |
+   | `http://localhost:8080/` in a browser on the host, or [from your devices](#access-from-your-devices) | redirects to `/ui/` and asks for a token; the API token signs in with full access |
 
-The starter configuration starts no run by itself: its only trigger binding (`playground-ready-for-agent`) is suspended.
+   The starter configuration starts no run by itself: its only trigger binding is suspended.
 
 ## Configuration
 
@@ -119,42 +136,46 @@ Two places, strictly separated:
 
 | | `deploy/.env` | configuration directory |
 | --- | --- | --- |
-| Holds | secrets, ports, the path of the configuration directory | workflows, agent profiles, trigger bindings, policies, sandbox templates, skills, integrations |
-| In Git | never (`.gitignore`, `.dockerignore`) | yes, it is meant to be versioned |
-| Read by | compose, into the environment of the services | server and worker at startup, mounted read-only at `/config` |
-| Apply a change | `docker compose -f deploy/compose.yaml up -d --wait` (recreates services whose environment changed; `restart` keeps the old environment) | `docker compose -f deploy/compose.yaml restart server worker` |
+| Holds | secrets, ports, the installation name, the path of the configuration directory | workflows, agent profiles, trigger bindings, policies, sandbox templates, skills, integrations |
+| In Git | never (`.gitignore`, `.dockerignore`) | yes, in a repository of its own |
+| Read by | compose, into the services' environment | server and worker at startup, mounted read-only at `/config` |
+| Apply a change | `docker compose -f deploy/compose.yaml up -d --wait` (recreates the services whose environment changed; `restart` keeps the old environment) | `docker compose -f deploy/compose.yaml restart server worker` |
+
+Running runs resume after either, and the worker takes up open chats again.
 
 ### Settings in `deploy/.env` besides secrets
 
-`deploy/.env.example` lists every variable `deploy/compose.yaml` reads; those with a default appear commented out (`# TEND_PORT=8080`). Besides the secrets:
+`deploy/.env.example` lists every variable `deploy/compose.yaml` reads; those with a default are commented out (`# TEND_PORT=8080`).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `TEND_CONFIG_PATH` | `../examples/config` (the starter configuration) | configuration directory on the host; relative paths resolve against `deploy/`, so prefer an absolute path |
+| `TEND_CONFIG_PATH` | `../examples/config` (the starter) | configuration directory on the host; relative paths resolve against `deploy/`, so use an absolute path |
 | `TEND_PORT` | `8080` | API, UI and MCP port, published on `127.0.0.1` only |
-| `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only and only with `--profile debug` |
-| `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; only for parallel stacks. Volume, image, sandbox, session volume and sandbox network names follow it |
-| `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it empty unless you put your own proxy in the gateway's place |
+| `TEND_ENGINE_UI_PORT` | `8233` | the engine's web UI, on `127.0.0.1` only and only with `--profile debug` |
+| `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; change it only for a second stack on the same engine (with other ports) |
+| `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it unset |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
 
-### Your own configuration directory
+`TEND_SANDBOX_IMAGES` and `TEND_INSTALLATION` are set by compose itself; don't set them.
 
-`examples/config` is the starter configuration: the `developer` and `assistant` agents, the `claude-code` sandbox, the workflows `develop-issue`, `hello-developer` and `restart-developer`, the suspended binding `playground-ready-for-agent`, the GitHub pull request integration and two policies (`ask-before-merge` asks before merging `develop-issue`'s pull requests). It holds no fakes; the test fixtures live in `tests/fixtures/config`. Copy it into a repository of your own (the planned `tendworks-config`) and point `TEND_CONFIG_PATH` at the checkout:
+### Your own configuration
 
-```sh
-cp -r examples/config ~/tendworks-config      # then git init, commit, push to a private repo
-echo "TEND_CONFIG_PATH=$HOME/tendworks-config" >> deploy/.env
-docker compose -f deploy/compose.yaml up -d --wait
-```
+`examples/config` is the starter configuration, without test fakes:
 
-The chat and web UI smoke tests need the scripted test workflow `restart-scripted` from the fixture configuration; see `scripts/smoke/chat-assistant.sh`.
+- agents `developer` and `assistant`, sandbox template `claude-code`, skill `tdd`;
+- workflows `develop-issue`, `hello-developer`, `restart-developer`;
+- trigger binding `playground-ready-for-agent`, suspended;
+- the GitHub pull request integration;
+- policies `merge-gate` (`auto`) and `ask-before-merge` (`ask` for `develop-issue`, so you approve every merge).
+
+Copy it into a repository of your own (the planned `tendworks-config`), point `TEND_CONFIG_PATH` at the checkout ([Install](#install), step 4) and change it there; a platform update never touches it. Compare with the new `examples/config` when release notes name configuration changes.
 
 Rules the loader enforces:
 
-- Every `*.yaml`, `*.yml` and `*.md` file below the directory is read, recursively; hidden files and directories (`.git`, `.github`) are skipped, so your configuration repository can carry its own CI. Each YAML file must be a workflow (has `document`) or a known `kind`; anything else stops the server (`neither a workflow nor a document with a kind`).
+- Every `*.yaml`, `*.yml` and `*.md` file below the directory is read, recursively. Hidden files and directories (`.git`, `.github`) are skipped, so the repository can carry its own CI. Each YAML file must be a workflow (has `document`) or a known `kind`; anything else stops the server (`neither a workflow nor a document with a kind`).
 - `.md` files count only under `agents/`; other Markdown (e.g. `skills/README.md`, `SKILL.md`) is not configuration.
 - Names are unique per kind; invalid configuration stops server or worker before they accept requests, with every issue in the log.
-- Server and worker run as user `node` (uid 1000 in the Node.js image); the files must be readable by it.
+- Server and worker run as user `node` (uid 1000); the files must be readable by it.
 - Secrets never go here, only references ([Secrets](#secrets)).
 
 ### Kinds and what you typically change
@@ -164,42 +185,39 @@ Rules the loader enforces:
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>` | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
-| `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: the starter's `ask-before-merge` lists `develop-issue`, so you approve every merge yourself; remove it there to let `merge-gate` merge automatically | server |
-| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb` | worker (server validates) |
+| `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: remove `develop-issue` from `ask-before-merge` to let `merge-gate` merge automatically | server |
+| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb` | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
 | `PullRequestIntegration` | `integrations/pull-requests/*.yaml` | one per host; `github` on `github.com` with the platform token | server |
 
-**Target repository.** The example targets `mtiews/tendworks-playground`. To use your own repository, change `spec.source.issues.repository` in `triggers/playground-ready-for-agent.yaml` and scope both GitHub tokens to that repository. The workflow derives the clone URL from the issue (`https://github.com/<repository>.git`). The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
-
-**Restarts.** `docker compose -f deploy/compose.yaml restart server worker` after any change to the configuration directory is always enough (after a change to `deploy/.env`, use `up -d --wait` instead: `restart` keeps the old environment); running runs resume after a restart (that is the milestone 1 success criterion), and open chats are taken up again by the worker.
+**Target repository.** The starter targets `mtiews/tendworks-playground`. For your own repository, change `spec.source.issues.repository` in `triggers/playground-ready-for-agent.yaml` and scope both GitHub tokens to it. The workflow derives the clone URL from the issue (`https://github.com/<repository>.git`). The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
 
 ## Secrets
 
-All secrets live in `deploy/.env` and reach the services as environment variables through `deploy/compose.yaml`. Configuration only references them (ADR 0008).
+All secrets live in `deploy/.env`. Configuration only references them (ADR 0008).
 
 ### Inventory
 
 | Secret | Purpose | Held by | Minimal scope | Generate | If it leaks |
 | --- | --- | --- | --- | --- | --- |
-| `TEND_API_TOKEN` | full access to the control plane API: start runs, merge, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `openssl rand -hex 32`; at least 16 characters | anyone who reaches the port can do everything you can, including approving merges |
-| `TEND_API_READ_TOKEN` | read-only API access (403 on writes); the platform MCP server reads with it | server, worker, and the Claude Code session of profiles with `mcp: [tendworks]` (as an MCP header, not as an environment variable); optionally you for a read-only UI | read only; must differ from `TEND_API_TOKEN` | `openssl rand -hex 32`; at least 16 characters | all runs, transcripts, chats, triggers and agents can be read |
-| `TEND_POSTGRES_PASSWORD` | database password of user `tend` | postgres, server, worker (in `TEND_DATABASE_URL`) | — | `openssl rand -hex 32` | low while Postgres is not published; full read/write of all platform state for anyone who can reach it |
+| `TEND_API_TOKEN` | full access to the control plane API: start runs, merge, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including approving merges |
+| `TEND_API_READ_TOKEN` | read-only API access (403 on writes); the platform MCP server reads with it | server, worker, and the Claude Code session of profiles with `mcp: [tendworks]` (as an MCP header, not as an environment variable); optionally you for a read-only UI | read only; must differ from `TEND_API_TOKEN` | `scripts/setup-env.sh`; at least 16 characters | all runs, transcripts, chats, triggers and agents can be read |
+| `TEND_POSTGRES_PASSWORD` | database password of user `tend` (default `tend`) | postgres, server, worker (in `TEND_DATABASE_URL`) | — | `openssl rand -hex 32` | low while the store is not published; full read/write of all platform state for anyone who reaches it |
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with your subscription | worker → every Claude Code sandbox, in the agent process's environment | — | `claude setup-token` | model usage on your subscription |
 | `ANTHROPIC_API_KEY` | Claude Code with an API key, billed per use | worker → every Claude Code sandbox, as above | a key for this purpose only; spend limits in the Anthropic Console | Anthropic Console | spend on your API account |
-| `TENDWORKS_AGENT_GITHUB_TOKEN` | the `developer` agent pushes its branch and opens the pull request (`GH_TOKEN` in the sandbox) | worker → sandboxes of profiles that reference it in `spec.env` | fine-grained, only the target repository: Contents read/write, Pull requests read/write | GitHub → Settings → Developer settings → Fine-grained tokens | push to any branch and open, edit or merge pull requests in that repository |
-| `TENDWORKS_PLATFORM_GITHUB_TOKEN` | the trigger reads issues; the merge gate merges pull requests | server only, never a sandbox | fine-grained, only the target repository: Issues read, Contents read/write, Pull requests read/write | as above | read issues, push and merge in that repository |
+| `TENDWORKS_AGENT_GITHUB_TOKEN` | the `developer` agent pushes its branch and opens the pull request (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of profiles that reference it | [GitHub access](#before-the-first-real-run-github-access) | fine-grained token | push to any branch and open, edit or merge pull requests in its repositories |
+| `TENDWORKS_PLATFORM_GITHUB_TOKEN` | the trigger reads issues; the merge gate merges pull requests | server only, never a sandbox | as above | fine-grained token | read issues, push and merge in its repositories |
 
 Notes:
 
-- **Credential terms.** `oauth-token` is a subscription token: "single-operator use only under Anthropic's terms" (`deploy/.env.example`). Third-party or shared use requires an API key (`docs/platform-architecture.md`). If anyone else uses your installation, use `api-key`.
-- **Agents read their own secrets.** Agents are untrusted, and nothing stops an agent (or code it runs) from reading the credential and `GH_TOKEN` in its environment and sending them anywhere: there is no egress allowlist yet. The target is injection by an egress proxy so sandboxes only see placeholders (`docs/platform-architecture.md`, security). Transcripts and replies redact the values (`***`), which protects the logs, not the secret.
-- **Both GitHub tokens** need GitHub's mandatory Metadata read, which fine-grained tokens include. Keep the agent token and the platform token separate: the platform token must never become an agent secret, and the resolver enforces that (below).
-- **`hello-developer` needs the agent token too**, although it does not use GitHub: the `developer` profile references it, and a task fails when a referenced secret is not set.
+- **Credential terms.** `oauth-token` is a subscription token, for single-operator use only under Anthropic's terms. If anyone else uses your installation, use `api-key`.
+- **Agents read their own secrets.** Nothing stops an agent (or code it runs) from reading the credential and `GH_TOKEN` in its environment and sending them anywhere: there is no egress allowlist yet. Transcripts and replies redact the values (`***`), which protects the logs, not the secret.
+- **`hello-developer` needs the agent token too**: the `developer` profile references it, and a task fails when a referenced secret is not set.
 
 ### Secret references (ADR 0008)
 
-Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`. In this profile a name is an environment variable of the bundle that uses it, resolved on every use, not at startup:
+Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`, resolved at every use:
 
 | Who references | May resolve | Example |
 | --- | --- | --- |
@@ -208,61 +226,107 @@ Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`. In th
 
 A reference outside its prefix is a configuration error at startup. `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` and the database URL can never be referenced.
 
-**Adding an agent secret:** add one line `TENDWORKS_AGENT_<NAME>=<value>` to `deploy/.env`, reference it in the profile's `spec.env`, and run `docker compose -f deploy/compose.yaml up -d --wait`. No compose edit: the one-shot service `agent-secrets` gets `deploy/.env` as a whole, has no network, writes only its `TENDWORKS_AGENT_*` variables to a file on the `agent-secrets` volume (mode 600) and ends; the worker reads that file at every secret reference, so the new secret needs no worker restart (a profile change still needs one). The worker never sees the platform's secrets. Only `deploy/.env` counts here, not variables exported in your shell or a file given with `--env-file`. A new `TENDWORKS_PLATFORM_*` secret still needs a line in the `server` environment of `deploy/compose.yaml` too.
+**Adding an agent secret:**
+
+1. Add `TENDWORKS_AGENT_<NAME>=<value>` to `deploy/.env`.
+2. Reference it in the profile's `spec.env`.
+3. `docker compose -f deploy/compose.yaml up -d --wait` (and `restart server worker` for the profile change).
+
+No compose edit: the one-shot service `agent-secrets` gets `deploy/.env` as a whole, has no network, writes only its `TENDWORKS_AGENT_*` variables to `agent-secrets.json` (mode 600) on the volume `<installation>_agent-secrets` and ends. The worker reads that file at every reference and never sees the platform's secrets. Only `deploy/.env` counts: not variables exported in your shell, not a file given with `--env-file`. A new `TENDWORKS_PLATFORM_*` secret still needs a line in the `server` environment of `deploy/compose.yaml`.
 
 ### Handling
 
-- `deploy/.env` belongs to the operator: `chmod 600 deploy/.env`, owned by your user. It is in `.gitignore` and `.dockerignore`, so it is neither committed nor copied into images.
+- `deploy/.env` belongs to the operator: mode 600, owned by your user (`scripts/setup-env.sh` does both). Back it up yourself, securely; [backups](#backup-and-restore) don't contain it.
 - Never put a secret into the configuration directory or its repository.
-- Encrypted secrets in Git (SOPS) and a secret store (OpenBao) are the stated future direction (`docs/platform-architecture.md`, ADR 0008); neither exists yet.
-- Don't paste tokens on the command line where shell history keeps them; `export TEND_API_TOKEN=$(grep '^TEND_API_TOKEN=' deploy/.env | cut -d= -f2-)` reads it from the file.
+- Don't paste tokens on the command line where shell history keeps them; read them from the file (`$(grep '^TEND_API_TOKEN=' deploy/.env | cut -d= -f2-)`).
+- Encrypted secrets in Git (SOPS) and a secret store (OpenBao) are the stated future direction; neither exists yet.
 
 ### Rotation
 
 | Secret | Steps |
 | --- | --- |
-| API token, read token | change `deploy/.env`, `docker compose -f deploy/compose.yaml up -d --wait` (server and worker get the new value), re-export it for `tend`, sign in to the UI again |
-| Claude Code credential, agent token | change `deploy/.env`, `up -d --wait` (worker). Sessions interrupted by the recreation resume in a new sandbox |
+| API token, read token | change `deploy/.env`, `up -d --wait` (server and worker get the new value), re-export it for `tend`, sign in again on every device |
+| Claude Code credential, agent secrets | change `deploy/.env`, `up -d --wait`. Agent secrets need no worker restart; a recreated worker resumes interrupted sessions in a new sandbox |
 | platform GitHub token | change `deploy/.env`, `up -d --wait` (server) |
-| Postgres password | the Postgres image applies `POSTGRES_PASSWORD` only when it initialises an empty volume, so changing `.env` alone breaks the connection. Change it in the database first (`docker compose -f deploy/compose.yaml exec postgres psql -U tend -d tend -c "ALTER USER tend PASSWORD '<new>'"`), then in `.env`, then `up -d --wait`. Not exercised by the project; test it on a copy first |
+| Postgres password | the store applies `POSTGRES_PASSWORD` only when it initialises an empty volume, so changing `.env` alone breaks the connection. Change it in the database first (`docker compose -f deploy/compose.yaml exec postgres psql -U tend -d tend -c "ALTER USER tend PASSWORD '<new>'"`), then in `.env`, then `up -d --wait`. Not exercised by the project; test it on a copy first |
 
-### Residual risks the docs name
+Rotate the API token at once when a device that was signed in is lost.
 
-- **Sandboxes and the API port.** Sandboxes run on their own network without the platform's services, but where the Docker host forwards the published port to them (Docker Desktop via `host.docker.internal`), only the tokens guard the API. On a Linux engine, sandboxes do not reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). They still reach everything else the bridge network routes to, including your LAN and the internet.
-- **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network `<installation>_platform-mcp` and can reach each other on it; Docker can forbid traffic only between all containers of a network, which would cut off the gateway too (ADR 0019). Other sandboxes stay apart: the sandbox network forbids traffic between its containers, and they never join the gateway's network. Through the gateway, sandboxes reach only `/mcp`, read-only.
-- **The agent token could merge.** Without repository rulesets (e.g. a private repository on GitHub's free plan) the agent token can technically merge its own pull request; the platform's merge gate only governs what the platform does (`docs/platform-architecture.md`). Protect the target branch with a ruleset where you can.
-- **Token in browser storage.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device". A script injected into the UI could read it; a strict CSP and sanitised agent output are the guards (ADR 0018). Don't tick "Stay signed in" on a shared browser.
+### Residual risks
+
+- **Agent secrets on a volume.** The `TENDWORKS_AGENT_*` values sit as a file on the volume `<installation>_agent-secrets` until the next `up` rewrites it or `down -v` removes it. A line you delete from `deploy/.env` is gone from the file after the next `up -d`; the old file content stays readable to anyone with Docker access until then.
+- **Sandboxes and the API port.** On a Linux engine, sandboxes don't reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). On Docker Desktop they reach it through `host.docker.internal`, and only the tokens guard the API. Sandboxes still reach everything else the bridge routes to, including your LAN and the internet.
+- **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network and can reach each other on it (ADR 0019). Other sandboxes stay apart. Through the gateway, sandboxes reach only `/mcp`, read-only.
+- **The agent token can merge** on repositories without rulesets ([GitHub access](#before-the-first-real-run-github-access)); the merge gate governs only what the platform does.
+- **Token in the browser.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device" (ADR 0018). Don't tick that on a shared browser.
 - **Socket proxy.** It filters paths, not request bodies: whoever reaches it can create a privileged container, i.e. become root on the host. Only the worker reaches it (ADR 0001).
-- **Isolation class `container`** shares the host kernel; a kernel exploit from a sandbox reaches the host. Put an outer boundary around it (dedicated VM) when agents process untrusted content such as public issues (ADR 0001).
-- **Temporal's web UI** has no authentication; while it runs (`--profile debug`, on `127.0.0.1:8233`), every local user of the host can open it. Stop it when you are done: `docker compose -f deploy/compose.yaml stop temporal-ui`.
+- **Isolation class `container`** shares the host kernel. Put an outer boundary around it (dedicated VM) when agents process untrusted content such as public issues, or verify [gVisor](#optional-gvisor).
+- **The engine's web UI** has no login; while it runs (`--profile debug`), every local user of the host can open it. Stop it when you are done.
 
-## Access
+## Before the first real run: GitHub access
 
-The stack publishes the API, UI and MCP endpoint on `127.0.0.1:8080` only (ADR 0018), and the Temporal UI on `127.0.0.1:8233` only while you run it with `docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui`. Reach them from your laptop through an SSH tunnel:
+Before any run on a real repository, follow [docs/github-agent-access.md](github-agent-access.md): two fine-grained tokens (agent and platform) with the narrowest permissions, and a release process the agent token cannot start. Then check the agent token:
 
 ```sh
-ssh -L 8080:localhost:8080 <host>                               # API, UI, tend
-ssh -L 8080:localhost:8080 -L 8233:localhost:8233 <host>        # plus the Temporal UI (profile debug)
+scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env                # read-only checks
+scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env --write-tests  # also push tests, cleans up
 ```
 
-Then on the laptop: `http://localhost:8080/` in the browser, and `tend` with its default `TEND_URL=http://localhost:8080` (build it there as in [Install](#install), step 5, or run `tend` on the host over SSH).
+Every check must pass before you remove `suspend: true` from a binding. Later, `scripts/check-github-agent-access.sh --repo OWNER/NAME --audit 30` lists commits on `main` without a merged pull request.
 
-**Do not publish the port beyond localhost** (e.g. `0.0.0.0:8080` in compose, a reverse proxy without TLS, a port forward on the router). There is no TLS and no identity: one static bearer token over plain HTTP is all that guards full control of agents, merges and approvals. Remote access waits for TLS and OIDC (ADR 0014, ADR 0018).
+## Access from your devices
 
-## Known gaps on Linux
+The server binds to `127.0.0.1` only. Reach the UI, API and `tend` from other devices **only through a TLS layer in front of that port on the same host** (ADR 0020). Never publish the port as plain HTTP on the network (`0.0.0.0:8080` in compose, a proxy without TLS, a router port forward): the API token in every request is all that guards full control of agents, merges and approvals. The token stays the sign-in until OIDC.
+
+### Recommended: Tailscale
+
+HTTPS with a certificate your devices trust, reachable only from your tailnet, no port opened on your network, no change to the platform.
+
+1. [Install Tailscale](https://tailscale.com/download/linux) on the host and on your phone and laptop, signed in to the same tailnet.
+2. In the tailnet's admin console, enable MagicDNS and HTTPS certificates.
+3. On the host:
+
+   ```sh
+   sudo tailscale serve --bg 8080
+   tailscale serve status        # shows https://<host>.<tailnet>.ts.net
+   ```
+
+4. Open `https://<host>.<tailnet>.ts.net/` on the phone and sign in with the API token. From a laptop on the tailnet: `TEND_URL=https://<host>.<tailnet>.ts.net tend status`.
+
+Use `tailscale serve`, never `tailscale funnel`: Funnel publishes the port to the internet. Stop serving with `sudo tailscale serve reset`.
+
+### Alternative: a reverse proxy with your own domain
+
+Without a third party: a reverse proxy on the host (e.g. Caddy or nginx) that terminates TLS for a name in your own domain and forwards to `http://127.0.0.1:8080`.
+
+- Use a certificate your devices trust without extra steps, e.g. from Let's Encrypt with the DNS challenge, so the name need not be reachable from the internet. A private CA needs its root certificate on every device.
+- Listen only on the LAN interface; no port forward on the router.
+- Pass long-lived responses through unbuffered: transcripts and chats stream as Server-Sent Events (`.../stream`).
+- Everyone on your LAN reaches the sign-in page; with Tailscale only your devices do.
+
+### Locally and for the engine's UI
+
+On the host itself, `http://localhost:8080/` works as is. The engine's UI is for debugging only, through an SSH tunnel:
+
+```sh
+docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui
+ssh -L 8233:localhost:8233 <host>        # on the laptop, then http://localhost:8233
+docker compose -f deploy/compose.yaml stop temporal-ui
+```
+
+## Known gaps
 
 | Area | State |
 | --- | --- |
-| Stack, sandboxes, socket proxy, restart and resume | work on a Linux Docker engine: CI runs the full compose stack and the end-to-end tests (scripted ACP agent in real sandboxes, API and browser) on Ubuntu (`.github/workflows/ci.yml`) |
-| `developer` agent with real Claude Code, pull request, merge, approval | the manual smoke tests are documented, but the docs do not record a run on a Linux host; expect it to work, verify with the [first workloads](#first-test-workloads) |
-| Platform MCP server from sandboxes | works through the MCP-only gateway (ADR 0019): the end-to-end tests on Linux CI call a platform tool from a scripted chat and check that sandboxes reach only `/mcp`. The `assistant` chat with real Claude Code is not yet recorded on a Linux host |
-| Chats without the MCP server | the chat mechanics are covered by the end-to-end tests on Linux. A profile with `spec.chat` and without `spec.mcp` chats without the platform's tools (below) |
-| `gvisor` isolation class | **not verified** (issue #17). The adapter asks Docker for the runtime `runsc`, which must be installed and registered in the Docker daemon; there are no setup instructions yet |
-| Cleanup | the worker removes orphaned sandboxes and session volumes ([Clean-up of sandboxes and session volumes](#clean-up-of-sandboxes-and-session-volumes)); the sandbox network and old images are never removed automatically (see [Reset](#reset)) |
-| Approvals vs. pull requests changed on GitHub | a pull request merged or closed on GitHub while its run waits is not reflected on the approval request; reject then ends the run with `merged: false` even though the code is merged (issue #51) |
-| Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes. Mitigated only by the `developer` role description (issue #23) |
+| Stack, sandboxes, MCP gateway, token checks, clean-up, installation names, backup and restore | covered by the end-to-end tests on Ubuntu CI (`.github/workflows/ci.yml`, scripted agent in real sandboxes) |
+| Real Claude Code, pull request, merge, approval, `assistant` chat on a Linux host | documented smoke tests; recorded on Linux with the milestone 2 [acceptance](#acceptance-checklist) |
+| `gvisor` isolation class | not verified yet (issue #17); [optional step](#optional-gvisor) |
+| Approvals vs. pull requests changed on GitHub | a pull request merged or closed on GitHub while its run waits is not reflected on the approval request; reject then ends the run with `merged: false` although the code is merged (issue #51) |
+| Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes (issue #23) |
+| Retention | nothing ages out: store, transcripts and the volumes of chats nobody ends grow forever (follow-up of issue #48). Watch the disk (`docker system df -v`) |
+| Notifications | delivered to the server log only |
 
-A chat profile without the platform MCP server, e.g. `agents/helper.md` in your configuration directory:
+A chat profile without the platform MCP server, e.g. `agents/helper.md` in your configuration:
 
 ```markdown
 ---
@@ -281,24 +345,30 @@ You are a helpful assistant working in your workspace. Keep answers short.
 
 Restart server and worker, then `tend chat helper` (optionally `--repo https://github.com/<owner>/<public-repo>`).
 
+### Optional: gVisor
+
+The adapter runs sandboxes of templates with `spec.isolationClass: gvisor` with the Docker runtime `runsc` (ADR 0001).
+
+1. Install `runsc` as in [gVisor's installation guide](https://gvisor.dev/docs/user_guide/install/) and register it with Docker (`sudo runsc install`, then `sudo systemctl restart docker`; the stack comes back by itself).
+2. Check Docker: `docker run --rm --runtime=runsc busybox dmesg` prints gVisor's kernel messages.
+3. Add a template to your configuration, e.g. `sandboxes/claude-code-gvisor.yaml` with `spec.isolationClass: gvisor`, point a profile's `spec.sandbox` at it and restart server and worker.
+4. Run `hello-developer` with that profile; while it works, `docker inspect --format '{{.HostConfig.Runtime}}' <sandbox>` says `runsc`. Without the runtime the run fails with `isolation class gvisor needs the runsc runtime on the sandbox host`.
+
 ## First test workloads
 
-The smoke tests in [docs/platform-implementation.md](platform-implementation.md) are the walkthrough; most are scripted in `scripts/smoke/` (bash, print PASS or FAIL). All need the stack up, `deploy/.env` filled in and `TEND_API_TOKEN` exported; the GitHub ones need `gh` logged in. Go in this order:
+The smoke tests in [docs/platform-implementation.md](platform-implementation.md) are the walkthrough; most are scripted in `scripts/smoke/` (bash, PASS or FAIL). They need the stack up, `deploy/.env` filled in and `TEND_API_TOKEN` exported; the GitHub ones need `gh` logged in. The scripts check the configuration the stack mounts (`TEND_CONFIG_PATH` from the shell or `deploy/.env`, else `examples/config`).
 
-| # | Workload | How | Needs | On Linux |
-| --- | --- | --- | --- | --- |
-| 1 | Claude Code answers in a sandbox, cost and transcript visible | `scripts/smoke/hello-developer.sh` (steps 3–4) | sandbox image, Claude credential, agent token | not yet recorded |
-| 2 | Restart mid-run resumes the agent session | `scripts/smoke/restart-developer.sh` (steps 5–7) | as 1 | not yet recorded |
-| 3 | Labelled issue → pull request → merged with `merge: auto` | open an issue in your target repository, then `scripts/smoke/pull-request-auto.sh <issue>` (steps 8–12) | platform token; `suspend: true` removed from `playground-ready-for-agent`; `develop-issue` removed from `ask-before-merge`; server restarted | not yet recorded |
-| 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` (step 14) | as 3, with `develop-issue` in `ask-before-merge` (as in the starter configuration) | not yet recorded |
-| 5 | `assistant` chat answers from the live platform state | `scripts/smoke/chat-assistant.sh` (steps 15–18) | scripted ACP image, the fixture configuration (`restart-scripted`), binding not suspended, read token | not yet recorded; the script checks the MCP gateway from a sandbox first |
-| 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (steps 19–23) | as 4 and 5 | not yet recorded |
+| # | Workload | How | Needs |
+| --- | --- | --- | --- |
+| 1 | Claude Code answers in a sandbox, cost and transcript visible | `scripts/smoke/hello-developer.sh` | sandbox image, Claude credential, agent token |
+| 2 | Restart mid-run resumes the agent session | `scripts/smoke/restart-developer.sh` | as 1 |
+| 3 | Labelled issue → pull request → merged with `merge: auto` | `scripts/smoke/pull-request-auto.sh <issue>` | platform token; `suspend: true` removed from the binding; `develop-issue` removed from `ask-before-merge`; server restarted |
+| 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` | as 3, with `develop-issue` in `ask-before-merge` (the starter) |
+| 5 | `assistant` chat answers from the live state | `tend chat assistant` or the UI; the full script `scripts/smoke/chat-assistant.sh` needs the fixture configuration (implementation doc, step 16) | read token |
+| 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (implementation doc, steps 19–23) | as 4 and 5 |
 
-Before you start:
-
-- **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried automatically; start it again by hand with `POST /runs` (`docs/platform-implementation.md`, "Triggers: one firing per issue").
-- The scripts check the configuration the stack mounts: `TEND_CONFIG_PATH` from the shell or `deploy/.env`, else `examples/config` (`scripts/smoke/lib.sh`).
-- Revert configuration changes after the tests (binding suspended again, `ask-before-merge` back), or keep them deliberately.
+- **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; start it again by hand with `POST /runs` (implementation doc, "Triggers: one firing per issue").
+- Revert configuration changes after the tests, or keep them deliberately.
 - Watch a run live: `tend run logs <id> --follow`, or the run detail in the UI.
 
 ## Operations
@@ -308,84 +378,100 @@ Before you start:
 | Task | Command |
 | --- | --- |
 | Status | `tend status`, `curl -s localhost:8080/status` |
-| Services | `docker compose -f deploy/compose.yaml ps` |
-| Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); server logs list the loaded configuration at startup and every notification, since notifications are delivered to the log for now |
+| Services | `docker compose -f deploy/compose.yaml ps` (`-a` shows `agent-secrets` as `Exited (0)`) |
+| Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]` |
 | Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
 | Approvals | `tend approval list --pending`, `tend approval approve <id>`, `tend approval reject <id>` |
 | Notifications, triggers, agents | `tend notification list`, `tend trigger list` (last check per binding), `tend agent list` (active sessions per profile) |
 | Chats | `tend chat <profile>`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
-| Live sandboxes | `docker ps --filter label=dev.tendworks.sandbox` |
-| Restart (after a configuration change) | `docker compose -f deploy/compose.yaml restart server worker` |
-| Apply a change to `deploy/.env` | `docker compose -f deploy/compose.yaml up -d --wait` (`restart` keeps the old environment) |
-| Workflow engine UI (debugging) | `docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui`, afterwards `... stop temporal-ui` |
-| Stop / start | `docker compose -f deploy/compose.yaml stop`, `... up -d --wait` |
+| Live sandboxes | `docker ps --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox` |
+| After a configuration change | `docker compose -f deploy/compose.yaml restart server worker` |
+| After a change to `deploy/.env` | `docker compose -f deploy/compose.yaml up -d --wait` |
+| Stop / start | `docker compose -f deploy/compose.yaml stop`, `... up -d --wait` (a stopped stack stays down after a reboot) |
 
 ### Where data lives
 
-| Data | Location | Removed by `down -v` |
-| --- | --- | --- |
-| platform state (runs, tasks, chats, approvals, notifications, event outbox) | volume `tendworks_postgres-data` | yes |
-| workflow execution history | volume `tendworks_temporal-data` | yes |
-| transcripts | volume `tendworks_transcripts` | yes |
-| agent sessions (workspace, harness home) | volumes `<installation>-volume-<task>-workspace` and `-session`, labels `dev.tendworks.volume`, `dev.tendworks.installation` and `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open; orphans go with the [clean-up](#clean-up-of-sandboxes-and-session-volumes) | **no** |
-| sandboxes | containers `<installation>-sandbox-<id>`, labels `dev.tendworks.sandbox`, `dev.tendworks.installation` and `dev.tendworks.owner`; orphans go with the [clean-up](#clean-up-of-sandboxes-and-session-volumes) | **no** |
-| sandbox network | `<installation>-sandboxes`, labels `dev.tendworks.sandbox-network` and `dev.tendworks.installation` | **no** |
-| MCP gateway network | `<installation>_platform-mcp` (compose) | yes, once no sandbox is attached ([Reset](#reset)) |
-| images | `tendworks-server`, `tendworks-worker`, `tendworks/sandbox-claude-code:<tag>` | **no** |
+| Data | Location | Backup | Removed by `down -v` |
+| --- | --- | --- | --- |
+| platform state (runs, tasks, chats, approvals, notifications, event outbox; each domain's `schema_migrations`) | volume `tendworks_postgres-data` | yes | yes |
+| workflow execution history | volume `tendworks_temporal-data` | yes | yes |
+| transcripts | volume `tendworks_transcripts` | yes | yes |
+| agent secrets (from `deploy/.env`) | volume `tendworks_agent-secrets` | no (recreated on `up`) | yes |
+| agent sessions (workspace, harness home) | volumes `tendworks-volume-<task>-workspace` and `-session`, labels `dev.tendworks.installation`, `dev.tendworks.volume`, `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open | no | **no** ([clean-up](#clean-up-of-sandboxes-and-session-volumes)) |
+| sandboxes | containers `tendworks-sandbox-<id>`, labels `dev.tendworks.installation`, `dev.tendworks.sandbox`, `dev.tendworks.owner` | no | **no** ([clean-up](#clean-up-of-sandboxes-and-session-volumes)) |
+| sandbox network | `tendworks-sandboxes`, labels `dev.tendworks.installation`, `dev.tendworks.sandbox-network` | no | **no** |
+| MCP gateway network | `tendworks_platform-mcp` | no | yes, once no sandbox is attached ([Reset](#reset)) |
+| images | `tendworks-server`, `tendworks-worker`, `tendworks-agent-secrets`, `tendworks/sandbox-claude-code:<tag>` | no | **no** |
 
-Names assume the default project name `tendworks`; with another `COMPOSE_PROJECT_NAME`, replace `tendworks` (the installation) accordingly. Several stacks on one Docker engine (e.g. e2e stacks) never see or touch each other's sandboxes and session volumes.
-
-Updating from before `v0.2.0`: sandboxes and session volumes had fixed names (`tendworks-sandbox-*`, `tendworks-volume-*`) and no installation label. With the default project name these are the installation's names, so open chats resume and nothing needs to be done. With another project name, end open chats before the update: afterwards their old volumes are no longer found, the chats start over with an empty workspace, and the old `tendworks-volume-*` volumes stay behind (remove them as under [Reset](#reset)).
-
-Nothing ages out: Postgres, transcripts and the volumes of chats nobody ends grow forever (store retention is a follow-up of issue #48). Watch the disk (`docker system df -v`).
+Names assume the installation `tendworks`; with another `COMPOSE_PROJECT_NAME`, replace it.
 
 ### Clean-up of sandboxes and session volumes
 
-When the worker starts and every 5 minutes, it removes the sandboxes and session volumes of its installation that belong to no live task and no open chat: tasks and chats that ended while a removal failed, leftovers of a worker that died, or of a store that was reset or restored. The owner label (`dev.tendworks.owner`) names the task; a session volume from before `v0.2.0` without one is matched by its name (`<task>-workspace`, `<task>-session`), and a sandbox without one is always removed, since no worker can reattach to it. Sandboxes go before their volumes.
+When the worker starts and every 5 minutes, it removes the sandboxes and session volumes of its installation that belong to no live task and no open chat: leftovers of failed removals, of a worker that died, or of a store that was reset or restored.
 
-- It touches only its own installation's resources (label `dev.tendworks.installation`, or the installation's names for resources from before `v0.2.0`), never those of another stack on the same engine.
-- It keeps everything of running tasks and open chats, including the volumes of an idle chat and of a run's task that waits to be resumed after a restart.
+- The owner label names the task. A session volume from before `v0.2.0` without one is matched by its name (`<task>-workspace`, `<task>-session`); a sandbox without one is always removed, since no worker can reattach to it. Sandboxes go before their volumes.
+- It touches only its own installation's resources (label `dev.tendworks.installation`, or the installation's names for unlabelled resources from before `v0.2.0`).
+- It keeps everything of running tasks and open chats, including the volumes of an idle chat and of a run's task that waits to be resumed.
 - Each removal is logged: `sandbox clean-up: removed sandbox <id> of <task>, ...` (`docker compose -f deploy/compose.yaml logs worker`).
-- A failed removal is logged (`sandbox clean-up: cannot remove ...`), and `GET /status` shows the component `sandbox-cleanup` unhealthy with the reason until a later pass gets it done; every pass retries. A removal that fails while a task or chat ends is recorded as an `error` entry in its transcript; the clean-up retries it once the task or chat has ended.
-- It does not remove the sandbox network, the gateway's network, images or store data.
+- A failed removal is logged (`sandbox clean-up: cannot remove ...`), and `/status` shows `sandbox-cleanup` unhealthy until a later pass succeeds. A removal that fails while a task or chat ends is recorded as an `error` entry in its transcript.
+- It never removes networks, images or store data.
 
 ### Update
 
-```sh
-git pull
-docker compose -f deploy/compose.yaml --profile sandbox-images build      # when images/sandbox-claude-code changed
-docker compose -f deploy/compose.yaml up -d --build --wait
-pnpm install && pnpm build                                                 # for the tend CLI
-```
+Downgrades are not supported; the way back is the backup taken before the update.
 
-- The sandbox image pin lives only in `deploy/compose.yaml`; a template that names `tendworks/sandbox-claude-code` without a tag follows it. Rebuild the sandbox images when the pin changed.
-- Check `git log` for configuration schema changes; an invalid configuration stops the server (see the log).
-- Server and worker migrate their database tables at startup, each change in its own transaction, and log `store <domain>: migrated from version <n> to <m>`. Downgrades are not supported; back up first (`scripts/backup.sh`) and prefer updating while no run is active.
+1. Read the release notes of the new tag (`docs/releases/<tag>.md`, also on the GitHub release): migrations, configuration changes, steps.
+2. Back up, preferably while no run is active:
+
+   ```sh
+   scripts/backup.sh --output-dir /mnt/backup
+   ```
+
+3. Check out the new tag and rebuild:
+
+   ```sh
+   git fetch --tags
+   git checkout <tag>
+   docker compose -f deploy/compose.yaml --profile sandbox-images build    # when the sandbox image pin changed
+   docker compose -f deploy/compose.yaml up -d --build --wait
+   pnpm install && pnpm build                                              # the tend CLI
+   ```
+
+4. Check: `tend status` is healthy, and the logs show `store <domain>: migrated from version <n> to <m>` for each migration of the release.
+
+- Your configuration is not touched; apply configuration changes the notes name in your own repository. An invalid configuration stops the server (see the log).
+- A template that names `tendworks/sandbox-claude-code` without a tag follows the pin in `deploy/compose.yaml`.
+- **Migrations:** each domain migrates its own tables at startup, each migration in its own transaction under a lock, so concurrent starts migrate once. A failed migration is rolled back; the bundle then stops working but keeps running: the server answers only `GET /status` (every other path 503 `Platform stopped`), the worker only `/health`, and `/status` shows the component `<schema>-schema` unhealthy. `up --wait` does not notice this, hence step 4. Then:
+  - fix the cause the log names and `up -d` again (the next start retries), or
+  - go back: stop the stack, `down -v`, check out the previous tag, [restore](#backup-and-restore) the backup of step 2 and start. Checking out the previous tag alone is not enough when another domain already migrated: the old release refuses a store newer than it knows.
 
 ### Backup and restore
 
-`scripts/backup.sh` writes one dated archive `<installation>-backup-<UTC time>.tar.gz` (mode 600) into `backups/` of the checkout, or into `--output-dir`. It holds a dump of the store, the workflow engine's state and the transcripts, taken together: the script stops server, worker and engine for the backup (usually under a minute) and starts the stack again afterwards. Because the three parts are consistent, runs that were working at backup time continue after a restore.
+`scripts/backup.sh` writes one archive `<installation>-backup-<UTC time>.tar.gz` (mode 600) into `backups/` of the checkout, or into `--output-dir`. It holds a dump of the store, the engine's state and the transcripts, taken together while server, worker and engine are stopped (usually under a minute); the stack is started again afterwards. Runs that were working at backup time continue after a restore.
 
 ```sh
-scripts/backup.sh                            # the stack of deploy/.env, archive in backups/
+scripts/backup.sh                            # archive in backups/
 scripts/backup.sh --output-dir /mnt/backup   # elsewhere; keep a copy off the host
 ```
 
-Restore into a stack without data, after `down -v` or on a new host with the same `deploy/.env` (images built as under [Install](#install)):
+Restore into a stack without data, after a [reset](#reset) or on a new host with the same `deploy/.env` and configuration (images built as under [Install](#install)):
 
 ```sh
-docker compose -f deploy/compose.yaml down -v          # deletes the stack's current data
 scripts/restore.sh backups/tendworks-backup-<time>.tar.gz
 docker compose -f deploy/compose.yaml up -d --wait
 ```
 
 - The restore refuses a running stack and a stack that holds data, and leaves the stack stopped.
-- A backup of an older release is migrated when the stack starts; one of a newer release is refused by the server (downgrades are not supported).
+- A backup of an older release is migrated on start; one of a newer release is refused by the server.
 - Both scripts take `--env-file` and `--project-name` and follow `COMPOSE_PROJECT_NAME`, like compose.
-- Not in a backup: `deploy/.env` (back it up yourself, securely), your configuration (keep it in its own Git repository) and session volumes. A restore therefore ends open agent sessions: chats and working tasks whose session volumes are gone start over with an empty workspace.
+- **Not in a backup:** `deploy/.env`, your configuration (keep it in its own repository) and session volumes. A restore therefore ends open agent sessions: chats and working tasks whose session volumes are gone start over with an empty workspace.
+- **Archives are sensitive:** they hold chat content, run inputs and transcripts (no tokens from `deploy/.env`). Keep them mode 600 and encrypt copies off the host.
+- Schedule backups yourself, e.g. a nightly cron job with `--output-dir`; nothing prunes old archives.
 
 ### Reset
+
+Deletes all platform data of the installation and leaves nothing behind:
 
 ```sh
 docker compose -f deploy/compose.yaml stop worker
@@ -395,9 +481,10 @@ docker volume rm $(docker volume ls -q --filter label=dev.tendworks.installation
 docker network rm tendworks-sandboxes
 ```
 
-`down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images, hence the other commands. A stack started again on an empty store would remove the leftover sandboxes and session volumes with its [clean-up](#clean-up-of-sandboxes-and-session-volumes), since no task owns them any more, but a reset should leave nothing behind without it. Remove the sandboxes before `down` (with the worker stopped, so it starts none meanwhile): while a sandbox of an MCP profile is still attached to the gateway's network, `down` cannot remove that network and leaves it behind ("Resource is still in use").
-
-Replace `tendworks` with your project name if you set one. Sandboxes and volumes created before `v0.2.0` have no installation label; find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks and test runs on the same engine used the same names then.
+- `down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data`, `transcripts` and `agent-secrets`: all runs, chats, approvals, notifications and transcripts.
+- It does **not** remove sandboxes, session volumes, the sandbox network or images, hence the other commands. A stack started again on an empty store would remove leftover sandboxes and session volumes with its clean-up, but a reset should not depend on that.
+- Remove the sandboxes before `down`, with the worker stopped so it starts none meanwhile: while a sandbox of an MCP profile is attached to the gateway's network, `down` leaves that network behind ("Resource is still in use").
+- Replace `tendworks` with your installation name if you set one. Resources created before `v0.2.0` have no installation label: find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks on the same engine used the same names then.
 
 ### Cleaning images
 
@@ -406,36 +493,55 @@ Replace `tendworks` with your project name if you set one. Sandboxes and volumes
 | list | `docker image ls --filter reference='tendworks*' --filter reference='tendworks/*'` |
 | old sandbox image after a pin update | `docker image rm tendworks/sandbox-claude-code:<old tag>` |
 | test image | `docker image rm tendworks/sandbox-scripted-acp:test` |
-| images of other compose projects (e.g. e2e stacks, ~0.9 GB each) | `docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' \| grep -E -- '-(server\|worker):'`, then `docker image rm` |
+| images of other compose projects (e.g. e2e stacks, ~0.9 GB each) | `docker image ls --format '{{.Repository}}:{{.Tag}} {{.Size}}' \| grep -E -- '-(server\|worker\|agent-secrets):'`, then `docker image rm` |
 | build cache | `docker builder prune` |
 
 ## Troubleshooting
 
 | Symptom or message | Where | Cause and fix |
 | --- | --- | --- |
-| `TEND_API_TOKEN is not set; ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits and restarts | no `deploy/.env`, or the token is empty in it; create the file with `scripts/setup-env.sh` (or fill in `openssl rand -hex 32`), then `up -d --wait` |
-| `TEND_API_TOKEN must be at least 16 characters; generate one with ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits | token too short; `openssl rand -hex 32`, then `up -d --wait` |
-| `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state` | server log, server exits | use two different values |
-| `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML in the configuration directory counts (hidden directories such as `.github/` are skipped) |
-| `schema <schema>: migration <n> (<name>) failed: ...` or `... newer than this release knows ...; downgrades are not supported`; `tend status` shows `<schema>-schema` unhealthy | server or worker log; `GET /status` | an update's migration failed and was rolled back, so the store is still at the previous version. The bundle keeps running but only answers `/status` (server) or `/health` (worker), every other request gets 503. Check out the previous tag (its store is unchanged) and `up -d --build`, or fix the cause and `up -d`; the next start retries. A store newer than the release needs the newer tag or the backup |
+| `TEND_API_TOKEN is not set; ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits and restarts | no `deploy/.env`, or the token is empty; `scripts/setup-env.sh` (or `openssl rand -hex 32`), then `up -d --wait` |
+| `TEND_API_TOKEN must be at least 16 characters; ...` (same for `TEND_API_READ_TOKEN`) | server log | token too short; `openssl rand -hex 32`, then `up -d --wait` |
+| `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, ...` | server log | use two different values |
+| `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML counts (hidden directories such as `.github/` are skipped) |
+| `schema <schema>: migration <n> (<name>) failed: ...` or `... newer than this release knows ...; downgrades are not supported`; `/status` shows `<schema>-schema` unhealthy; every other request answers 503 `Platform stopped` | server or worker log, `/status` | see [Update](#update), migrations: fix and `up -d`, or go back with the backup |
 | `missing environment variable <NAME>` | server or worker log | a bundle setting is missing; only happens with a modified compose file |
-| `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; its tasks will fail until this is fixed` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
-| run fails: `no harness credential configured: set TEND_CLAUDE_CODE_CREDENTIAL to oauth-token or api-key and the matching variable in deploy/.env` | `tend run get` | as above |
+| `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; ...` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
+| run fails: `no harness credential configured: ...` | `tend run get` | as above |
 | `TEND_CLAUDE_CODE_CREDENTIAL selects api-key, but ANTHROPIC_API_KEY is empty` | worker log | fill the selected variable |
-| run fails: `agent profile developer: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning at start | set the agent token (also needed for `hello-developer`) |
-| `... is not an agent secret: agents may only reference TENDWORKS_AGENT_* secrets` (or `platform integrations may only reference TENDWORKS_PLATFORM_*`) | log, run | a reference outside its prefix; rename the variable (an agent secret needs only its line in `deploy/.env`, then `up -d`) |
-| `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the platform token did not reach the server; set it, `up -d --wait` (a plain `restart` keeps the old environment) |
+| run fails: `agent profile developer: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning | add the line to `deploy/.env` (not your shell), `up -d --wait` |
+| `... is not an agent secret: agents may only reference TENDWORKS_AGENT_* secrets` (or `platform integrations may only reference TENDWORKS_PLATFORM_*`) | log, run | a reference outside its prefix; rename the variable |
+| `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the token did not reach the server; set it, `up -d --wait` (`restart` keeps the old environment) |
 | binding never checks | `tend trigger list` | `spec.suspend: true`; remove it and restart the server |
 | issue labelled but no new run | | each issue fires once per binding, also after a failed run (ADR 0006); start it by hand with `POST /runs` |
 | run fails at `/do/1/merge`: `No pull request to merge`, `Repository unavailable: GitHub answered 401: Bad credentials ...` | `tend run get` | the agent reported no pull request, or the platform token is invalid or lacks scope |
-| `cannot create a sandbox from template claude-code: image tendworks/sandbox-claude-code:<tag> is not on the sandbox host` | run or chat | build the sandbox image (`--profile sandbox-images build`); the tag must match the template |
-| `agent profile assistant lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker` | chat or run | worker lacks the read token (compose sets the URL); run `scripts/setup-env.sh` or set `TEND_API_READ_TOKEN`, then `up -d --wait` |
-| `FAIL: a sandbox cannot use the platform MCP server at ...` | `chat-assistant.sh` | the gateway is not running or `TEND_PLATFORM_MCP_URL` points elsewhere; `docker compose -f deploy/compose.yaml ps mcp-gateway` and `logs mcp-gateway` |
-| `Network <installation>_platform-mcp Resource is still in use` | `down` | sandboxes of MCP profiles are still attached to the gateway's network, which stays behind; remove the installation's sandboxes ([Reset](#reset)), then `down` again |
-| `the control plane refused the token (HTTP 401); set TEND_API_TOKEN or pass --token` | `tend` | export the value from `deploy/.env` (or pass `--token`) |
+| `cannot create a sandbox from template claude-code: image tendworks/sandbox-claude-code:<tag> is not on the sandbox host` | run or chat | build the sandbox image (`--profile sandbox-images build`) |
+| `isolation class gvisor needs the runsc runtime on the sandbox host` | run or chat | [install gVisor](#optional-gvisor) or use isolation class `container` |
+| `agent profile assistant lists the platform MCP server, but none is configured: ...` | chat or run | the worker lacks the read token; set `TEND_API_READ_TOKEN`, `up -d --wait` |
+| the `assistant` cannot reach its tools; `FAIL: a sandbox cannot use the platform MCP server at ...` | chat, `chat-assistant.sh` | `docker compose -f deploy/compose.yaml ps mcp-gateway` and `logs mcp-gateway`; remove a custom `TEND_PLATFORM_MCP_URL` (e.g. an old `host.docker.internal` value) from `deploy/.env`, `up -d --wait` |
+| `Network <installation>_platform-mcp Resource is still in use` | `down` | sandboxes of MCP profiles are still attached; remove the installation's sandboxes ([Reset](#reset)), then `down` again |
+| `the control plane refused the token (HTTP 401); ...` | `tend` | export the value from `deploy/.env` (or pass `--token`) |
 | 403 with a reason on a write | `tend`, UI | you used the read-only token |
-| `The control plane at http://localhost:8080 does not answer.` | smoke scripts | stack down or server exited; `docker compose ... ps` and `logs server --tail 20`; after code or contract changes rebuild with `up -d --build --wait` |
-| `The tend CLI is not built; run pnpm build first.` | `chat-assistant.sh` | `pnpm install && pnpm build` on the host |
-| `/ui/` answers 404, log says `web UI: no build at ...` | server log | the image has no UI build; rebuild with `up -d --build` |
-| sandboxes or volumes left after tests | `docker ps`, `docker volume ls` | a running stack of that installation removes its own with the [clean-up](#clean-up-of-sandboxes-and-session-volumes); for a stack that is gone, [Reset](#reset) |
-| `sandbox clean-up: cannot remove ...`; `tend status` shows `sandbox-cleanup` unhealthy | worker log; `GET /status` | the sandbox backend refused a removal (e.g. a volume still mounted by a container outside the platform); the next pass retries every 5 minutes. Check the named resource with `docker inspect`, remove what holds it, or restart the worker for a pass at once |
+| `The control plane at http://localhost:8080 does not answer.` | smoke scripts, `tend` | stack down or server exited; `docker compose ... ps` and `logs server --tail 20` |
+| UI not reachable from the phone | browser | `tailscale serve status` on the host; the phone signed in to the tailnet; HTTPS certificates enabled in the tailnet |
+| `/ui/` answers 404, log says `web UI: no build at ...` | server log | the image has no UI build; `up -d --build` |
+| stack down after a reboot | `docker compose ps` | Docker not enabled at boot (`sudo systemctl enable docker`), or you stopped the stack before (`stop` survives a reboot); `up -d --wait` |
+| `sandbox clean-up: cannot remove ...`; `sandbox-cleanup` unhealthy | worker log, `/status` | the sandbox backend refused a removal (e.g. a volume mounted by a container outside the platform); remove what holds it (`docker inspect`); the next pass retries within 5 minutes, or restart the worker |
+| sandboxes or volumes left after tests | `docker ps -a`, `docker volume ls` | a running stack of that installation removes its own; for a stack that is gone, [Reset](#reset) |
+| restore: `the stack is running` or refused over data | `scripts/restore.sh` | `docker compose -f deploy/compose.yaml stop`, then [Reset](#reset), then restore again |
+
+## Acceptance checklist
+
+Milestone 2 is accepted on the operator's Ubuntu host by following only this guide (success criterion in `docs/platform-architecture.md`, issue #66). Record each result in #66.
+
+| # | Check | How | Passes when |
+| --- | --- | --- | --- |
+| 1 | Fresh installation | [Install](#install) from the release candidate tag, with `scripts/setup-env.sh` and your own configuration directory | `tend status` healthy; `scripts/smoke/hello-developer.sh` PASS |
+| 2 | GitHub access, then `develop-issue` with `merge: ask` on a private repository | [GitHub access](#before-the-first-real-run-github-access), then `scripts/smoke/pull-request-ask.sh <issue>` or the binding with the issue labelled | the check script passes for the narrowed agent token; the run waits, you approve in the UI, the pull request is merged |
+| 3 | `assistant` chat from live state | `tend chat assistant` or the UI, while a run works: "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?" | each answer comes with a `tendworks` tool call and matches `tend run list`, `tend agent list`, `tend trigger list` |
+| 4 | Web UI on the phone over HTTPS | [Tailscale](#recommended-tailscale) | sign-in, status, a run's live transcript and a chat work at phone width; `http://` is never used |
+| 5 | Host reboot during a run | start `restart-developer`, `sudo reboot` while it works | the stack comes back by itself and the run completes with `resumed: 1` |
+| 6 | Update | [Update](#update) to the next tag | `tend status` healthy, migrations logged, runs, chats and transcripts kept |
+| 7 | Backup and restore | `scripts/backup.sh`, [Reset](#reset), `scripts/restore.sh <archive>`, `up -d --wait` | runs, chats and transcripts are back |
+| 8 | Nothing left behind | `scripts/check-github-agent-access.sh --repo OWNER/NAME --audit 30`; after all runs and chats ended, `docker ps -a --filter label=dev.tendworks.sandbox`, `docker volume ls --filter label=dev.tendworks.volume` | no direct pushes to `main`; no sandbox or session volume without a live task or open chat; `sandbox-cleanup` healthy |
+| 9 | Optional: gVisor (#17) | [Optional: gVisor](#optional-gvisor) | the run completes in a `runsc` sandbox |

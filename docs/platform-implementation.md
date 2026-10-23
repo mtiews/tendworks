@@ -64,7 +64,9 @@ tendworks/
     contract/
     e2e/
     fixtures/config/         # fakes and scripted profiles, layered on the starter configuration
+  scripts/                   # operator tools: setup-env.sh, backup.sh, restore.sh, check-github-agent-access.sh; smoke/
   docs/adr/
+  docs/releases/             # release notes per tag (migrations, configuration changes)
 ```
 
 Packages under `packages/` map to the domains; apps under `apps/` are only bundles for operations and can be split later without moving code.
@@ -239,14 +241,30 @@ Every domain owns a Postgres schema (`orchestration`, `agent_runtime`, `event_bu
 - **Version table:** each schema has its own `<schema>.schema_migrations` (version, name, applied at). No domain reads another's.
 - **On start:** each bundle migrates the domains it runs (worker: orchestration, agent runtime, event bus; server: event bus, human interaction, trigger gateway; the event bus is migrated by both, which the lock makes safe). Under the domain's advisory lock (`hashtext('<schema>.migrate')`), every migration above the recorded version runs in its own transaction together with its row in the version table, so concurrent starts migrate once.
 - **Migration 1** is the schema as the stores created it before versioned migrations, with its `create … if not exists` and `alter … add column if not exists` statements. It adopts such a store with its data.
-- **Failure:** a failed migration is rolled back, so the store stays at the version before it. The bundle logs `schema <schema>: migration <n> (<name>) failed: <error>` and stops working: the server answers only `GET /status`, the worker only `GET /health` (every other request gets 503), and both report the component `<schema>-schema` (e.g. `orchestration-schema`) as unhealthy, so `GET /status` shows it either way. A store at a newer version than the release knows fails the same way (no downgrades). The next start tries again.
+- **Failure:** a failed migration is rolled back, so the store stays at the version before it. The bundle logs `schema <schema>: migration <n> (<name>) failed: <error>` and stops working: the server answers only `GET /status`, the worker only `GET /health` (every other request gets 503; the control plane contract documents the server's `Platform stopped` problem on every operation, `tests/contract/openapi.test.ts` produces it), and both report the component `<schema>-schema` (e.g. `orchestration-schema`) as unhealthy, so `GET /status` shows it either way. A store at a newer version than the release knows fails the same way (no downgrades). The next start tries again.
 
 To add a migration to a domain:
 
 1. Append an entry to the domain's list in its Postgres adapter (e.g. `orchestrationMigrations` in `packages/orchestration/src/adapters/postgres-run-store.ts`) with the next `version`, a short stable `name` and its `sql`. Never edit or reorder a released migration; versions count up from 1 without gaps.
 2. Write the SQL for the store at the previous version. It need not be idempotent (the version table guards it), and it may use the domain's own tables only.
 3. Extend the adapter's integration test (`*.integration.test.ts`), which migrates a fresh store and adopts one created by migration 1 with its data; add data the new migration must carry over.
-4. Name the migration in the release notes.
+4. Name the migration in the release notes (`docs/releases/<tag>.md`).
+
+## Single-host deployment (milestone 2)
+
+Implemented (spec #54); acceptance on the operator's Ubuntu host (#66) is pending, then `v0.2.0` is tagged with `docs/releases/v0.2.0.md`. What it consists of, and where:
+
+| Part | Where |
+| --- | --- |
+| Releases | SemVer git tags, images built on the host from the tag; notes in `docs/releases/` |
+| Safe defaults | `scripts/setup-env.sh`; the server refuses to start without both tokens (`apiTokenProblems` in `packages/control-plane/src/api.ts`); `restart: unless-stopped`; engine UI in profile `debug`; `tests/architecture/deployment.test.ts` |
+| Configuration | [Starter and fixture configuration](#starter-and-fixture-configuration); agent secrets through the one-shot service `agent-secrets` (ADR 0008) |
+| Schema migrations | [Schema migrations](#schema-migrations) |
+| Backup and restore | `scripts/backup.sh`, `scripts/restore.sh` (`scripts/lib/stack.sh`), proven by `tests/e2e/backup-restore.test.ts` |
+| Sandboxes per installation, clean-up | [Claude Code harness](#claude-code-harness), session volumes paragraph; `tests/e2e/installations.test.ts` |
+| Platform MCP server on Linux | [Platform MCP server](#platform-mcp-server) (ADR 0019) |
+| Access from the operator's devices | operator guide only (ADR 0020); no platform change |
+| Operator guide | `docs/operator-guide.md`, with the acceptance checklist |
 
 ## Quality gates
 
@@ -271,3 +289,5 @@ To add a migration to a domain:
 - [x] Design review for milestone 1b (chat session model) once S2 works (ADR 0015, ADR 0016, ADR 0017)
 - [x] Design review for milestone 1c (web UI) (ADR 0018)
 - [x] Linux: an address at which sandboxes reach the platform MCP server: the MCP-only gateway (ADR 0019, Platform MCP server)
+- [x] Milestone 2 implemented (spec #54, tickets #57–#65)
+- [ ] Milestone 2 accepted on the operator's Ubuntu host (#66), then tag `v0.2.0`

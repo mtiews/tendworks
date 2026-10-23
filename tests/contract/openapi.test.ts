@@ -1,5 +1,13 @@
 import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
-import { createAgentRuntimeClient, createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
+import {
+  createAgentRuntimeClient,
+  createControlPlaneApi,
+  createOrchestrationClient,
+  createStoppedControlPlaneApi,
+  createTriggerGatewayClient,
+  loadConfiguration,
+  type ControlPlaneApiOptions,
+} from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
 import {
   createApprovals,
@@ -119,6 +127,51 @@ describe("control plane: status", () => {
 
     expect(response.status).toBe(503);
     expect(error).toMatchObject({ status: "unhealthy" });
+  });
+});
+
+describe("control plane: a stopped platform", () => {
+  const failed = createStaticHealthProbe("orchestration-schema", { status: "unhealthy", message: "migration 2 (add-index) failed" });
+  const stopped = createStoppedControlPlaneApi({ probes: [healthy, failed], reason: "schema orchestration: migration 2 (add-index) failed" });
+  const fetchStopped = contracts.controlPlane.guard((request) => stopped.fetch(request));
+  const json = (body: unknown) => ({ body: JSON.stringify(body), headers: { authorization: `Bearer ${API_TOKEN}`, "content-type": "application/json" } });
+  const read = { headers: { authorization: `Bearer ${API_TOKEN}` } };
+  // One valid request per operation but GET /status.
+  const requests: [string, string, RequestInit][] = [
+    ["GET", "/access", read],
+    ["POST", "/runs", json({ workflow: "hello-agent" })],
+    ["GET", "/runs", read],
+    ["GET", "/runs/r-1", read],
+    ["GET", "/runs/r-1/tasks/t-1/transcript", read],
+    ["GET", "/runs/r-1/tasks/t-1/transcript/stream", read],
+    ["POST", "/chats", json({ agent: "fake-assistant", text: "Hello" })],
+    ["GET", "/chats", read],
+    ["GET", "/chats/c-1", read],
+    ["POST", "/chats/c-1/messages", json({ text: "Hello?" })],
+    ["POST", "/chats/c-1/cancel", read],
+    ["POST", "/chats/c-1/end", read],
+    ["GET", "/chats/c-1/transcript", read],
+    ["GET", "/chats/c-1/transcript/stream", read],
+    ["GET", "/agents", read],
+    ["GET", "/triggers", read],
+    ["GET", "/notifications", read],
+    ["POST", "/pull-requests/merge", json({ run: "r-1", pullRequest: PR })],
+    ["GET", "/approval-requests", read],
+    ["POST", "/approval-requests/a-1/decision", json({ decision: "approve" })],
+  ];
+
+  it("still reports its status, naming the failed component", async () => {
+    const response = await fetchStopped(new Request("http://tend.test/status"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ status: "unhealthy", components: expect.arrayContaining([expect.objectContaining({ name: "orchestration-schema" })]) });
+  });
+
+  it.each(requests)("refuses %s %s with 503 Platform stopped", async (method, path, init) => {
+    const response = await fetchStopped(new Request(`http://tend.test${path}`, { method, ...init }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ title: "Platform stopped", status: 503 });
   });
 });
 

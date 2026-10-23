@@ -4,21 +4,23 @@ Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform. Agent
 
 ## Current state
 
-The walking skeleton is done up to milestone 1c:
+The walking skeleton is done up to milestone 1c, and milestone 2 is implemented (acceptance on Ubuntu pending, then the first release `v0.2.0`):
 
 | Milestone | What works |
 | --- | --- |
 | 1: automated path | GitHub issue labelled `ready-for-agent` → time trigger → workflow → `developer` agent (Claude Code via ACP in a Docker sandbox) → pull request → merge behind a policy gate (`auto` or `ask`) → notification; runs resume after a platform restart |
 | 1b: chat path | chats with an agent through the API and `tend chat`, with a read-only MCP server on the platform for chat agents |
 | 1c: web UI | single-page app under `/ui/`: status, runs with live transcripts, approvals, notifications, chats; localhost only, signed in with an API token |
+| 2: single-host deployment on Linux | install from a release tag on Ubuntu 24.04 with Docker Engine: no default tokens, restart after reboot, schema migrations, backup and restore scripts, sandboxes per installation with orphan clean-up, the platform MCP server through an MCP-only gateway, access from your devices through a TLS layer such as Tailscale ([release notes](docs/releases/v0.2.0.md)) |
 
-There is no identity (OIDC), no TLS, no egress control and no Action Gateway yet. The stack is meant for one operator on one machine.
+There is no identity (OIDC), no TLS inside the platform, no egress control and no Action Gateway yet. The stack is meant for one operator on one host.
 
 ## Documentation
 
 | Document | For |
 | --- | --- |
-| [docs/operator-guide.md](docs/operator-guide.md) | installing and running Tendworks on your own Linux machine: prerequisites, secrets, access, known gaps, operations |
+| [docs/operator-guide.md](docs/operator-guide.md) | installing, running and updating Tendworks on your own Linux host: install from a tag, secrets, access from your devices, backup and restore, troubleshooting, acceptance checklist |
+| [docs/releases/](docs/releases/) | release notes per tag: migrations, configuration changes, update steps |
 | [docs/platform-architecture.md](docs/platform-architecture.md) | domains, seams and standards, data model, security, roadmap |
 | [docs/platform-implementation.md](docs/platform-implementation.md) | tech stack, repo structure, walking skeleton, smoke tests, open items |
 | [docs/software-factory.md](docs/software-factory.md) | the first application on Tendworks |
