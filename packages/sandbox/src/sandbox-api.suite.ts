@@ -22,6 +22,8 @@ export interface SandboxApiSuiteContext {
   image: string;
   /** The same backend as `api`, but serving another installation. */
   neighbour: SandboxApi;
+  /** A network on the backend that `api` allows sandboxes to join. */
+  network: string;
 }
 
 /**
@@ -346,6 +348,24 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
         await neighbour.destroy(theirs.id);
         await neighbour.deleteVolume(volume);
       }
+    });
+
+    it("joins a network the installation allows when asked, and lists it", async () => {
+      const joined = await context.api.create(template(), { networks: [context.network] });
+      created.push(joined.id);
+      const plain = await create();
+
+      const listed = await context.api.list();
+
+      expect(violations("Sandbox", joined)).toEqual([]);
+      expect(joined.networks).toEqual([context.network]);
+      expect(listed.find(({ id }) => id === joined.id)?.networks).toEqual([context.network]);
+      expect(plain).not.toHaveProperty("networks");
+      expect(listed.find(({ id }) => id === plain.id)).not.toHaveProperty("networks");
+    });
+
+    it("refuses a network the installation does not allow", async () => {
+      await expect(context.api.create(template(), { networks: ["not-allowed-for-sandboxes"] })).rejects.toMatchObject({ code: "invalid-request" });
     });
 
     it("keeps files of different sandboxes apart", async () => {

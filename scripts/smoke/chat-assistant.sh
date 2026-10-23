@@ -20,8 +20,8 @@
 #   `suspend: true` and TENDWORKS_PLATFORM_GITHUB_TOKEN set (pull request smoke test, step 9),
 #   with no open playground issue labelled ready-for-agent (each would start a paid run).
 #   Another binding: TEND_SMOKE_BINDING=<name>.
-# - Linux: TEND_PLATFORM_MCP_URL set to an address sandboxes reach the server's port at
-#   (docs); the script checks it from a sandbox before the chat starts.
+# - The platform MCP server is reached through the MCP-only gateway (ADR 0019) on Linux and
+#   Docker Desktop alike; the script checks it from a sandbox before the chat starts.
 # - Optional: lower the idle wait. The script waits for the assistant's idle time
 #   (spec.chat.idleMinutes, 5 in agents/assistant.md of the configuration). To wait less, set it
 #   to 1 there, restart server and worker, and run with TEND_SMOKE_IDLE_MINUTES=1. Revert
@@ -150,8 +150,10 @@ if [ "$BINDING" = playground-ready-for-agent ] && command -v gh >/dev/null; then
 fi
 
 # The address the worker gives chat sessions for the platform MCP server, tried from a
-# container of the assistant's sandbox image on the sandbox network, as a sandbox sees it.
+# container of the assistant's sandbox image on the sandbox network and the MCP-only
+# gateway's network, as the assistant's sandboxes see it.
 MCP_URL=$(worker_env TEND_PLATFORM_MCP_URL)
+MCP_NETWORK=$(worker_env TEND_PLATFORM_MCP_NETWORK)
 READ_TOKEN=$(worker_env TEND_API_READ_TOKEN)
 NETWORK="$INSTALLATION-sandboxes"
 # The template names the image by its repository; the worker holds the pin (TEND_SANDBOX_IMAGES).
@@ -161,17 +163,20 @@ IMAGE=$(worker_env TEND_SANDBOX_IMAGES | tr ', ' '\n\n' | grep -m 1 -E "^$TEMPLA
 docker network inspect "$NETWORK" >/dev/null 2>&1 ||
   docker network create --driver bridge --opt com.docker.network.bridge.enable_icc=false "$NETWORK" >/dev/null
 echo "Checking the platform MCP server at $MCP_URL from a sandbox ..."
-MCP_TOOLS=$(MSYS_NO_PATHCONV=1 MCP_URL="$MCP_URL" READ_TOKEN="$READ_TOKEN" docker run --rm --network "$NETWORK" \
+PROBE=$(MSYS_NO_PATHCONV=1 MCP_URL="$MCP_URL" READ_TOKEN="$READ_TOKEN" docker create --network "$NETWORK" \
   -e MCP_URL -e READ_TOKEN --entrypoint node "$IMAGE" -e '
     fetch(process.env.MCP_URL, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer " + process.env.READ_TOKEN },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     }).then((r) => r.json()).then((b) => console.log(b.result.tools.map((t) => t.name).sort().join(" ")), (e) => console.log("unreachable: " + e.cause?.code));
-  ' 2>&1 || true)
+  ')
+[ -z "$MCP_NETWORK" ] || docker network connect "$MCP_NETWORK" "$PROBE" >/dev/null
+MCP_TOOLS=$(docker start --attach "$PROBE" 2>&1 || true)
+docker rm -f "$PROBE" >/dev/null
 if [ "$MCP_TOOLS" != "get_run list_agents list_runs list_triggers" ]; then
   echo "FAIL: a sandbox cannot use the platform MCP server at $MCP_URL: $MCP_TOOLS"
-  echo "On Linux set TEND_PLATFORM_MCP_URL (docs/platform-implementation.md, chat smoke test)."
+  echo "Check that the gateway runs: docker compose -f deploy/compose.yaml ps mcp-gateway"
   exit 1
 fi
 echo "  ok    a sandbox lists the platform tools: $MCP_TOOLS"

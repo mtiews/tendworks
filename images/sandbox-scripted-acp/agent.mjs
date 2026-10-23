@@ -12,8 +12,13 @@
 // A prompt that starts with "chat:" is a chat turn instead (end-to-end chat tests): it
 // answers at once with every chat prompt of the session so far ("I remember: a | b"),
 // kept in the session file, so it shows that a chat holds one agent session across turns.
+//
 // A prompt that starts with "secret:" answers with the SHA-256 digest of SCRIPTED_SECRET,
 // so the end-to-end tests see an agent secret arrive without the value in a transcript.
+//
+// A prompt "mcp:<tool>" calls that tool without arguments on the first HTTP MCP server the
+// session was given (the platform MCP server) and answers with what it returned, or with
+// why the call failed: "mcp <tool>: <text>" or "mcp <tool> failed: <reason>".
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -23,7 +28,7 @@ import * as acp from "@agentclientprotocol/sdk";
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? "/tmp/scripted-acp";
 const turnMs = Number(process.env.SCRIPTED_TURN_SECONDS ?? "90") * 1000;
 const sessionFile = (sessionId) => join(configDir, "projects", `${sessionId}.jsonl`);
-const sessions = new Map(); // sessionId -> { cwd, resumed }
+const sessions = new Map(); // sessionId -> { cwd, resumed, mcpServers }
 let cancel = () => {};
 // Cumulative for the session, as ACP defines it; this process knows only its own turns.
 let cost = 0;
@@ -34,18 +39,18 @@ const connection = acp
   .agent({ name: "scripted-acp-agent" })
   .onRequest(acp.methods.agent.initialize, () => ({
     protocolVersion: acp.PROTOCOL_VERSION,
-    agentCapabilities: { sessionCapabilities: { resume: {} } },
+    agentCapabilities: { sessionCapabilities: { resume: {} }, mcpCapabilities: { http: true } },
   }))
   .onRequest(acp.methods.agent.session.new, (ctx) => {
     const sessionId = `scripted-${crypto.randomUUID()}`;
     mkdirSync(join(configDir, "projects"), { recursive: true });
     writeFileSync(sessionFile(sessionId), `${JSON.stringify({ cwd: ctx.params.cwd })}\n`);
-    sessions.set(sessionId, { cwd: ctx.params.cwd, resumed: false });
+    sessions.set(sessionId, { cwd: ctx.params.cwd, resumed: false, mcpServers: ctx.params.mcpServers ?? [] });
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.resume, (ctx) => {
     if (!existsSync(sessionFile(ctx.params.sessionId))) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
-    sessions.set(ctx.params.sessionId, { cwd: ctx.params.cwd, resumed: true });
+    sessions.set(ctx.params.sessionId, { cwd: ctx.params.cwd, resumed: true, mcpServers: ctx.params.mcpServers ?? [] });
     return {};
   })
   .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
@@ -56,6 +61,15 @@ const connection = acp
       // The SHA-256 digest of SCRIPTED_SECRET (an agent secret a profile passes in), never the value.
       const value = process.env.SCRIPTED_SECRET;
       const text = value ? `secret digest ${createHash("sha256").update(value).digest("hex")}` : "no secret";
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
+    if (said.startsWith("mcp:")) {
+      const tool = said.slice(4).trim();
+      const text = await callTool(session.mcpServers, tool).then(
+        (result) => `mcp ${tool}: ${result}`,
+        (error) => `mcp ${tool} failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
       await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
       return { stopReason: "end_turn" };
     }
@@ -88,5 +102,25 @@ const connection = acp
   })
   .onNotification(acp.methods.agent.session.cancel, () => cancel())
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+
+/** Calls a tool on the first HTTP MCP server with one JSON-RPC request (the platform's server is stateless). */
+async function callTool(mcpServers, tool) {
+  const server = mcpServers.find((candidate) => candidate.type === "http");
+  if (!server) throw new Error("no HTTP MCP server configured for this session");
+  const response = await fetch(server.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json, text/event-stream",
+      ...Object.fromEntries(server.headers.map(({ name, value }) => [name, value])),
+    },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: tool, arguments: {} } }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const { result, error } = await response.json();
+  if (error) throw new Error(error.message);
+  return result.content.map((part) => part.text ?? "").join("");
+}
 
 await connection.closed;

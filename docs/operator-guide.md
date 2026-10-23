@@ -28,6 +28,7 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 | `server` | control plane API, trigger gateway, human interaction, platform MCP server (`/mcp`), web UI (`/ui/`) | `127.0.0.1:8080` (`TEND_PORT`) |
 | `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy | no |
 | `agent-secrets` | runs once on `up` and ends (`Exited (0)` is normal): hands the worker the `TENDWORKS_AGENT_*` lines of `deploy/.env`, without network ([Secret references](#secret-references-adr-0008)) | no |
+| `mcp-gateway` | MCP-only gateway: forwards `/mcp` to the server and refuses every other path; sandboxes of profiles with `mcp: [tendworks]` reach it on the internal network `<installation>_platform-mcp` (ADR 0019) | no |
 | sandboxes | one container per agent session (`<installation>-sandbox-<id>`), created by the worker, on the Docker network `<installation>-sandboxes`; the installation is the compose project name, `tendworks` by default | no |
 
 Sandbox images are never pulled by the platform; you build them once (see [Install](#install)).
@@ -133,7 +134,7 @@ Two places, strictly separated:
 | `TEND_PORT` | `8080` | API, UI and MCP port, published on `127.0.0.1` only |
 | `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only and only with `--profile debug` |
 | `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; only for parallel stacks. Volume, image, sandbox, session volume and sandbox network names follow it |
-| `TEND_PLATFORM_MCP_URL` | `http://host.docker.internal:<TEND_PORT>/mcp` | where sandboxes reach the platform MCP server; no working value on Linux yet ([Known gaps](#known-gaps-on-linux)) |
+| `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it empty unless you put your own proxy in the gateway's place |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
 
 ### Your own configuration directory
@@ -228,6 +229,7 @@ A reference outside its prefix is a configuration error at startup. `TEND_API_TO
 ### Residual risks the docs name
 
 - **Sandboxes and the API port.** Sandboxes run on their own network without the platform's services, but where the Docker host forwards the published port to them (Docker Desktop via `host.docker.internal`), only the tokens guard the API. On a Linux engine, sandboxes do not reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). They still reach everything else the bridge network routes to, including your LAN and the internet.
+- **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network `<installation>_platform-mcp` and can reach each other on it; Docker can forbid traffic only between all containers of a network, which would cut off the gateway too (ADR 0019). Other sandboxes stay apart: the sandbox network forbids traffic between its containers, and they never join the gateway's network. Through the gateway, sandboxes reach only `/mcp`, read-only.
 - **The agent token could merge.** Without repository rulesets (e.g. a private repository on GitHub's free plan) the agent token can technically merge its own pull request; the platform's merge gate only governs what the platform does (`docs/platform-architecture.md`). Protect the target branch with a ruleset where you can.
 - **Token in browser storage.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device". A script injected into the UI could read it; a strict CSP and sanitised agent output are the guards (ADR 0018). Don't tick "Stay signed in" on a shared browser.
 - **Socket proxy.** It filters paths, not request bodies: whoever reaches it can create a privileged container, i.e. become root on the host. Only the worker reaches it (ADR 0001).
@@ -253,8 +255,8 @@ Then on the laptop: `http://localhost:8080/` in the browser, and `tend` with its
 | --- | --- |
 | Stack, sandboxes, socket proxy, restart and resume | work on a Linux Docker engine: CI runs the full compose stack and the end-to-end tests (scripted ACP agent in real sandboxes, API and browser) on Ubuntu (`.github/workflows/ci.yml`) |
 | `developer` agent with real Claude Code, pull request, merge, approval | the manual smoke tests are documented, but the docs do not record a run on a Linux host; expect it to work, verify with the [first workloads](#first-test-workloads) |
-| Platform MCP server from sandboxes | **does not work** (issue #50, open item in `docs/platform-implementation.md`). Sandboxes get no `host.docker.internal`, and the bridge gateway refuses the connection because the port is published on `127.0.0.1` only. `assistant` chats (`mcp: [tendworks]`) cannot reach their `tendworks` tools; the issue rates this as blocking the `assistant` chat. There is no tested workaround; don't open the port to work around it |
-| Chats without the MCP server | the chat mechanics are covered by the end-to-end tests on Linux. To chat with Claude Code today, add a profile with `spec.chat` and without `spec.mcp` (below) |
+| Platform MCP server from sandboxes | works through the MCP-only gateway (ADR 0019): the end-to-end tests on Linux CI call a platform tool from a scripted chat and check that sandboxes reach only `/mcp`. The `assistant` chat with real Claude Code is not yet recorded on a Linux host |
+| Chats without the MCP server | the chat mechanics are covered by the end-to-end tests on Linux. A profile with `spec.chat` and without `spec.mcp` chats without the platform's tools (below) |
 | `gvisor` isolation class | **not verified** (issue #17). The adapter asks Docker for the runtime `runsc`, which must be installed and registered in the Docker daemon; there are no setup instructions yet |
 | Cleanup | session volumes, the sandbox network and old images are never cleaned up automatically (issue #48, see [Reset](#reset)) |
 | Approvals vs. pull requests changed on GitHub | a pull request merged or closed on GitHub while its run waits is not reflected on the approval request; reject then ends the run with `merged: false` even though the code is merged (issue #51) |
@@ -289,8 +291,8 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | 2 | Restart mid-run resumes the agent session | `scripts/smoke/restart-developer.sh` (steps 5–7) | as 1 | not yet recorded |
 | 3 | Labelled issue → pull request → merged with `merge: auto` | open an issue in your target repository, then `scripts/smoke/pull-request-auto.sh <issue>` (steps 8–12) | platform token; `suspend: true` removed from `playground-ready-for-agent`; `develop-issue` removed from `ask-before-merge`; server restarted | not yet recorded |
 | 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` (step 14) | as 3, with `develop-issue` in `ask-before-merge` (as in the starter configuration) | not yet recorded |
-| 5 | `assistant` chat answers from the live platform state | `scripts/smoke/chat-assistant.sh` (steps 15–18) | scripted ACP image, the fixture configuration (`restart-scripted`), binding not suspended, read token | **fails** (MCP, issue #50); the script checks the MCP address first and stops |
-| 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (steps 19–23) | as 4 and 5 | not yet recorded; the `assistant` chat fails as in 5 |
+| 5 | `assistant` chat answers from the live platform state | `scripts/smoke/chat-assistant.sh` (steps 15–18) | scripted ACP image, the fixture configuration (`restart-scripted`), binding not suspended, read token | not yet recorded; the script checks the MCP gateway from a sandbox first |
+| 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (steps 19–23) | as 4 and 5 | not yet recorded |
 
 Before you start:
 
@@ -329,6 +331,7 @@ Before you start:
 | agent sessions (workspace, harness home) | volumes `<installation>-volume-<task>-workspace` and `-session`, labels `dev.tendworks.volume`, `dev.tendworks.installation` and `dev.tendworks.owner` (the task); removed when a task or chat ends, kept while a chat is open | **no** |
 | sandboxes | containers `<installation>-sandbox-<id>`, labels `dev.tendworks.sandbox`, `dev.tendworks.installation` and `dev.tendworks.owner` | **no** |
 | sandbox network | `<installation>-sandboxes`, labels `dev.tendworks.sandbox-network` and `dev.tendworks.installation` | **no** |
+| MCP gateway network | `<installation>_platform-mcp` (compose) | yes, once no sandbox is attached ([Reset](#reset)) |
 | images | `tendworks-server`, `tendworks-worker`, `tendworks/sandbox-claude-code:<tag>` | **no** |
 
 Names assume the default project name `tendworks`; with another `COMPOSE_PROJECT_NAME`, replace `tendworks` (the installation) accordingly. Several stacks on one Docker engine (e.g. e2e stacks) never see or touch each other's sandboxes and session volumes.
@@ -375,16 +378,14 @@ docker compose -f deploy/compose.yaml up -d --wait
 ### Reset
 
 ```sh
-docker compose -f deploy/compose.yaml down -v
-```
-
-Removes the containers and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images (issue #48). With the stack down, remove those by label:
-
-```sh
+docker compose -f deploy/compose.yaml stop worker
 docker rm -f $(docker ps -aq --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox)
+docker compose -f deploy/compose.yaml down -v
 docker volume rm $(docker volume ls -q --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.volume)
 docker network rm tendworks-sandboxes
 ```
+
+`down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data` and `transcripts`: all runs, chats, approvals, notifications and transcripts. It does **not** remove sandboxes, session volumes, the sandbox network or images (issue #48), hence the other commands. Remove the sandboxes before `down` (with the worker stopped, so it starts none meanwhile): while a sandbox of an MCP profile is still attached to the gateway's network, `down` cannot remove that network and leaves it behind ("Resource is still in use").
 
 Replace `tendworks` with your project name if you set one. Sandboxes and volumes created before `v0.2.0` have no installation label; find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks and test runs on the same engine used the same names then.
 
@@ -418,8 +419,9 @@ Replace `tendworks` with your project name if you set one. Sandboxes and volumes
 | issue labelled but no new run | | each issue fires once per binding, also after a failed run (ADR 0006); start it by hand with `POST /runs` |
 | run fails at `/do/1/merge`: `No pull request to merge`, `Repository unavailable: GitHub answered 401: Bad credentials ...` | `tend run get` | the agent reported no pull request, or the platform token is invalid or lacks scope |
 | `cannot create a sandbox from template claude-code: image tendworks/sandbox-claude-code:<tag> is not on the sandbox host` | run or chat | build the sandbox image (`--profile sandbox-images build`); the tag must match the template |
-| `agent profile assistant lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker` | chat or run | worker lacks one of them. On Linux, a set URL still does not work (issue #50) |
-| chat smoke script: hint to set `TEND_PLATFORM_MCP_URL` (`On Linux set TEND_PLATFORM_MCP_URL ...`) | `chat-assistant.sh` | the sandbox cannot reach the MCP address; known Linux gap (issue #50) |
+| `agent profile assistant lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker` | chat or run | worker lacks the read token (compose sets the URL); run `scripts/setup-env.sh` or set `TEND_API_READ_TOKEN`, then `up -d --wait` |
+| `FAIL: a sandbox cannot use the platform MCP server at ...` | `chat-assistant.sh` | the gateway is not running or `TEND_PLATFORM_MCP_URL` points elsewhere; `docker compose -f deploy/compose.yaml ps mcp-gateway` and `logs mcp-gateway` |
+| `Network <installation>_platform-mcp Resource is still in use` | `down` | sandboxes of MCP profiles are still attached to the gateway's network, which stays behind; remove the installation's sandboxes ([Reset](#reset)), then `down` again |
 | `the control plane refused the token (HTTP 401); set TEND_API_TOKEN or pass --token` | `tend` | export the value from `deploy/.env` (or pass `--token`) |
 | 403 with a reason on a write | `tend`, UI | you used the read-only token |
 | `The control plane at http://localhost:8080 does not answer.` | smoke scripts | stack down or server exited; `docker compose ... ps` and `logs server --tail 20`; after code or contract changes rebuild with `up -d --build --wait` |

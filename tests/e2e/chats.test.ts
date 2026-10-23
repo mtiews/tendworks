@@ -164,6 +164,24 @@ describe("chats", () => {
     },
   );
 
+  it.skipIf(!credentialSelected())(
+    "lets the agent of a profile that lists the platform MCP server call one of its tools through the gateway",
+    { timeout: 180_000 },
+    async () => {
+      // "mcp:<tool>" makes the scripted agent call that tool on the MCP server its session was given.
+      const { data: started, response } = await client.POST("/chats", { body: { agent: "scripted-mcp-assistant", text: "mcp:list_agents" } });
+      expect(response.status).toBe(201);
+      const chatId = started!.id;
+      const answered = await waiting(chatId, 120_000);
+      await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
+
+      expect(answered.status).toBe("input-required");
+      expect(answered.message).toMatch(/^mcp list_agents: /);
+      const listed = JSON.parse(answered.message!.replace(/^mcp list_agents: /, "")) as { items: { name: string }[] };
+      expect(listed.items.map((agent) => agent.name)).toContain("scripted-mcp-assistant");
+    },
+  );
+
   it.skipIf(!credentialSelected())("cancels a long turn in the sandbox; the chat stays open in the same session", { timeout: 180_000 }, async () => {
     // A prompt without "chat:" makes the scripted agent work for a long time.
     const { data: started } = await client.POST("/chats", { body: { agent: "scripted-assistant", text: "Work for a long time." } });

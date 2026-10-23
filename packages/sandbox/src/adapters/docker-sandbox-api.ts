@@ -2,6 +2,7 @@ import { request as httpRequest } from "node:http";
 import type { Socket } from "node:net";
 import { posix } from "node:path";
 import {
+  allowedNetworks,
   assertAbsolutePath,
   assertInstallation,
   assertSandboxId,
@@ -41,6 +42,12 @@ export interface DockerSandboxApiOptions {
    * for tests that do not care about the network.
    */
   sandboxNetwork?: boolean;
+  /**
+   * Networks sandboxes may join on request besides the sandbox network, e.g. a gateway's
+   * network that the deployment created; none by default. Sandboxes on one of them can
+   * reach every container on it, including each other unless the network forbids it.
+   */
+  networks?: readonly string[];
 }
 
 const runtimes: Record<IsolationClass, string> = { container: "runc", gvisor: "runsc" };
@@ -147,6 +154,7 @@ export function createDockerSandboxApi({
   installation = defaultInstallation,
   labels: extraLabels = {},
   sandboxNetwork = true,
+  networks: allowed = [],
 }: DockerSandboxApiOptions): SandboxApi {
   assertInstallation(installation);
   const containerName = (sandboxId: string) => `${installation}-sandbox-${sandboxId}`;
@@ -226,8 +234,9 @@ export function createDockerSandboxApi({
     }));
 
   const api: SandboxApi = {
-    async create(template, { volumes = [], owner } = {}) {
+    async create(template, { volumes = [], owner, networks: requested = [] } = {}) {
       assertVolumeMounts(volumes);
+      const networks = allowedNetworks(requested, allowed);
       if (sandboxNetwork) await ensureNetwork();
       const id = newSandboxId();
       const isolationClass = template.spec.isolationClass ?? defaultIsolationClass;
@@ -282,12 +291,19 @@ export function createDockerSandboxApi({
         throw new Error(`creating the sandbox failed: ${created.status} ${message}`);
       }
 
-      const started = await call("POST", `/containers/${containerName(id)}/start`);
-      if (!started.ok) {
-        const error = await failure(started, "starting the sandbox");
+      const discard = async (error: Error) => {
         await call("DELETE", `/containers/${containerName(id)}?force=true&v=true`);
-        throw error;
+        return error;
+      };
+      // Joined before it starts, so nothing in it runs before it is on every network.
+      for (const joined of networks) {
+        const connected = await call("POST", `/networks/${encodeURIComponent(joined)}/connect`, { json: { Container: containerName(id) } });
+        if (!connected.ok) throw await discard(await failure(connected, `joining the network ${joined}`));
+        await connected.body?.cancel();
       }
+
+      const started = await call("POST", `/containers/${containerName(id)}/start`);
+      if (!started.ok) throw await discard(await failure(started, "starting the sandbox"));
 
       const sandbox: Sandbox = {
         id,
@@ -296,18 +312,26 @@ export function createDockerSandboxApi({
         state: "running",
         createdAt: new Date().toISOString(),
         ...(owner === undefined ? {} : { owner }),
+        ...(networks.length === 0 ? {} : { networks }),
       };
       return sandbox;
     },
     async list() {
       const response = await call("GET", `/containers/json?all=true&${filters(LABEL.sandbox)}`);
       if (!response.ok) throw await failure(response, "listing the sandboxes");
-      const containers = (await response.json()) as { Names: string[]; Labels: Labels; State: string; Created: number }[];
-      return containers.flatMap(({ Names, Labels: found, State, Created }): Sandbox[] => {
+      const containers = (await response.json()) as {
+        Names: string[];
+        Labels: Labels;
+        State: string;
+        Created: number;
+        NetworkSettings?: { Networks?: Record<string, unknown> | null };
+      }[];
+      return containers.flatMap(({ Names, Labels: found, State, Created, NetworkSettings }): Sandbox[] => {
         const id = found?.[LABEL.sandbox];
         if (!Names.some((name) => ours(name.replace(/^\//, ""), id, found, containerName)) || !sandboxIdPattern.test(id!)) return [];
         const isolationClass = isolationClasses.find((candidate) => candidate === found?.[LABEL.isolationClass]) ?? defaultIsolationClass;
         const owner = found?.[LABEL.owner];
+        const networks = allowed.filter((network) => network in (NetworkSettings?.Networks ?? {}));
         return [
           {
             id: id!,
@@ -316,6 +340,7 @@ export function createDockerSandboxApi({
             state: State === "running" ? "running" : "stopped",
             createdAt: new Date(Created * 1000).toISOString(),
             ...(owner === undefined ? {} : { owner }),
+            ...(networks.length === 0 ? {} : { networks }),
           },
         ];
       });

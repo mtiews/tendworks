@@ -68,13 +68,15 @@ for (const profile of profiles) {
     if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
-// The platform MCP server (ADR 0016): its address as sandboxes reach it (configuration,
-// since it depends on how sandboxes reach the server's published port) and the read-only
-// token. Both go only to sessions of profiles that list it (mcp: [tendworks]); the API
-// token never enters a sandbox. Never log the token.
+// The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
+// token, and the network of the MCP-only gateway that sandboxes reach it on (ADR 0019).
+// They go only to sessions of profiles that list it (mcp: [tendworks]), whose sandboxes
+// alone join that network; the API token never enters a sandbox. Never log the token.
 const platformMcpUrl = process.env.TEND_PLATFORM_MCP_URL || undefined;
+const platformMcpNetwork = process.env.TEND_PLATFORM_MCP_NETWORK || undefined;
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
-const platformMcp = platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken } : undefined;
+const platformMcp =
+  platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken, ...(platformMcpNetwork ? { network: platformMcpNetwork } : {}) } : undefined;
 for (const profile of profiles) {
   if (listsPlatformMcpServer(profile) && !platformMcp) {
     console.warn(`agent profile ${profile.metadata.name}: lists the platform MCP server, but TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN is not set; its tasks will fail until this is fixed`);
@@ -82,7 +84,11 @@ for (const profile of profiles) {
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}) }),
+  sandboxes: createDockerSandboxApi({
+    url: sandboxBackendUrl,
+    ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}),
+    networks: platformMcpNetwork ? [platformMcpNetwork] : [],
+  }),
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,

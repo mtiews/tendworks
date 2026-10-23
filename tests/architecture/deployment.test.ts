@@ -10,8 +10,18 @@ const composeText = read("compose.yaml");
 const compose = parse(composeText) as {
   services: Record<
     string,
-    { profiles?: string[]; restart?: string; ports?: string[]; environment?: Record<string, unknown>; command?: string[]; depends_on?: Record<string, { condition: string }> }
+    {
+      image?: string;
+      profiles?: string[];
+      restart?: string;
+      ports?: string[];
+      environment?: Record<string, unknown>;
+      command?: string[];
+      networks?: string[];
+      depends_on?: Record<string, { condition: string }>;
+    }
   >;
+  networks?: Record<string, { internal?: boolean } | null>;
 };
 const services = Object.entries(compose.services);
 /** Services that run once and end, which others wait for (e.g. the agent secrets exporter). */
@@ -49,6 +59,19 @@ describe("the compose stack", () => {
       "temporal-ui": ["127.0.0.1:${TEND_ENGINE_UI_PORT:-8233}:8080"],
     });
     expect(compose.services.temporal?.command).toContain("--headless");
+  });
+
+  it("lets sandboxes reach the platform MCP server only through the gateway, on an internal network of its own", () => {
+    const { worker, "mcp-gateway": gateway } = compose.services;
+    const url = new URL(/:-([^}]*)\}$/.exec(String(worker?.environment?.TEND_PLATFORM_MCP_URL))![1]!);
+    const onNetwork = services.filter(([, service]) => service.networks?.includes("platform-mcp")).map(([name]) => name);
+
+    expect(url.hostname).toBe("mcp-gateway");
+    expect(url.pathname).toBe("/mcp");
+    expect(worker?.environment?.TEND_PLATFORM_MCP_NETWORK).toBe("${COMPOSE_PROJECT_NAME}_platform-mcp");
+    expect(onNetwork).toEqual(["mcp-gateway"]);
+    expect(compose.networks?.["platform-mcp"]?.internal).toBe(true);
+    expect(gateway?.image).toMatch(/:\d+\.\d+\.\d+/);
   });
 });
 

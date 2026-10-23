@@ -126,6 +126,24 @@ services:
       timeout: 3s
       retries: 30
 
+  # MCP-only gateway (ADR 0019): the one way from sandboxes to the platform MCP server.
+  # It forwards only /mcp to the server and refuses every other path. It shares the
+  # internal network platform-mcp only with sandboxes of agent profiles that list the
+  # platform MCP server; other sandboxes cannot reach it. Publishes nothing.
+  # Residual risk: sandboxes on that network can reach each other (Docker can forbid
+  # traffic only between all containers of a network, which would cut off the gateway too).
+  mcp-gateway:
+    image: nginx:1.30.6-alpine
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - ./mcp-gateway/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - default
+      - platform-mcp
+
   worker:
     build:
       context: ..
@@ -143,10 +161,13 @@ services:
       TEND_CONTROL_PLANE_URL: http://server:8080
       TEND_API_TOKEN: ${TEND_API_TOKEN:-}
       # The platform MCP server (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)):
-      # its address as sandboxes reach the server's published port, and the read-only token
-      # it is read with. Only sessions of agent profiles that list it (mcp: [tendworks]) get
-      # both, from the agent runtime itself; no profile can reference them.
-      TEND_PLATFORM_MCP_URL: ${TEND_PLATFORM_MCP_URL:-http://host.docker.internal:${TEND_PORT:-8080}/mcp}
+      # its address as sandboxes reach it through the MCP-only gateway, the gateway's network
+      # (ADR 0019 (sandboxes-reach-the-platform-mcp-server-through-an-mcp-only-gateway)) and
+      # the read-only token it is read with. Only sessions of agent profiles that list it
+      # (mcp: [tendworks]) get them, from the agent runtime itself, and only their sandboxes
+      # join the network; no profile can reference them.
+      TEND_PLATFORM_MCP_URL: ${TEND_PLATFORM_MCP_URL:-http://mcp-gateway:8080/mcp}
+      TEND_PLATFORM_MCP_NETWORK: ${COMPOSE_PROJECT_NAME}_platform-mcp
       TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
       # The installation, named after the compose project: sandboxes, session volumes and
       # the sandbox network are named <installation>-sandbox-<id>, <installation>-volume-<name>
@@ -229,6 +250,11 @@ services:
 
 networks:
   sandbox-backend:
+    internal: true
+  # The MCP-only gateway's network; sandboxes of MCP profiles join it (mcp-gateway above).
+  # `down` leaves it behind ("Resource is still in use") while such a sandbox is still
+  # attached: remove the installation's sandboxes first (docs/operator-guide.md, "Reset").
+  platform-mcp:
     internal: true
 
 volumes:

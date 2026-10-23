@@ -26,8 +26,9 @@ export interface Sandboxes {
   /**
    * Volumes outlive the sandbox, so a later sandbox mounting them carries on with their files.
    * The owner (the task the sandbox works for) is recorded on the sandbox and its new volumes.
+   * The sandbox also joins the given networks (only those the installation allows).
    */
-  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[]; owner?: string }): Promise<{ id: string }>;
+  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[]; owner?: string; networks?: string[] }): Promise<{ id: string }>;
   /** Runs a command and waits for it to finish; a non-zero exit code is not an error. */
   exec(sandboxId: string, request: ExecRequest): Promise<ExecResult>;
   attach(sandboxId: string, request: ExecRequest): Promise<SandboxProcess>;
