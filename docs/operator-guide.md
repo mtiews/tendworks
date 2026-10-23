@@ -345,35 +345,29 @@ pnpm install && pnpm build                                                 # for
 
 - The sandbox image pin lives only in `deploy/compose.yaml`; a template that names `tendworks/sandbox-claude-code` without a tag follows it. Rebuild the sandbox images when the pin changed.
 - Check `git log` for configuration schema changes; an invalid configuration stops the server (see the log).
-- Server and worker migrate their database tables at startup, each change in its own transaction, and log `store <domain>: migrated from version <n> to <m>`. Downgrades are not supported; back up first and prefer updating while no run is active.
+- Server and worker migrate their database tables at startup, each change in its own transaction, and log `store <domain>: migrated from version <n> to <m>`. Downgrades are not supported; back up first (`scripts/backup.sh`) and prefer updating while no run is active.
 
 ### Backup and restore
 
-The architecture's backup concept (WAL archiving, S3) is not built yet. For this profile, a cold copy of the volumes is the simple option. The commands are plain Docker and have not been exercised by the project: test a restore before you rely on it.
-
-Postgres and Temporal must be copied together; their states refer to each other (runs live in both).
+`scripts/backup.sh` writes one dated archive `<installation>-backup-<UTC time>.tar.gz` (mode 600) into `backups/` of the checkout, or into `--output-dir`. It holds a dump of the store, the workflow engine's state and the transcripts, taken together: the script stops server, worker and engine for the backup (usually under a minute) and starts the stack again afterwards. Because the three parts are consistent, runs that were working at backup time continue after a restore.
 
 ```sh
-docker compose -f deploy/compose.yaml stop
-for v in postgres-data temporal-data transcripts; do
-  docker run --rm -v tendworks_$v:/data:ro -v "$PWD/backup":/backup postgres:18.6-alpine \
-    tar czf /backup/$v.tgz -C /data .
-done
+scripts/backup.sh                            # the stack of deploy/.env, archive in backups/
+scripts/backup.sh --output-dir /mnt/backup   # elsewhere; keep a copy off the host
+```
+
+Restore into a stack without data, after `down -v` or on a new host with the same `deploy/.env` (images built as under [Install](#install)):
+
+```sh
+docker compose -f deploy/compose.yaml down -v          # deletes the stack's current data
+scripts/restore.sh backups/tendworks-backup-<time>.tar.gz
 docker compose -f deploy/compose.yaml up -d --wait
 ```
 
-Restore into empty volumes (after `down -v`, or on a new host with the same `deploy/.env`):
-
-```sh
-docker compose -f deploy/compose.yaml create        # creates the volumes without starting
-for v in postgres-data temporal-data transcripts; do
-  docker run --rm -v tendworks_$v:/data -v "$PWD/backup":/backup postgres:18.6-alpine \
-    tar xzf /backup/$v.tgz -C /data
-done
-docker compose -f deploy/compose.yaml up -d --wait
-```
-
-Session volumes hold the workspaces and harness state of open chats and interrupted tasks; back them up the same way only if you need to resume those. Also back up `deploy/.env` (securely) and keep your configuration in its own Git repository.
+- The restore refuses a running stack and a stack that holds data, and leaves the stack stopped.
+- A backup of an older release is migrated when the stack starts; one of a newer release is refused by the server (downgrades are not supported).
+- Both scripts take `--env-file` and `--project-name` and follow `COMPOSE_PROJECT_NAME`, like compose.
+- Not in a backup: `deploy/.env` (back it up yourself, securely), your configuration (keep it in its own Git repository) and session volumes. A restore therefore ends open agent sessions: chats and working tasks whose session volumes are gone start over with an empty workspace.
 
 ### Reset
 

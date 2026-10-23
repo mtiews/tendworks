@@ -19,3 +19,6 @@ tests/browser/playwright-report/
 
 # Fixture configuration assembled for the compose stack (tests/fixtures/fixture-configuration.ts)
 tests/fixtures/assembled-config/
+
+# Archives of scripts/backup.sh
+backups/
