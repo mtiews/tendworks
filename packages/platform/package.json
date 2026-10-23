@@ -3,12 +3,21 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile defaults, and how clients show costs and run origins.",
+  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile defaults, how clients show costs and run origins, and (under ./migrations, kept out of the browser-safe entry point) versioned schema migrations for one domain's store.",
   "exports": {
     ".": {
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./migrations": {
+      "source": "./src/migrations.ts",
+      "types": "./dist/migrations.d.ts",
+      "default": "./dist/migrations.js"
     }
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1",
+    "pg": "8.23.1"
   }
 }

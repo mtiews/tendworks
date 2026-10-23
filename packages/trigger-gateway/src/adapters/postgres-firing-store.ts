@@ -1,4 +1,5 @@
 import pg from "pg";
+import { migrate, type Migration } from "@tendworks/platform/migrations";
 import type { Evaluation, FiringStore } from "../firings/firing-store.js";
 import type { EventPublisher, TriggerFiredEvent } from "../trigger-events.js";
 
@@ -8,7 +9,16 @@ export interface SqlTransaction {
 }
 
 // The trigger gateway owns the schema `trigger_gateway`; no other domain reads these tables.
-const SCHEMA = `
+/**
+ * The trigger gateway's schema, one migration per change (docs/platform-implementation.md,
+ * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
+ * migrations; its `if not exists` statements adopt such a store with its data.
+ */
+export const triggerGatewayMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    name: "initial",
+    sql: `
 create schema if not exists trigger_gateway;
 create table if not exists trigger_gateway.firings (
   binding    text not null,
@@ -33,19 +43,16 @@ create table if not exists trigger_gateway.outbox (
   event      jsonb not null,
   created_at timestamptz not null default now()
 );
-`;
+`,
+  },
+];
 
-/** Creates the trigger gateway's tables if they do not exist yet. */
-export async function migrateTriggerGatewayStore(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    // Serialises concurrent starts of several servers.
-    await client.query("select pg_advisory_lock(hashtext('trigger_gateway.migrate'))");
-    await client.query(SCHEMA);
-  } finally {
-    await client.query("select pg_advisory_unlock(hashtext('trigger_gateway.migrate'))").catch(() => {});
-    client.release();
-  }
+/**
+ * Brings the trigger gateway's tables to the latest version under its advisory lock. Throws
+ * `MigrationError` when a migration fails (it is rolled back); the service must stop then.
+ */
+export function migrateTriggerGatewayStore(pool: pg.Pool): Promise<{ from: number; to: number }> {
+  return migrate(pool, { schema: "trigger_gateway", migrations: triggerGatewayMigrations });
 }
 
 /**

@@ -388,6 +388,9 @@ importers:
 
   packages/event-bus:
     dependencies:
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -482,7 +485,14 @@ importers:
         specifier: 8.23.1
         version: 8.23.1
 
-  packages/platform: {}
+  packages/platform:
+    devDependencies:
+      '@types/pg':
+        specifier: 8.23.1
+        version: 8.23.1
+      pg:
+        specifier: 8.23.1
+        version: 8.23.1
 
   packages/sandbox:
     dependencies:
