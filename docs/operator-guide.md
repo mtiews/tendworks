@@ -27,6 +27,7 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 | `docker-proxy` | the worker's only way to the Docker API, restricted by path (ADR 0001) | no, internal network |
 | `server` | control plane API, trigger gateway, human interaction, platform MCP server (`/mcp`), web UI (`/ui/`) | `127.0.0.1:8080` (`TEND_PORT`) |
 | `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy | no |
+| `agent-secrets` | runs once on `up` and ends (`Exited (0)` is normal): hands the worker the `TENDWORKS_AGENT_*` lines of `deploy/.env`, without network ([Secret references](#secret-references-adr-0008)) | no |
 | sandboxes | one container per agent session (`<installation>-sandbox-<id>`), created by the worker, on the Docker network `<installation>-sandboxes`; the installation is the compose project name, `tendworks` by default | no |
 
 Sandbox images are never pulled by the platform; you build them once (see [Install](#install)).
@@ -204,7 +205,9 @@ Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`. In th
 | agent profiles (`spec.env`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }` |
 | trigger bindings, pull request integrations | only `TENDWORKS_PLATFORM_*` | `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }` |
 
-A reference outside its prefix is a configuration error at startup. `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` and the database URL can never be referenced. **A new secret needs a compose change:** compose passes only the variables it lists, so a new `TENDWORKS_AGENT_*` or `TENDWORKS_PLATFORM_*` secret must be added to `deploy/.env` *and* to the `worker` or `server` environment in `deploy/compose.yaml`.
+A reference outside its prefix is a configuration error at startup. `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` and the database URL can never be referenced.
+
+**Adding an agent secret:** add one line `TENDWORKS_AGENT_<NAME>=<value>` to `deploy/.env`, reference it in the profile's `spec.env`, and run `docker compose -f deploy/compose.yaml up -d --wait`. No compose edit: the one-shot service `agent-secrets` gets `deploy/.env` as a whole, has no network, writes only its `TENDWORKS_AGENT_*` variables to a file on the `agent-secrets` volume (mode 600) and ends; the worker reads that file at every secret reference, so the new secret needs no worker restart (a profile change still needs one). The worker never sees the platform's secrets. Only `deploy/.env` counts here, not variables exported in your shell or a file given with `--env-file`. A new `TENDWORKS_PLATFORM_*` secret still needs a line in the `server` environment of `deploy/compose.yaml` too.
 
 ### Handling
 
@@ -409,7 +412,7 @@ Replace `tendworks` with your project name if you set one. Sandboxes and volumes
 | run fails: `no harness credential configured: set TEND_CLAUDE_CODE_CREDENTIAL to oauth-token or api-key and the matching variable in deploy/.env` | `tend run get` | as above |
 | `TEND_CLAUDE_CODE_CREDENTIAL selects api-key, but ANTHROPIC_API_KEY is empty` | worker log | fill the selected variable |
 | run fails: `agent profile developer: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning at start | set the agent token (also needed for `hello-developer`) |
-| `... is not an agent secret: agents may only reference TENDWORKS_AGENT_* secrets` (or `platform integrations may only reference TENDWORKS_PLATFORM_*`) | log, run | a reference outside its prefix; rename the variable and add it to compose |
+| `... is not an agent secret: agents may only reference TENDWORKS_AGENT_* secrets` (or `platform integrations may only reference TENDWORKS_PLATFORM_*`) | log, run | a reference outside its prefix; rename the variable (an agent secret needs only its line in `deploy/.env`, then `up -d`) |
 | `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the platform token did not reach the server; set it, `up -d --wait` (a plain `restart` keeps the old environment) |
 | binding never checks | `tend trigger list` | `spec.suspend: true`; remove it and restart the server |
 | issue labelled but no new run | | each issue fires once per binding, also after a failed run (ADR 0006); start it by hand with `POST /runs` |

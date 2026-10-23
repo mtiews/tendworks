@@ -24,23 +24,29 @@ export interface SecretResolver {
   problem(name: string): string | undefined;
 }
 
+/** Where secrets are looked up: an environment, or a function asked again at every reference. */
+export type SecretEnvironment = Record<string, string | undefined> | (() => Record<string, string | undefined>);
+
 /**
  * Secret references of `consumer`, resolved against `environment` (in the laptop profile
  * the bundle's environment, filled from `deploy/.env`). Only names with the consumer's
  * prefix resolve, so a reference can never hand out the database URL, and a secret
  * meant for the platform never reaches a sandbox, whatever configuration names.
+ * Given a function, every reference asks it again, so a secret added later resolves
+ * without a restart.
  */
-export function createSecretResolver(consumer: SecretConsumer, environment: Record<string, string | undefined>): SecretResolver {
+export function createSecretResolver(consumer: SecretConsumer, environment: SecretEnvironment): SecretResolver {
   const prefix = SECRET_PREFIXES[consumer];
   const allowed = (name: string) => name.startsWith(prefix) && name.length > prefix.length;
+  const lookup = (name: string) => (typeof environment === "function" ? environment() : environment)[name] || undefined;
   return {
-    resolve: (name) => (allowed(name) && environment[name] ? environment[name] : undefined),
+    resolve: (name) => (allowed(name) ? lookup(name) : undefined),
     problem(name) {
       if (!allowed(name)) {
         const [kind, consumers] = DESCRIPTIONS[consumer];
         return `${name} is not ${kind}: ${consumers} may only reference ${prefix}* secrets`;
       }
-      return environment[name] ? undefined : `secret ${name} is not set`;
+      return lookup(name) ? undefined : `secret ${name} is not set`;
     },
   };
 }
