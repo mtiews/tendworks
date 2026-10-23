@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -37,6 +37,17 @@ describe("a secrets file", () => {
     exportSecrets("agent", environment, path);
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it.skipIf(process.platform === "win32")("is readable by its owner only even when a temporary file of an earlier, interrupted export is left", () => {
+    const path = file();
+    // Left behind by an exporter of the same process id that died before renaming it.
+    writeFileSync(`${path}.${process.pid}.tmp`, "stale", { mode: 0o644 });
+
+    exportSecrets("agent", environment, path);
+
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readSecretsFile(path)).toEqual({ TENDWORKS_AGENT_GITHUB_TOKEN: "agent-token", TENDWORKS_AGENT_NEW_TOKEN: "new-token" });
   });
 
   it("reads as empty while it does not exist yet", () => {

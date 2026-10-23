@@ -197,9 +197,11 @@ describe("Docker adapter resources of an installation", () => {
     expect(Object.keys(networks).sort()).toEqual([`${own}-sandboxes`, gateway].sort());
   });
 
-  it("still lists and reaches sandboxes and volumes created before installations had labels", async () => {
-    // Before installation names, the only installation's resources carried names of the
-    // same scheme (`tendworks-sandbox-<id>`, `tendworks-volume-<volume>`), without its label.
+  it("still reaches sandboxes and volumes created before installations had labels, but never lists them", async () => {
+    // Before installation names, every stack's resources carried names of the same scheme
+    // (`tendworks-sandbox-<id>`, `tendworks-volume-<volume>`) without a label, so the name
+    // alone cannot tell this installation's from another stack's: a listing, which the
+    // clean-up removes from, leaves them out; a session that knows its sandbox still reaches it.
     const api = createApi(own);
     const id = crypto.randomUUID().replaceAll("-", "");
     const volume = `legacy-${id.slice(0, 8)}`;
@@ -211,8 +213,8 @@ describe("Docker adapter resources of an installation", () => {
     );
     created.push({ api, id });
 
-    expect(await api.list()).toContainEqual(expect.objectContaining({ id, template: "legacy", state: "running" }));
-    expect(await api.listVolumes()).toContainEqual({ name: volume });
+    expect((await api.list()).map((sandbox) => sandbox.id)).not.toContain(id);
+    expect((await api.listVolumes()).map(({ name }) => name)).not.toContain(volume);
     expect((await api.exec(id, { command: ["echo", "still here"] })).stdout).toBe("still here\n");
   });
 

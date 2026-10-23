@@ -13,10 +13,11 @@ import {
   migrateAgentRuntimeStore,
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
-import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
+import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platform";
-import { MigrationError } from "@tendworks/platform/migrations";
+import { migrateOrStop } from "@tendworks/platform/migrations";
 import { readSecretsFile } from "@tendworks/platform/secrets-file";
+import { storeConnectionString } from "@tendworks/platform/store-connection";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -100,29 +101,37 @@ const claudeCode = createClaudeCodeHarness({
 });
 
 const engineAddress = env("TEND_EXECUTION_ENGINE_ADDRESS");
-const pool = new pg.Pool({ connectionString: env("TEND_DATABASE_URL") });
+// The store's password has no default (scripts/setup-env.sh generates it); never log it.
+let connectionString: string;
+try {
+  connectionString = storeConnectionString(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+const pool = new pg.Pool({ connectionString });
 // Each domain brings its own tables to the version this release needs (docs/platform-implementation.md,
 // "Schema migrations"). A failed migration was rolled back; the worker then stops working
-// and only answers GET /health, which names it, so the server's GET /status shows it.
-try {
-  for (const [domain, migrateStore] of [["orchestration", migrateOrchestrationStore], ["agent runtime", migrateAgentRuntimeStore], ["event bus", migrateEventBus]] as const) {
-    const { from, to } = await migrateStore(pool);
-    if (from !== to) console.log(`store ${domain}: migrated from version ${from} to ${to}`);
-  }
-} catch (error) {
-  if (!(error instanceof MigrationError)) throw error;
-  console.error(`${error.message}; the worker stopped and answers only GET /health until the store is fixed or restored and the worker restarted`);
-  const stopped = createHealthApi({
-    probes: [createStaticHealthProbe(error.component, { status: "unhealthy", message: error.message }), createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
-  });
-  const reason = error.message;
-  const fetch = (request: Request) =>
-    new URL(request.url).pathname === "/health" ? stopped.fetch(request) : Promise.resolve(Response.json({ title: "Worker stopped", status: 503, detail: reason }, { status: 503 }));
-  serve({ fetch, port: Number(env("PORT", "8081")) });
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => process.exit(0));
-  // The rest of this bundle never starts.
-  await new Promise<never>(() => {});
-}
+// and only answers GET /health, which names it, so the server's GET /status shows it (ADR 0021).
+await migrateOrStop(
+  pool,
+  [
+    ["orchestration", migrateOrchestrationStore],
+    ["agent runtime", migrateAgentRuntimeStore],
+    ["event bus", migrateEventBus],
+  ],
+  {
+    bundle: "worker",
+    answers: "GET /health",
+    stop: (error) => {
+      const stopped = createStoppedBundleApi({
+        title: "Worker stopped",
+        probes: [createStaticHealthProbe(error.component, { status: "unhealthy", message: error.message }), createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
+      });
+      serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8081")) });
+    },
+  },
+);
 
 // Run, step and chat events go onto the event bus in the transaction of the state they describe.
 const bus = createPostgresEventBus({ pool });

@@ -19,7 +19,8 @@ export interface Migration {
 /** The part of a pooled database connection migrations need (e.g. a `pg.PoolClient`). */
 export interface MigrationConnection {
   query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
-  release(): void;
+  /** Back to the pool; with `true` the connection is closed instead. */
+  release(destroy?: boolean): void;
 }
 
 /** Where migrations get a connection from (e.g. a `pg.Pool`). */
@@ -80,8 +81,48 @@ export async function migrate(database: MigrationDatabase, { schema, migrations 
     }
     return { from, to };
   } finally {
-    await connection.query("select pg_advisory_unlock(hashtext($1))", [lock]).catch(() => {});
-    connection.release();
+    // The lock belongs to the session: a connection that may still hold it is closed, not pooled.
+    const unlocked = await connection.query("select pg_advisory_unlock(hashtext($1))", [lock]).then(
+      () => true,
+      () => false,
+    );
+    if (unlocked) connection.release();
+    else connection.release(true);
+  }
+}
+
+/** A domain's store as a bundle migrates it at start: its name for the log, and its domain's migrate function. */
+export type StoreMigration<D> = readonly [domain: string, migrate: (database: D) => Promise<{ from: number; to: number }>];
+
+export interface MigrateOrStopOptions {
+  /** The bundle, e.g. `worker`, as the log names it. */
+  bundle: string;
+  /** The one operation a stopped bundle still answers, e.g. `GET /health`, as the log names it. */
+  answers: string;
+  /** Serves that operation (and refuses every other) once a migration failed. */
+  stop: (error: MigrationError) => void;
+  log?: Pick<Console, "log" | "error">;
+}
+
+/**
+ * Brings each of a bundle's stores to the version this release needs, in order (ADR 0021).
+ * When one fails with a {@link MigrationError}, the bundle stops working instead of exiting,
+ * which would only restart it into the same failure: `stop` serves its status operation, a
+ * signal ends the process, and the returned promise never settles, so the rest of the bundle
+ * never starts. Any other error is passed on.
+ */
+export async function migrateOrStop<D>(database: D, stores: readonly StoreMigration<D>[], { bundle, answers, stop, log = console }: MigrateOrStopOptions): Promise<void> {
+  try {
+    for (const [domain, migrateStore] of stores) {
+      const { from, to } = await migrateStore(database);
+      if (from !== to) log.log(`store ${domain}: migrated from version ${from} to ${to}`);
+    }
+  } catch (error) {
+    if (!(error instanceof MigrationError)) throw error;
+    log.error(`${error.message}; the ${bundle} stopped and answers only ${answers} until the store is fixed or restored and the ${bundle} restarted`);
+    stop(error);
+    for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => process.exit(0));
+    await new Promise<never>(() => {});
   }
 }
 

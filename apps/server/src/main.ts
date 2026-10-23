@@ -34,7 +34,8 @@ import {
 } from "@tendworks/trigger-gateway";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
-import { MigrationError } from "@tendworks/platform/migrations";
+import { migrateOrStop } from "@tendworks/platform/migrations";
+import { storeConnectionString } from "@tendworks/platform/store-connection";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -71,29 +72,37 @@ if (apiToken === undefined || readToken === undefined || tokenProblems.length > 
   process.exit(1);
 }
 
-const databaseUrl = env("TEND_DATABASE_URL");
+// The store's password has no default (scripts/setup-env.sh generates it); never log it.
+let databaseUrl: string;
+try {
+  databaseUrl = storeConnectionString(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
 const pool = new pg.Pool({ connectionString: databaseUrl });
 // Each domain brings its own tables to the version this release needs (docs/platform-implementation.md,
 // "Schema migrations"). A failed migration was rolled back; the server then stops working
-// and only answers GET /status, which names it, so it never runs on a half-migrated store.
-try {
-  for (const [domain, migrateStore] of [["event bus", migrateEventBus], ["human interaction", migrateHumanInteractionStore], ["trigger gateway", migrateTriggerGatewayStore]] as const) {
-    const { from, to } = await migrateStore(pool);
-    if (from !== to) console.log(`store ${domain}: migrated from version ${from} to ${to}`);
-  }
-} catch (error) {
-  if (!(error instanceof MigrationError)) throw error;
-  console.error(`${error.message}; the server stopped and answers only GET /status until the store is fixed or restored and the server restarted`);
-  const stopped = createStoppedControlPlaneApi({
-    probes: [createStoreProbe(databaseUrl), { name: error.component, check: async () => ({ status: "unhealthy", message: error.message }) }],
-    bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
-    reason: error.message,
-  });
-  serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8080")) });
-  for (const signal of ["SIGINT", "SIGTERM"] as const) process.once(signal, () => process.exit(0));
-  // The rest of this bundle never starts.
-  await new Promise<never>(() => {});
-}
+// and only answers GET /status, which names it, so it never runs on a half-migrated store (ADR 0021).
+await migrateOrStop(
+  pool,
+  [
+    ["event bus", migrateEventBus],
+    ["human interaction", migrateHumanInteractionStore],
+    ["trigger gateway", migrateTriggerGatewayStore],
+  ],
+  {
+    bundle: "server",
+    answers: "GET /status",
+    stop: (error) => {
+      const stopped = createStoppedControlPlaneApi({
+        probes: [createStoreProbe(databaseUrl), { name: error.component, check: async () => ({ status: "unhealthy", message: error.message }) }],
+        bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
+      });
+      serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8080")) });
+    },
+  },
+);
 
 // Human interaction: run outcomes and approval requests from the event bus become
 // notifications, recorded before the notification channel (a log for now) delivers them.

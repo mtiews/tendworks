@@ -177,6 +177,7 @@ interface FakeSandbox {
   mounts: { path: string; files: Files }[];
   kill: () => void;
   owner?: string;
+  createdAt: string;
 }
 
 /**
@@ -191,6 +192,7 @@ export function scriptedSandboxes(
   const sandboxes = new Map<string, FakeSandbox>();
   const volumes = new Map<string, Files>();
   const volumeOwners = new Map<string, string>();
+  const volumesCreatedAt = new Map<string, string>();
   const created: { template: SandboxTemplate; volumes: VolumeMount[]; owner?: string; networks: string[] }[] = [];
   const destroyed: string[] = [];
   const deletedVolumes: string[] = [];
@@ -212,18 +214,19 @@ export function scriptedSandboxes(
       const mounts = (options.volumes ?? []).map(({ volume, path }) => {
         if (!volumes.has(volume)) {
           volumes.set(volume, new Map());
+          volumesCreatedAt.set(volume, new Date().toISOString());
           if (options.owner !== undefined) volumeOwners.set(volume, options.owner);
         }
         return { path, files: volumes.get(volume)! };
       });
-      sandboxes.set(id, { files: new Map(), mounts, kill: () => {}, ...(options.owner === undefined ? {} : { owner: options.owner }) });
+      sandboxes.set(id, { files: new Map(), mounts, kill: () => {}, createdAt: new Date().toISOString(), ...(options.owner === undefined ? {} : { owner: options.owner }) });
       return { id };
     },
     async list() {
-      return [...sandboxes].map(([id, { owner }]) => ({ id, ...(owner === undefined ? {} : { owner }) }));
+      return [...sandboxes].map(([id, { owner, createdAt }]) => ({ id, createdAt, ...(owner === undefined ? {} : { owner }) }));
     },
     async listVolumes() {
-      return [...volumes.keys()].map((name) => ({ name, ...(volumeOwners.has(name) ? { owner: volumeOwners.get(name)! } : {}) }));
+      return [...volumes.keys()].map((name) => ({ name, createdAt: volumesCreatedAt.get(name)!, ...(volumeOwners.has(name) ? { owner: volumeOwners.get(name)! } : {}) }));
     },
     async attach(sandboxId, request) {
       const sandbox = find(sandboxId);
@@ -260,6 +263,7 @@ export function scriptedSandboxes(
       deletedVolumes.push(volume);
       volumes.delete(volume);
       volumeOwners.delete(volume);
+      volumesCreatedAt.delete(volume);
     },
   };
   return { api, created, destroyed, deletedVolumes, attached, execs, observed, sandboxes, volumes };

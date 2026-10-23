@@ -8,7 +8,7 @@
  * Kept out of the package's browser-safe entry point: it is imported as
  * `@tendworks/platform/secrets-file` and needs Node.js.
  */
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { SECRET_PREFIXES, type SecretConsumer } from "./secrets.js";
 
 /** Writes the secrets of `consumer` found in `environment` to `path`, replacing the file as a whole. Never logs a value. */
@@ -17,9 +17,12 @@ export function exportSecrets(consumer: SecretConsumer, environment: Record<stri
   const secrets = Object.fromEntries(
     Object.entries(environment).filter((entry): entry is [string, string] => entry[0].startsWith(prefix) && entry[0].length > prefix.length && !!entry[1]),
   );
-  // Written next to the file and renamed over it, so a reader never sees half a file.
+  // Written next to the file and renamed over it, so a reader never sees half a file. A
+  // temporary file left by an interrupted export goes first: the mode applies only to a new
+  // file, and "wx" refuses to write into one that appears in the meantime.
   const written = `${path}.${process.pid}.tmp`;
-  writeFileSync(written, JSON.stringify(secrets), { mode: 0o600 });
+  rmSync(written, { force: true });
+  writeFileSync(written, JSON.stringify(secrets), { mode: 0o600, flag: "wx" });
   renameSync(written, path);
   return Object.keys(secrets).sort();
 }

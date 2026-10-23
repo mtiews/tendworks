@@ -41,6 +41,27 @@ describe("the compose stack", () => {
     }
   });
 
+  it("has no default store password and puts none into a connection URL, so server and worker refuse to start until it is set", () => {
+    const { postgres, server, worker } = compose.services;
+
+    expect(postgres?.environment?.POSTGRES_PASSWORD).toBe("${TEND_POSTGRES_PASSWORD:-}");
+    for (const [name, service] of Object.entries({ server, worker })) {
+      expect(service?.environment?.TEND_POSTGRES_PASSWORD, name).toBe("${TEND_POSTGRES_PASSWORD:-}");
+      expect(new URL(String(service?.environment?.TEND_DATABASE_URL)).password, name).toBe("");
+    }
+    expect(composeText).not.toMatch(/TEND_POSTGRES_PASSWORD:-[^}]/);
+  });
+
+  it("names the store's user and database as the backup and restore scripts do", () => {
+    const scripts = readFileSync(new URL("../../scripts/lib/stack.sh", import.meta.url), "utf8");
+    const named = (variable: string) => new RegExp(`^${variable}=(.*)$`, "m").exec(scripts)?.[1];
+
+    expect({ user: named("STORE_USER"), database: named("STORE_DATABASE") }).toEqual({
+      user: compose.services.postgres?.environment?.POSTGRES_USER,
+      database: compose.services.postgres?.environment?.POSTGRES_DB,
+    });
+  });
+
   it("restarts every long-running service by itself, also after a host reboot", () => {
     for (const [name, service] of started("debug").filter(([name]) => !oneShot.has(name))) expect(service.restart, name).toBe("unless-stopped");
   });

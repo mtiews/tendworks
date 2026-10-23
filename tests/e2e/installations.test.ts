@@ -34,7 +34,6 @@ async function waiting(chatId: string, timeoutMs = 120_000): Promise<Chat> {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const exists = async (kind: "container" | "volume", name: string) =>
   (await docker(kind, "ls", ...(kind === "container" ? ["-a"] : []), "-q", "--filter", `name=^${name}$`)) !== "";
-const volumesOf = async (owner: string) => (await docker("volume", "ls", "-q", "--filter", `label=dev.tendworks.owner=${owner}`)).split("\n").filter(Boolean).sort();
 
 // Another installation on the same Docker engine, as the sandbox adapter of a second stack
 // would leave it: a sandbox with a session volume, named and labelled after that installation.
@@ -82,51 +81,43 @@ describe.skipIf(!credentialSelected())("installations on one Docker engine", () 
     expect(await docker("volume", "ls", "-q", "--filter", `name=${neighbourVolume}`)).toBe(neighbourVolume);
   });
 
-  it("removes this installation's sandboxes and volumes of no live task or open chat after a worker start, and nothing else", { timeout: 600_000 }, async () => {
-    // Orphans of this installation: a sandbox with its session volume whose task is unknown,
-    // and a workspace volume from before owners were recorded (no owner, no installation label).
+  it("after a worker start, removes no orphan younger than ten minutes, nothing unlabelled and nothing of another installation", { timeout: 300_000 }, async () => {
+    // An orphan of this installation that was just created (a sandbox with its session
+    // volume whose task is unknown), and resources from before installation labels: named
+    // like this installation's, but another stack's for all the clean-up can tell.
     const orphan = crypto.randomUUID().replaceAll("-", "");
     const orphanSandbox = `${installation}-sandbox-${orphan}`;
     const orphanVolume = volumeOf(`${orphan}-session`);
-    const legacyVolume = volumeOf(`${crypto.randomUUID()}-workspace`);
-    const ours = ["--label", `dev.tendworks.installation=${installation}`, "--label", `dev.tendworks.owner=${orphan}`];
-    await docker("volume", "create", ...ours, "--label", `dev.tendworks.volume=${orphan}-session`, orphanVolume);
-    await docker("volume", "create", "--label", `dev.tendworks.volume=${legacyVolume.slice(`${installation}-volume-`.length)}`, legacyVolume);
+    const legacy = crypto.randomUUID().replaceAll("-", "");
+    const legacySandbox = `${installation}-sandbox-${legacy}`;
+    const legacyVolume = volumeOf(`${legacy}-workspace`);
+    const owned = ["--label", `dev.tendworks.installation=${installation}`, "--label", `dev.tendworks.owner=${orphan}`];
     const image = JSON.parse(await docker("compose", "-f", composeFile, "--profile", "test-images", "config", "--format", "json")).services["sandbox-scripted-acp"].image as string;
+    await docker("volume", "create", ...owned, "--label", `dev.tendworks.volume=${orphan}-session`, orphanVolume);
+    await docker("volume", "create", "--label", `dev.tendworks.owner=${legacy}`, "--label", `dev.tendworks.volume=${legacy}-workspace`, legacyVolume);
     await docker(
-      "run", "-d", "--name", orphanSandbox, ...ours, "--label", `dev.tendworks.sandbox=${orphan}`,
+      "run", "-d", "--name", orphanSandbox, ...owned, "--label", `dev.tendworks.sandbox=${orphan}`,
       "--mount", `type=volume,source=${orphanVolume},target=/session`, "--entrypoint", "sleep", image, "infinity",
     );
+    await docker("run", "-d", "--name", legacySandbox, "--label", `dev.tendworks.sandbox=${legacy}`, "--entrypoint", "sleep", image, "infinity");
     try {
-      // An open chat waiting for a message, and a chat working on a long turn.
-      const { data: open } = await client.POST("/chats", { body: { agent: "scripted-assistant", text: "chat: Hello" } });
-      expect(await waiting(open!.id)).toMatchObject({ status: "input-required" });
-      const { data: working } = await client.POST("/chats", { body: { agent: "scripted-assistant", text: "Write the files" } });
-      for (const deadline = Date.now() + 120_000; ; await pause(500)) {
-        const entries = (await client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: working!.id } } })).data?.items ?? [];
-        if (entries.some((entry) => entry.type === "tool-call")) break;
-        if (Date.now() > deadline) throw new Error(`chat ${working!.id} never started its turn`);
-      }
-
+      const since = new Date().toISOString();
       await compose("restart", "worker");
       await compose("up", "-d", "--wait", "server", "worker");
-      for (const deadline = Date.now() + 120_000; (await exists("container", orphanSandbox)) || (await exists("volume", orphanVolume)) || (await exists("volume", legacyVolume)); await pause(1_000)) {
-        if (Date.now() > deadline) throw new Error("the worker did not remove the orphaned sandbox and volumes");
+      // The pass on start reports the young orphan it keeps; by then it has decided on everything.
+      const kept = `sandbox clean-up: keeping volume ${orphan}-session of ${orphan}`;
+      for (const deadline = Date.now() + 120_000; !(await compose("logs", "--no-color", "--since", since, "worker")).stdout.includes(kept); await pause(1_000)) {
+        if (Date.now() > deadline) throw new Error("the worker's clean-up never reported the young orphan");
       }
-      const resumed = await waiting(working!.id, 240_000);
-      const kept = { open: await volumesOf(open!.id), working: await volumesOf(working!.id) };
-      await client.POST("/chats/{chatId}/end", { params: { path: { chatId: open!.id } } });
-      await client.POST("/chats/{chatId}/end", { params: { path: { chatId: working!.id } } });
 
-      expect(kept).toEqual({
-        open: [volumeOf(`${open!.id}-session`), volumeOf(`${open!.id}-workspace`)],
-        working: [volumeOf(`${working!.id}-session`), volumeOf(`${working!.id}-workspace`)],
-      });
-      expect(resumed).toMatchObject({ status: "input-required", message: expect.stringMatching(/after\.txt\nbefore\.txt$/) });
+      expect(await exists("container", orphanSandbox)).toBe(true);
+      expect(await exists("volume", orphanVolume)).toBe(true);
+      expect(await exists("container", legacySandbox)).toBe(true);
+      expect(await exists("volume", legacyVolume)).toBe(true);
       expect(await docker("inspect", "--format", "{{.State.Running}}", neighbourSandbox)).toBe("true");
       expect(await docker("volume", "ls", "-q", "--filter", `name=${neighbourVolume}`)).toBe(neighbourVolume);
     } finally {
-      await docker("rm", "-f", "-v", orphanSandbox).catch(() => {});
+      await docker("rm", "-f", "-v", orphanSandbox, legacySandbox).catch(() => {});
       await docker("volume", "rm", "-f", orphanVolume, legacyVolume).catch(() => {});
     }
   });

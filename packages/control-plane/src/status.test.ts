@@ -131,7 +131,7 @@ describe("GET /status: a failed schema migration", () => {
   const failure = createStaticHealthProbe(failed.component, { status: "unhealthy", message: failed.message });
 
   it("shows the server's own failed migration while the stopped server refuses everything else", async () => {
-    const api = createStoppedControlPlaneApi({ probes: [healthy("store"), failure], reason: failed.message });
+    const api = createStoppedControlPlaneApi({ probes: [healthy("store"), failure] });
 
     const status = await api.fetch(new Request("http://tend.test/status"));
     const runs = await api.fetch(new Request("http://tend.test/runs", { headers: { authorization: "Bearer test-token" } }));
@@ -146,10 +146,11 @@ describe("GET /status: a failed schema migration", () => {
       },
     ]);
     expect(runs.status).toBe(503);
+    // The reason, with whatever the store said, only in GET /status, which reveals no more than the platform's health.
     expect(await runs.json()).toEqual({
       title: "Platform stopped",
       status: 503,
-      detail: 'schema human_interaction: migration 2 (add-channel) failed: column "channel" already exists',
+      detail: "The platform stopped working; GET /status names the component that stopped it.",
     });
   });
 

@@ -8,16 +8,14 @@ export interface StoppedControlPlaneApiOptions {
   probes: HealthProbe[];
   bundles?: RuntimeBundle[];
   probeTimeoutMs?: number;
-  /** Why the server stopped; every operation but `GET /status` answers 503 with it. */
-  reason: string;
 }
 
 /**
- * The control plane of a server that must not work, e.g. because a schema migration failed:
- * it keeps answering `GET /status`, so the operator sees why, and refuses every other
- * operation, so nothing runs on a half-migrated store.
+ * The control plane of a server that must not work, e.g. because a schema migration failed
+ * (ADR 0021): it keeps answering `GET /status`, so the operator sees why, and refuses every
+ * other operation with a 503 that names no reason, so nothing runs on a half-migrated store.
  */
-export function createStoppedControlPlaneApi({ probes, bundles = [], probeTimeoutMs, reason }: StoppedControlPlaneApiOptions): {
+export function createStoppedControlPlaneApi({ probes, bundles = [], probeTimeoutMs }: StoppedControlPlaneApiOptions): {
   fetch(request: Request): Promise<Response>;
 } {
   return {
@@ -27,7 +25,10 @@ export function createStoppedControlPlaneApi({ probes, bundles = [], probeTimeou
         const report = await checkPlatform(probes, bundles, probeTimeoutMs);
         return Response.json(report, { status: report.status === "healthy" ? 200 : 503 });
       }
-      return Response.json({ title: "Platform stopped", status: 503, detail: reason } satisfies Schemas["Problem"], { status: 503 });
+      return Response.json(
+        { title: "Platform stopped", status: 503, detail: "The platform stopped working; GET /status names the component that stopped it." } satisfies Schemas["Problem"],
+        { status: 503 },
+      );
     },
   };
 }

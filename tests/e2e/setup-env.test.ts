@@ -23,7 +23,7 @@ describe("scripts/setup-env.sh", () => {
   let directory: string;
   afterEach(() => rmSync(directory, { recursive: true, force: true }));
 
-  it("creates the env file from the example with two different random tokens, readable by its owner only", async () => {
+  it("creates the env file from the example with two different random tokens and a random store password, readable by its owner only", async () => {
     directory = mkdtempSync(join(tmpdir(), "tend-setup-env-"));
     const envFile = join(directory, ".env");
 
@@ -36,12 +36,16 @@ describe("scripts/setup-env.sh", () => {
     expect(apiToken).toMatch(/^[0-9a-f]{64}$/);
     expect(readToken).toMatch(/^[0-9a-f]{64}$/);
     expect(readToken).not.toBe(apiToken);
+    const storePassword = value(env, "TEND_POSTGRES_PASSWORD");
+    expect(storePassword).toMatch(/^[0-9a-f]{64}$/);
+    expect([apiToken, readToken]).not.toContain(storePassword);
     // Everything else is the example as it is, for the operator to fill in.
-    const withoutTokens = (text: string) => text.replace(/^(TEND_API_TOKEN|TEND_API_READ_TOKEN)=.*$/gm, "$1=");
-    expect(withoutTokens(env)).toBe(example);
-    // Tokens never appear in the output.
+    const withoutSecrets = (text: string) => text.replace(/^(TEND_API_TOKEN|TEND_API_READ_TOKEN|TEND_POSTGRES_PASSWORD)=.*$/gm, "$1=");
+    expect(withoutSecrets(env)).toBe(example);
+    // Secrets never appear in the output.
     expect(stdout + stderr).not.toContain(apiToken);
     expect(stdout + stderr).not.toContain(readToken);
+    expect(stdout + stderr).not.toContain(storePassword);
     // Windows has no Unix file modes; the stack's target is Linux.
     if (process.platform !== "win32") expect(statSync(envFile).mode & 0o777).toBe(0o600);
   });

@@ -162,10 +162,10 @@ export function createDockerSandboxApi({
   const network = `${installation}-sandboxes`;
   const labels = { ...extraLabels, [LABEL.installation]: installation };
   const ownerLabel = (owner: string | undefined) => (owner === undefined ? {} : { [LABEL.owner]: owner });
-  // Ours: named after this installation and labelled for it. Resources from before
-  // installation names have no installation label; their name alone decides.
-  const ours = (name: string, logical: string | undefined, found: Labels, nameOf: (logical: string) => string) =>
-    logical !== undefined && name === nameOf(logical) && [installation, undefined].includes(found?.[LABEL.installation]);
+  // This installation's: named after it and labelled for it. Resources from before
+  // installation labels are never listed, so nothing removes another stack's by name alone.
+  const isThisInstallations = (name: string, logical: string | undefined, found: Labels, nameOf: (logical: string) => string) =>
+    logical !== undefined && name === nameOf(logical) && found?.[LABEL.installation] === installation;
 
   const call = (method: string, path: string, init: { json?: unknown; body?: Uint8Array; contentType?: string } = {}) => {
     const headers: Record<string, string> = {};
@@ -210,15 +210,15 @@ export function createDockerSandboxApi({
 
   // Created once per adapter; a failed attempt is retried with the next sandbox.
   let networkReady: Promise<void> | undefined;
-  const ensureNetwork = (name = network) =>
+  const ensureNetwork = () =>
     (networkReady ??= (async () => {
-      const found = await call("GET", `/networks/${encodeURIComponent(name)}`);
+      const found = await call("GET", `/networks/${encodeURIComponent(network)}`);
       await found.body?.cancel();
       if (found.ok) return;
-      if (found.status !== 404) throw await failure(found, `finding the sandbox network ${name}`);
+      if (found.status !== 404) throw await failure(found, `finding the sandbox network ${network}`);
       const created = await call("POST", "/networks/create", {
         json: {
-          Name: name,
+          Name: network,
           Driver: "bridge",
           // No traffic between sandboxes; each one only reaches the outside.
           Options: { "com.docker.network.bridge.enable_icc": "false" },
@@ -226,7 +226,7 @@ export function createDockerSandboxApi({
         },
       });
       // 409: another adapter created it meanwhile.
-      if (!created.ok && created.status !== 409) throw await failure(created, `creating the sandbox network ${name}`);
+      if (!created.ok && created.status !== 409) throw await failure(created, `creating the sandbox network ${network}`);
       await created.body?.cancel();
     })().catch((error: unknown) => {
       networkReady = undefined;
@@ -334,8 +334,10 @@ export function createDockerSandboxApi({
       }[];
       return containers.flatMap(({ Names, Labels: found, State, Created, NetworkSettings }): Sandbox[] => {
         const id = found?.[LABEL.sandbox];
-        if (!Names.some((name) => ours(name.replace(/^\//, ""), id, found, containerName)) || !sandboxIdPattern.test(id!)) return [];
-        const isolationClass = isolationClasses.find((candidate) => candidate === found?.[LABEL.isolationClass]) ?? defaultIsolationClass;
+        if (!Names.some((name) => isThisInstallations(name.replace(/^\//, ""), id, found, containerName)) || !sandboxIdPattern.test(id!)) return [];
+        // Every sandbox carrying the installation label was created with its isolation class label.
+        const isolationClass = isolationClasses.find((candidate) => candidate === found?.[LABEL.isolationClass]);
+        if (isolationClass === undefined) return [];
         const owner = found?.[LABEL.owner];
         const networks = allowed.filter((network) => network in (NetworkSettings?.Networks ?? {}));
         return [
@@ -354,12 +356,12 @@ export function createDockerSandboxApi({
     async listVolumes() {
       const response = await call("GET", `/volumes?${filters(LABEL.volume)}`);
       if (!response.ok) throw await failure(response, "listing the volumes");
-      const { Volumes } = (await response.json()) as { Volumes: { Name: string; Labels: Labels }[] | null };
-      return (Volumes ?? []).flatMap(({ Name, Labels: found }): Volume[] => {
+      const { Volumes } = (await response.json()) as { Volumes: { Name: string; Labels: Labels; CreatedAt: string }[] | null };
+      return (Volumes ?? []).flatMap(({ Name, Labels: found, CreatedAt }): Volume[] => {
         const volume = found?.[LABEL.volume];
-        if (!ours(Name, volume, found, volumeName) || !volumeNamePattern.test(volume!)) return [];
+        if (!isThisInstallations(Name, volume, found, volumeName) || !volumeNamePattern.test(volume!)) return [];
         const owner = found?.[LABEL.owner];
-        return [{ name: volume!, ...(owner === undefined ? {} : { owner }) }];
+        return [{ name: volume!, createdAt: new Date(CreatedAt).toISOString(), ...(owner === undefined ? {} : { owner }) }];
       });
     },
     async exec(sandboxId, request) {

@@ -3,18 +3,21 @@ import { describe, expect, it } from "vitest";
 import { createSandboxCleanup, type CleanupSandboxes } from "./sandbox-cleanup.js";
 import { createInMemoryTaskStore, type TaskKind, type TaskStore } from "./task-store.js";
 
-/** The sandboxes and volumes of one installation in memory; a delete can be made to fail. */
+/** Long enough ago for the clean-up to remove what was created then. */
+const anHourAgo = () => new Date(Date.now() - 60 * 60_000).toISOString();
+
+/** The sandboxes and volumes of one installation in memory, created an hour ago unless said otherwise; a delete can be made to fail. */
 function backend() {
-  const sandboxes = new Map<string, { owner?: string; volumes: string[] }>();
-  const volumes = new Map<string, { owner?: string }>();
+  const sandboxes = new Map<string, { owner?: string; volumes: string[]; createdAt: string }>();
+  const volumes = new Map<string, { owner?: string; createdAt: string }>();
   const failing = new Set<string>();
   const calls: string[] = [];
   const api: CleanupSandboxes = {
     async list() {
-      return [...sandboxes].map(([id, { owner }]) => ({ id, ...(owner === undefined ? {} : { owner }) }));
+      return [...sandboxes].map(([id, { owner, createdAt }]) => ({ id, createdAt, ...(owner === undefined ? {} : { owner }) }));
     },
     async listVolumes() {
-      return [...volumes].map(([name, { owner }]) => ({ name, ...(owner === undefined ? {} : { owner }) }));
+      return [...volumes].map(([name, { owner, createdAt }]) => ({ name, createdAt, ...(owner === undefined ? {} : { owner }) }));
     },
     async destroy(sandboxId) {
       calls.push(`destroy ${sandboxId}`);
@@ -31,10 +34,10 @@ function backend() {
     },
   };
   /** A sandbox of the harness's kind: owned by a task, with the task's two volumes. */
-  const session = (sandboxId: string, owner: string | undefined, volumeOwner = owner) => {
+  const session = (sandboxId: string, owner: string | undefined, { volumeOwner = owner, createdAt = anHourAgo() } = {}) => {
     const names = [`${volumeOwner}-workspace`, `${volumeOwner}-session`];
-    sandboxes.set(sandboxId, { ...(owner === undefined ? {} : { owner }), volumes: names });
-    for (const name of names) volumes.set(name, owner === undefined ? {} : { owner });
+    sandboxes.set(sandboxId, { ...(owner === undefined ? {} : { owner }), volumes: names, createdAt });
+    for (const name of names) volumes.set(name, { ...(owner === undefined ? {} : { owner }), createdAt });
   };
   return { api, sandboxes, volumes, failing, calls, session };
 }
@@ -84,7 +87,7 @@ describe("sandbox clean-up", () => {
     sandboxes.session("sandbox1", working);
     sandboxes.session("sandbox2", waiting);
     // An idle chat has let its sandbox go, its volumes stay.
-    sandboxes.volumes.set(`${waiting}-extra`, { owner: waiting });
+    sandboxes.volumes.set(`${waiting}-extra`, { owner: waiting, createdAt: anHourAgo() });
     const { lines, log } = logged();
 
     await createSandboxCleanup({ sandboxes: sandboxes.api, store, log }).run();
@@ -106,20 +109,50 @@ describe("sandbox clean-up", () => {
     expect(sandboxes.volumes.size).toBe(0);
   });
 
-  it("finds the owner of a volume from before owners were recorded by its name, and removes ownerless sandboxes", async () => {
+  it("never removes a sandbox or volume without a recorded owner, whatever its name says", async () => {
     const store = createInMemoryTaskStore();
-    const working = await claim(store, "TASK_STATE_WORKING");
     const ended = await claim(store, "TASK_STATE_COMPLETED");
     const sandboxes = backend();
-    // Created by a worker that recorded no owners: nobody can reattach to these sandboxes any more.
-    sandboxes.session("sandbox1", undefined, working);
-    sandboxes.session("sandbox2", undefined, ended);
-    sandboxes.volumes.set("not-of-a-task", {});
+    // Named like a task's session, but nothing records whose it is: it may hold another stack's work.
+    sandboxes.session("sandbox1", undefined, { volumeOwner: ended });
+    sandboxes.volumes.set("not-of-a-task", { createdAt: anHourAgo() });
+    const { lines, log } = logged();
 
-    await createSandboxCleanup({ sandboxes: sandboxes.api, store, log: logged().log }).run();
+    await createSandboxCleanup({ sandboxes: sandboxes.api, store, log }).run();
 
-    expect([...sandboxes.sandboxes.keys()]).toEqual([]);
-    expect([...sandboxes.volumes.keys()].sort()).toEqual([`${working}-session`, `${working}-workspace`, "not-of-a-task"]);
+    expect([...sandboxes.sandboxes.keys()]).toEqual(["sandbox1"]);
+    expect([...sandboxes.volumes.keys()].sort()).toEqual([`${ended}-session`, `${ended}-workspace`, "not-of-a-task"].sort());
+    expect(lines).toEqual([]);
+  });
+
+  it("keeps an orphan younger than ten minutes for a later pass, and says so", async () => {
+    const store = createInMemoryTaskStore();
+    const unknown = crypto.randomUUID();
+    const sandboxes = backend();
+    sandboxes.session("sandbox1", unknown, { createdAt: new Date(Date.now() - 9 * 60_000).toISOString() });
+    const { lines, log } = logged();
+
+    const pass = await createSandboxCleanup({ sandboxes: sandboxes.api, store, log }).run();
+
+    expect([...sandboxes.sandboxes.keys()]).toEqual(["sandbox1"]);
+    expect(sandboxes.volumes.size).toBe(2);
+    expect(pass).toEqual({ removed: [], failed: [] });
+    expect(lines).toContain(`sandbox clean-up: keeping sandbox sandbox1 of ${unknown}, which is no live task or open chat, until it is 10 minutes old`);
+  });
+
+  it("skips the whole pass when it cannot read the live tasks and open chats, and reports it", async () => {
+    const store = createInMemoryTaskStore();
+    store.active = () => Promise.reject(new Error("store unreachable"));
+    const sandboxes = backend();
+    sandboxes.session("sandbox1", crypto.randomUUID());
+    const { lines, log } = logged();
+    const cleanup = createSandboxCleanup({ sandboxes: sandboxes.api, store, log });
+
+    await cleanup.run();
+
+    expect(sandboxes.calls).toEqual([]);
+    expect(lines).toEqual(["ERROR sandbox clean-up: the pass failed: store unreachable; the next pass retries it"]);
+    expect(await cleanup.check()).toEqual({ status: "unhealthy", message: "the last pass failed: store unreachable" });
   });
 
   it("reports a failed removal in the log and as an unhealthy component, and retries it with the next pass", async () => {

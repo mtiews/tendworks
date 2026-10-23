@@ -21,11 +21,11 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 OUTPUT_DIR="$ROOT/backups"
 parse_stack_args "$@"
-set -- ${ARGS[@]+"${ARGS[@]}"}
+set -- ${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"}
 while [ $# -gt 0 ]; do
   case "$1" in
     --output-dir) OUTPUT_DIR=${2:?--output-dir needs a directory}; shift 2 ;;
-    -h | --help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
@@ -38,8 +38,8 @@ if [ -z "$POSTGRES" ] || [ -z "$TEMPORAL" ] || [ -z "$WORKER" ]; then
   echo "  docker compose -f deploy/compose.yaml up -d --wait" >&2
   exit 1
 fi
-INSTALLATION=$(docker_ inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$POSTGRES")
-IMAGE=$(docker_ inspect --format '{{.Config.Image}}' "$POSTGRES")
+INSTALLATION=$(docker_keeping_paths inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$POSTGRES")
+IMAGE=$(docker_keeping_paths inspect --format '{{.Config.Image}}' "$POSTGRES")
 ENGINE_VOLUME=$(volume_at "$TEMPORAL" "$ENGINE_PATH")
 TRANSCRIPTS_VOLUME=$(volume_at "$WORKER" "$TRANSCRIPTS_PATH")
 RUNNING=$(compose ps --status running --services)
@@ -82,8 +82,8 @@ echo "Writing $ARCHIVE..."
 (
   umask 077
   set -C
-  compose exec -T postgres pg_dump --username tend --dbname tend --format custom |
-    docker_ run --rm -i --network none -e "TEND_BACKUP_MANIFEST=$MANIFEST" \
+  compose exec -T postgres pg_dump --username "$STORE_USER" --dbname "$STORE_DATABASE" --format custom |
+    docker_keeping_paths run --rm -i --network none -e "TEND_BACKUP_MANIFEST=$MANIFEST" \
       -v "$ENGINE_VOLUME:/backup/engine:ro" -v "$TRANSCRIPTS_VOLUME:/backup/transcripts:ro" \
       --entrypoint sh "$IMAGE" -c '
         set -e

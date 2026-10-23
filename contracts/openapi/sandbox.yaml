@@ -21,7 +21,10 @@ paths:
       description: >-
         Every sandbox of this installation that still exists on the backend, also
         those that have stopped (e.g. after the backend host restarted) and those
-        no consumer remembers any more, so they can be found and destroyed.
+        no consumer remembers any more, so they can be found and destroyed. Only
+        sandboxes recorded as this installation's are listed: one the backend cannot
+        attribute (e.g. created before installations were recorded) is left out, so
+        no consumer removes another installation's by mistake.
       responses:
         "200":
           description: The installation's sandboxes.
@@ -67,6 +70,9 @@ paths:
     get:
       operationId: listVolumes
       summary: List the installation's volumes
+      description: >-
+        Every volume recorded as this installation's, with when it was created; like
+        sandboxes, volumes the backend cannot attribute are left out.
       responses:
         "200":
           description: The installation's volumes.
@@ -282,11 +288,14 @@ components:
         tell which resources are still in use.
     Volume:
       type: object
-      required: [name]
+      required: [name, createdAt]
       additionalProperties: false
       properties:
         name:
           $ref: "#/components/schemas/VolumeName"
+        createdAt:
+          type: string
+          format: date-time
         owner:
           $ref: "#/components/schemas/Owner"
           description: Owner of the sandbox that created the volume; missing if it had none.

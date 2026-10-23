@@ -34,6 +34,7 @@ interface FakeSandbox {
 interface FakeVolume {
   files: Files;
   owner?: string;
+  createdAt: string;
 }
 
 /** The state of a fake backend, which several installations may share. */
@@ -103,7 +104,7 @@ export function createFakeSandboxApi({
       const mounted = new Map<string, Files>();
       for (const { volume, path } of mounts) {
         const key = volumeKey(volume);
-        if (!backend.volumes.has(key)) backend.volumes.set(key, { files: new Map(), ...(owner === undefined ? {} : { owner }) });
+        if (!backend.volumes.has(key)) backend.volumes.set(key, { files: new Map(), createdAt: new Date().toISOString(), ...(owner === undefined ? {} : { owner }) });
         mounted.set(mountPath(path), backend.volumes.get(key)!.files);
       }
       sandboxes.set(sandbox.id, { installation, sandbox, user, files: new Map(), mounts: mounted });
@@ -116,7 +117,7 @@ export function createFakeSandboxApi({
       const prefix = volumeKey("");
       return [...backend.volumes]
         .filter(([key]) => key.startsWith(prefix))
-        .map(([key, { owner }]): Volume => ({ name: key.slice(prefix.length), ...(owner === undefined ? {} : { owner }) }));
+        .map(([key, { owner, createdAt }]): Volume => ({ name: key.slice(prefix.length), createdAt, ...(owner === undefined ? {} : { owner }) }));
     },
     async exec(sandboxId, request) {
       return run(find(sandboxId), request);

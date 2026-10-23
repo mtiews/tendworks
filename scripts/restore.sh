@@ -12,8 +12,10 @@
 #
 # Refuses a running stack and a stack that holds data: stop and reset it first with
 #   docker compose -f deploy/compose.yaml down -v      (deletes the stack's data)
-# Session volumes are not in a backup: open chats and working tasks whose session volumes
-# are gone start over with an empty workspace. Needs bash (Git Bash on Windows) and docker compose.
+# Session volumes are not in a backup. Where they are gone, a run that was working continues
+# with its step's agent in a new session and an empty workspace, and an open chat continues
+# with a new agent session, without its earlier conversation, in an empty workspace.
+# Needs bash (Git Bash on Windows) and docker compose.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,7 +23,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 
 ARCHIVE=
 parse_stack_args "$@"
-set -- ${ARGS[@]+"${ARGS[@]}"}
+set -- ${SCRIPT_ARGS[@]+"${SCRIPT_ARGS[@]}"}
 while [ $# -gt 0 ]; do
   case "$1" in
     -h | --help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -42,18 +44,20 @@ fi
 # Containers and volumes as compose names them, created without starting anything.
 compose create
 POSTGRES=$(container_of postgres)
-INSTALLATION=$(docker_ inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$POSTGRES")
-IMAGE=$(docker_ inspect --format '{{.Config.Image}}' "$POSTGRES")
+INSTALLATION=$(docker_keeping_paths inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$POSTGRES")
+IMAGE=$(docker_keeping_paths inspect --format '{{.Config.Image}}' "$POSTGRES")
 STORE_VOLUME=$(volume_at "$POSTGRES" "$STORE_PATH")
-ENGINE_VOLUME=$(volume_at "$(container_of temporal)" "$ENGINE_PATH")
-TRANSCRIPTS_VOLUME=$(volume_at "$(container_of worker)" "$TRANSCRIPTS_PATH")
+TEMPORAL=$(container_of temporal)
+WORKER=$(container_of worker)
+ENGINE_VOLUME=$(volume_at "$TEMPORAL" "$ENGINE_PATH")
+TRANSCRIPTS_VOLUME=$(volume_at "$WORKER" "$TRANSCRIPTS_PATH")
 
 trap 'compose stop postgres >/dev/null 2>&1 || true' EXIT
 
 # A helper container of the store's image checks that the stack holds no data, then unpacks
 # the engine's state and the transcripts into their volumes, with the owners they had.
 echo "Restoring $ARCHIVE into installation $INSTALLATION..."
-docker_ run --rm -i --network none -e "TEND_INSTALLATION=$INSTALLATION" \
+docker_keeping_paths run --rm -i --network none -e "TEND_INSTALLATION=$INSTALLATION" \
   -v "$STORE_VOLUME:/restore/store:ro" -v "$ENGINE_VOLUME:/restore/engine" -v "$TRANSCRIPTS_VOLUME:/restore/transcripts" \
   --entrypoint sh "$IMAGE" -c '
     set -e
@@ -78,9 +82,9 @@ docker_ run --rm -i --network none -e "TEND_INSTALLATION=$INSTALLATION" \
 
 # The store: a fresh database, then the dump into it in one transaction.
 compose up -d --wait postgres
-compose exec -T postgres sh -c '
+compose exec -T -e "STORE_USER=$STORE_USER" -e "STORE_DATABASE=$STORE_DATABASE" postgres sh -c '
   set -eo pipefail
-  tar xzOf - store.dump | pg_restore --username tend --dbname tend --no-owner --single-transaction --exit-on-error
+  tar xzOf - store.dump | pg_restore --username "$STORE_USER" --dbname "$STORE_DATABASE" --no-owner --single-transaction --exit-on-error
 ' <"$ARCHIVE"
 
 echo "Restored installation $INSTALLATION from $ARCHIVE; the stack is stopped. Start it with:"

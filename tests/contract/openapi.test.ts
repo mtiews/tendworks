@@ -8,7 +8,7 @@ import {
   loadConfiguration,
   type ControlPlaneApiOptions,
 } from "@tendworks/control-plane";
-import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
+import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import {
   createApprovals,
   createFakePullRequests,
@@ -132,7 +132,7 @@ describe("control plane: status", () => {
 
 describe("control plane: a stopped platform", () => {
   const failed = createStaticHealthProbe("orchestration-schema", { status: "unhealthy", message: "migration 2 (add-index) failed" });
-  const stopped = createStoppedControlPlaneApi({ probes: [healthy, failed], reason: "schema orchestration: migration 2 (add-index) failed" });
+  const stopped = createStoppedControlPlaneApi({ probes: [healthy, failed] });
   const fetchStopped = contracts.controlPlane.guard((request) => stopped.fetch(request));
   const json = (body: unknown) => ({ body: JSON.stringify(body), headers: { authorization: `Bearer ${API_TOKEN}`, "content-type": "application/json" } });
   const read = { headers: { authorization: `Bearer ${API_TOKEN}` } };
@@ -172,6 +172,43 @@ describe("control plane: a stopped platform", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ title: "Platform stopped", status: 503 });
+  });
+});
+
+describe("a stopped worker, called by the control plane", () => {
+  const failed = createStaticHealthProbe("orchestration-schema", { status: "unhealthy", message: "schema orchestration: migration 2 (add-index) failed" });
+  const stopped = createStoppedBundleApi({ title: "Worker stopped", probes: [failed] });
+  const json = (body: unknown) => ({ body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+  // One valid request per operation of the worker's internal APIs.
+  const requests: ["orchestration" | "agentRuntime", string, string, RequestInit][] = [
+    ["orchestration", "POST", "/runs", json({ workflow: { document: { dsl: "1.0.0", namespace: "test", name: "hello", version: "0.1.0" }, do: [] } })],
+    ["orchestration", "GET", "/runs", {}],
+    ["orchestration", "GET", "/runs/r-1", {}],
+    ["agentRuntime", "POST", "/chats", json({ agent: "fake-assistant", text: "Hello" })],
+    ["agentRuntime", "GET", "/chats", {}],
+    ["agentRuntime", "GET", "/chats/c-1", {}],
+    ["agentRuntime", "POST", "/chats/c-1/messages", json({ text: "Hello?" })],
+    ["agentRuntime", "POST", "/chats/c-1/cancel", {}],
+    ["agentRuntime", "POST", "/chats/c-1/end", {}],
+    ["agentRuntime", "GET", "/sessions", {}],
+    ["agentRuntime", "GET", "/tasks/t-1/transcript", {}],
+    ["agentRuntime", "GET", "/tasks/t-1/transcript/stream", {}],
+  ];
+
+  it("still reports its health, naming the failed component", async () => {
+    const response = await contracts.health.guard((request) => stopped.fetch(request))(new Request("http://worker.test/health"));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ status: "unhealthy", components: [expect.objectContaining({ name: "orchestration-schema" })] });
+  });
+
+  it.each(requests)("%s: refuses %s %s with 503 Worker stopped, without the reason", async (api, method, path, init) => {
+    const response = await contracts[api].guard((request) => stopped.fetch(request))(new Request(`http://worker.test${path}`, { method, ...init }));
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toMatchObject({ title: "Worker stopped", status: 503 });
+    expect(JSON.stringify(body)).not.toContain("add-index");
   });
 });
 

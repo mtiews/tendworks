@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile defaults, how clients show costs and run origins, and (under ./migrations, kept out of the browser-safe entry point) versioned schema migrations for one domain's store, and (under ./secrets-file, also Node.js only) handing one consumer's secrets to another container through a file.",
+  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile defaults, how clients show costs and run origins, and (under ./migrations, kept out of the browser-safe entry point) versioned schema migrations for one domain's store and a bundle's start-up migration, (under ./secrets-file, also Node.js only) handing one consumer's secrets to another container through a file, and (under ./store-connection) the store's connection string with its password.",
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -19,6 +19,11 @@
       "source": "./src/secrets-file.ts",
       "types": "./dist/secrets-file.d.ts",
       "default": "./dist/secrets-file.js"
+    },
+    "./store-connection": {
+      "source": "./src/store-connection.ts",
+      "types": "./dist/store-connection.d.ts",
+      "default": "./dist/store-connection.js"
     }
   },
   "devDependencies": {

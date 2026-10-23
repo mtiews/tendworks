@@ -314,7 +314,7 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       expect((await context.api.list()).map(({ id }) => id)).not.toContain(owned.id);
     });
 
-    it("lists the volumes its sandboxes created, with the sandbox's owner, until they are deleted", async () => {
+    it("lists the volumes its sandboxes created, with the sandbox's owner and when they were created, until they are deleted", async () => {
       const volume = volumeName();
       const sandbox = await context.api.create(template(), { volumes: [{ volume, path: "/tmp" }], owner: "task-0815" });
       await context.api.destroy(sandbox.id);
@@ -322,7 +322,9 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       const listed = await context.api.listVolumes();
 
       for (const entry of listed) expect(violations("Volume", entry)).toEqual([]);
-      expect(listed).toContainEqual({ name: volume, owner: "task-0815" });
+      const entry = listed.find(({ name }) => name === volume);
+      expect(entry).toEqual({ name: volume, owner: "task-0815", createdAt: expect.any(String) });
+      expect(Date.now() - Date.parse(entry!.createdAt)).toBeLessThan(10 * 60_000);
 
       await context.api.deleteVolume(volume);
       expect((await context.api.listVolumes()).map(({ name }) => name)).not.toContain(volume);

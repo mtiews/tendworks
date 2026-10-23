@@ -11,10 +11,10 @@ const composeFile = fileURLToPath(new URL("../../deploy/compose.yaml", import.me
 const strong = "0123456789abcdef0123456789abcdef"; // betterleaks:allow test token for a refused start
 const other = "fedcba9876543210fedcba9876543210"; // betterleaks:allow test token for a refused start
 
-const startServer = (apiToken: string, readToken: string) =>
+const startServer = (apiToken: string, readToken: string, ...environment: string[]) =>
   promisify(execFile)(
     "docker",
-    ["compose", "-f", composeFile, "run", "--rm", "--no-deps", "-T", "-e", `TEND_API_TOKEN=${apiToken}`, "-e", `TEND_API_READ_TOKEN=${readToken}`, "server"],
+    ["compose", "-f", composeFile, "run", "--rm", "--no-deps", "-T", "-e", `TEND_API_TOKEN=${apiToken}`, "-e", `TEND_API_READ_TOKEN=${readToken}`, ...environment.flatMap((variable) => ["-e", variable]), "server"],
     { timeout: 60_000 },
   ).then(
     ({ stdout, stderr }) => ({ code: 0, output: stdout + stderr }),
@@ -42,5 +42,12 @@ describe("starting the server", () => {
 
     expect(code).not.toBe(0);
     expect(output).toContain("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN");
+  });
+
+  it("is refused without the store password; the log names its variable", { timeout: 60_000 }, async () => {
+    const { code, output } = await startServer(strong, other, "TEND_POSTGRES_PASSWORD=");
+
+    expect(code).not.toBe(0);
+    expect(output).toContain("TEND_POSTGRES_PASSWORD is not set");
   });
 });

@@ -22,7 +22,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: tend
-      POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-tend}
+      # No default: scripts/setup-env.sh generates it. The store takes it only when it
+      # initialises an empty volume; changing it later: docs/operator-guide.md, "Rotation".
+      POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       POSTGRES_DB: tend
     volumes:
       - postgres-data:/var/lib/postgresql
@@ -98,7 +100,10 @@ services:
       target: server
     restart: unless-stopped
     environment:
-      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend # betterleaks:allow laptop default password
+      # The store, and its password apart: the bundle encodes it into the connection itself
+      # and refuses to start without it.
+      TEND_DATABASE_URL: postgres://tend@postgres:5432/tend
+      TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_WORKER_URL: http://worker:8081
       TEND_CONFIG_DIR: /config
       # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
@@ -153,7 +158,8 @@ services:
     environment:
       TEND_EXECUTION_ENGINE_ADDRESS: temporal:7233
       TEND_SANDBOX_BACKEND_URL: http://docker-proxy:2375
-      TEND_DATABASE_URL: postgres://tend:${TEND_POSTGRES_PASSWORD:-tend}@postgres:5432/tend # betterleaks:allow laptop default password
+      TEND_DATABASE_URL: postgres://tend@postgres:5432/tend
+      TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_CONFIG_DIR: /config
       TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
       # Workflows reach the control plane API (and only it) from here, e.g. the merge step,

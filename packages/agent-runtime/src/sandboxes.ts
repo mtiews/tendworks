@@ -6,9 +6,9 @@ export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type ExecRequest = Schemas["ExecRequest"];
 export type ExecResult = Schemas["ExecResult"];
 export type VolumeMount = Schemas["VolumeMount"];
-/** A sandbox as the installation lists it, with the owner it was created with. */
-export type ListedSandbox = Pick<Schemas["Sandbox"], "id" | "owner">;
-/** A volume as the installation lists it, with the owner of the sandbox that created it. */
+/** A sandbox as the installation lists it, with the owner it was created with and when. */
+export type ListedSandbox = Pick<Schemas["Sandbox"], "id" | "owner" | "createdAt">;
+/** A volume as the installation lists it, with the owner of the sandbox that created it and when. */
 export type ListedVolume = Schemas["Volume"];
 
 /** A process in a sandbox with its standard streams open. */

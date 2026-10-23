@@ -7,6 +7,8 @@ info:
     reads agent sessions and leads chats through it; it is never published. Every agent
     session belongs to one A2A task (a run's step or a chat), so sessions are addressed by
     their task id; a chat's id is its task's id.
+    A worker that stopped, e.g. after a failed schema migration, answers every operation
+    with 503 and a problem titled `Worker stopped`; its health API names the reason.
 paths:
   /chats:
     post:
@@ -37,6 +39,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
     get:
       operationId: listChats
       summary: List chats, the most recently started first
@@ -47,6 +57,14 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/chat.schema.yaml#/$defs/chatList"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /chats/{chatId}:
     get:
       operationId: getChat
@@ -62,6 +80,14 @@ paths:
                 $ref: "../schemas/chat.schema.yaml#/$defs/chat"
         "404":
           description: No chat with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
           content:
             application/json:
               schema:
@@ -107,6 +133,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /chats/{chatId}/cancel:
     post:
       operationId: cancelChatTurn
@@ -136,6 +170,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /chats/{chatId}/end:
     post:
       operationId: endChat
@@ -159,6 +201,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /sessions:
     get:
       operationId: listAgentSessions
@@ -174,6 +224,14 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/agent-session.schema.yaml#/$defs/agentSessionList"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /tasks/{taskId}/transcript:
     get:
       operationId: getTaskTranscript
@@ -196,6 +254,14 @@ paths:
                 $ref: "#/components/schemas/TranscriptEntryList"
         "404":
           description: No task with this id, or it has no transcript.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
           content:
             application/json:
               schema:
@@ -235,6 +301,14 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "404":
           description: No task with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
           content:
             application/json:
               schema:

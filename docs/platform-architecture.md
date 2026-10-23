@@ -462,9 +462,9 @@ The walking skeleton runs on the developer's laptop. Before broadening, the plat
 
 - **Releases:** tagged releases (`v0.2.0` onwards), built on the host.
 - **Configuration:** the operator's configuration lives apart from the code. The starter configuration has no test fakes.
-- **Secure defaults:** no default tokens, the workflow engine's UI only on request.
+- **Secure defaults:** no default tokens or store password, the workflow engine's UI only on request.
 - **Running unattended:** restart policies, so the stack survives a host reboot.
-- **Updates:** versioned schema migrations per domain; backup and restore scripts.
+- **Updates:** versioned schema migrations per domain; a failed migration stops its bundle, which keeps reporting why (ADR 0021 (a-failed-migration-stops-the-bundle-not-the-process)); backup and restore scripts.
 - **Sandboxes:** named per installation, with a clean-up of orphans.
 - **Chat agents on Linux:** sandboxes reach the platform MCP server through an MCP-only gateway (ADR 0019 (sandboxes-reach-the-platform-mcp-server-through-an-mcp-only-gateway)).
 - **Access:** from the operator's devices only through a TLS layer in front of the localhost-bound server (ADR 0020 (remote-access-only-through-a-tls-layer-in-front-of-localhost)).
@@ -478,7 +478,7 @@ The former roadmap steps 2–6 move back by one.
 - answers an `assistant` chat from live state;
 - serves the web UI to the operator's phone over HTTPS;
 - continues a run across a host reboot;
-- updates to a new tag with a migration;
+- updates to a new tag (upgrading stores of older schema versions is proven by the migration integration tests);
 - restores from a backup;
 - leaves no orphaned sandboxes or volumes.
 

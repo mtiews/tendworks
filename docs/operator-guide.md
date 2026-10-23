@@ -77,10 +77,9 @@ All commands run from the repository root. Compose uses `deploy/` as its project
    scripts/setup-env.sh
    ```
 
-   Copies `deploy/.env.example` to `deploy/.env`, fills in a random `TEND_API_TOKEN` and a different random `TEND_API_READ_TOKEN`, sets mode 600 and refuses to overwrite an existing file. It never prints the tokens. There are no default tokens: the server refuses to start without both and names the variable to set.
+   Copies `deploy/.env.example` to `deploy/.env`, fills in a random `TEND_API_TOKEN`, a different random `TEND_API_READ_TOKEN` and a random store password `TEND_POSTGRES_PASSWORD`, sets mode 600 and refuses to overwrite an existing file. It never prints them. There are no defaults: the server refuses to start without both tokens, server and worker refuse to start without the store password, and each names the variable to set. The store takes its password only when it is created; changing it later needs the [rotation](#rotation) steps.
 
 3. **Fill in the rest of `deploy/.env`** ([Secrets](#secrets)) **before the first start**:
-   - `TEND_POSTGRES_PASSWORD` (`openssl rand -hex 32`): the store takes it only when it is created; changing it later needs the [rotation](#rotation) steps.
    - `TEND_CLAUDE_CODE_CREDENTIAL` and the matching `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
    - `TENDWORKS_AGENT_GITHUB_TOKEN` and `TENDWORKS_PLATFORM_GITHUB_TOKEN`, as in [GitHub access](#before-the-first-real-run-github-access).
 
@@ -202,7 +201,7 @@ All secrets live in `deploy/.env`. Configuration only references them (ADR 0008)
 | --- | --- | --- | --- | --- | --- |
 | `TEND_API_TOKEN` | full access to the control plane API: start runs, merge, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including approving merges |
 | `TEND_API_READ_TOKEN` | read-only API access (403 on writes); the platform MCP server reads with it | server, worker, and the Claude Code session of profiles with `mcp: [tendworks]` (as an MCP header, not as an environment variable); optionally you for a read-only UI | read only; must differ from `TEND_API_TOKEN` | `scripts/setup-env.sh`; at least 16 characters | all runs, transcripts, chats, triggers and agents can be read |
-| `TEND_POSTGRES_PASSWORD` | database password of user `tend` (default `tend`) | postgres, server, worker (in `TEND_DATABASE_URL`) | — | `openssl rand -hex 32` | low while the store is not published; full read/write of all platform state for anyone who reaches it |
+| `TEND_POSTGRES_PASSWORD` | database password of user `tend`; no default, server and worker refuse to start without it | postgres, server, worker (which encode it into their connection) | — | `scripts/setup-env.sh` (or `openssl rand -hex 32`) | low while the store is not published; full read/write of all platform state for anyone who reaches it |
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with your subscription | worker → every Claude Code sandbox, in the agent process's environment | — | `claude setup-token` | model usage on your subscription |
 | `ANTHROPIC_API_KEY` | Claude Code with an API key, billed per use | worker → every Claude Code sandbox, as above | a key for this purpose only; spend limits in the Anthropic Console | Anthropic Console | spend on your API account |
@@ -248,13 +247,13 @@ No compose edit: the one-shot service `agent-secrets` gets `deploy/.env` as a wh
 | API token, read token | change `deploy/.env`, `up -d --wait` (server and worker get the new value), re-export it for `tend`, sign in again on every device |
 | Claude Code credential, agent secrets | change `deploy/.env`, `up -d --wait`. Agent secrets need no worker restart; a recreated worker resumes interrupted sessions in a new sandbox |
 | platform GitHub token | change `deploy/.env`, `up -d --wait` (server) |
-| Postgres password | the store applies `POSTGRES_PASSWORD` only when it initialises an empty volume, so changing `.env` alone breaks the connection. Change it in the database first (`docker compose -f deploy/compose.yaml exec postgres psql -U tend -d tend -c "ALTER USER tend PASSWORD '<new>'"`), then in `.env`, then `up -d --wait`. Not exercised by the project; test it on a copy first |
+| Postgres password | the store applies `POSTGRES_PASSWORD` only when it initialises an empty volume, so changing `.env` alone breaks the connection. Change it in the database first with `ALTER USER` (`docker compose -f deploy/compose.yaml exec postgres psql -U tend -d tend -c "ALTER USER tend PASSWORD '<new>'"`, a value without `'`, e.g. `openssl rand -hex 32`), then in `.env`, then `up -d --wait`. A store created before `v0.2.0` without a password set has the password `tend`. Not exercised by the project; test it on a copy first |
 
 Rotate the API token at once when a device that was signed in is lost.
 
 ### Residual risks
 
-- **Agent secrets on a volume.** The `TENDWORKS_AGENT_*` values sit as a file on the volume `<installation>_agent-secrets` until the next `up` rewrites it or `down -v` removes it. A line you delete from `deploy/.env` is gone from the file after the next `up -d`; the old file content stays readable to anyone with Docker access until then.
+- **Agent secrets on a volume.** The `TENDWORKS_AGENT_*` values sit in plain text as a file (mode 600) on the volume `<installation>_agent-secrets` until `down -v` removes it; each `up` rewrites it. A line you delete from `deploy/.env` is gone from the file after the next `up -d`; the old file content stays readable to anyone with Docker access until then.
 - **Sandboxes and the API port.** On a Linux engine, sandboxes don't reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). On Docker Desktop they reach it through `host.docker.internal`, and only the tokens guard the API. Sandboxes still reach everything else the bridge routes to, including your LAN and the internet.
 - **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network and can reach each other on it (ADR 0019). Other sandboxes stay apart. Through the gateway, sandboxes reach only `/mcp`, read-only.
 - **The agent token can merge** on repositories without rulesets ([GitHub access](#before-the-first-real-run-github-access)); the merge gate governs only what the platform does.
@@ -410,8 +409,9 @@ Names assume the installation `tendworks`; with another `COMPOSE_PROJECT_NAME`, 
 
 When the worker starts and every 5 minutes, it removes the sandboxes and session volumes of its installation that belong to no live task and no open chat: leftovers of failed removals, of a worker that died, or of a store that was reset or restored.
 
-- The owner label names the task. A session volume from before `v0.2.0` without one is matched by its name (`<task>-workspace`, `<task>-session`); a sandbox without one is always removed, since no worker can reattach to it. Sandboxes go before their volumes.
-- It touches only its own installation's resources (label `dev.tendworks.installation`, or the installation's names for unlabelled resources from before `v0.2.0`).
+- It removes only what carries both its installation's label (`dev.tendworks.installation`) and an owner label (`dev.tendworks.owner`, the task). Resources from before `v0.2.0` have neither and are never removed automatically, since other stacks on the engine used the same names; review and remove them by hand ([Reset](#reset)). Sandboxes go before their volumes.
+- It removes an orphan only once it is 10 minutes old (`sandbox clean-up: keeping ... until it is 10 minutes old` until then), so it never races a task that is just starting.
+- A pass that cannot read the live tasks and chats (e.g. the store is unreachable) removes nothing; it is reported like a failed removal and retried.
 - It keeps everything of running tasks and open chats, including the volumes of an idle chat and of a run's task that waits to be resumed.
 - Each removal is logged: `sandbox clean-up: removed sandbox <id> of <task>, ...` (`docker compose -f deploy/compose.yaml logs worker`).
 - A failed removal is logged (`sandbox clean-up: cannot remove ...`), and `/status` shows `sandbox-cleanup` unhealthy until a later pass succeeds. A removal that fails while a task or chat ends is recorded as an `error` entry in its transcript.
@@ -442,7 +442,7 @@ Downgrades are not supported; the way back is the backup taken before the update
 
 - Your configuration is not touched; apply configuration changes the notes name in your own repository. An invalid configuration stops the server (see the log).
 - A template that names `tendworks/sandbox-claude-code` without a tag follows the pin in `deploy/compose.yaml`.
-- **Migrations:** each domain migrates its own tables at startup, each migration in its own transaction under a lock, so concurrent starts migrate once. A failed migration is rolled back; the bundle then stops working but keeps running: the server answers only `GET /status` (every other path 503 `Platform stopped`), the worker only `/health`, and `/status` shows the component `<schema>-schema` unhealthy. `up --wait` does not notice this, hence step 4. Then:
+- **Migrations:** each domain migrates its own tables at startup, each migration in its own transaction under a lock, so concurrent starts migrate once. A failed migration is rolled back; the bundle then stops working but keeps running ([ADR 0021](adr/0021-a-failed-migration-stops-the-bundle-not-the-process.md)): the server answers only `GET /status` (every other path 503 `Platform stopped`), the worker only `/health` (every other path 503 `Worker stopped`, so API requests that need the worker, such as runs and chats, fail with 503), and `/status` shows the component `<schema>-schema` unhealthy with the error. The other bundle keeps running. `up --wait` does not notice this, hence step 4. Then:
   - fix the cause the log names and `up -d` again (the next start retries), or
   - go back: stop the stack, `down -v`, check out the previous tag, [restore](#backup-and-restore) the backup of step 2 and start. Checking out the previous tag alone is not enough when another domain already migrated: the old release refuses a store newer than it knows.
 
@@ -465,7 +465,10 @@ docker compose -f deploy/compose.yaml up -d --wait
 - The restore refuses a running stack and a stack that holds data, and leaves the stack stopped.
 - A backup of an older release is migrated on start; one of a newer release is refused by the server.
 - Both scripts take `--env-file` and `--project-name` and follow `COMPOSE_PROJECT_NAME`, like compose.
-- **Not in a backup:** `deploy/.env`, your configuration (keep it in its own repository) and session volumes. A restore therefore ends open agent sessions: chats and working tasks whose session volumes are gone start over with an empty workspace.
+- **Not in a backup:** `deploy/.env`, your configuration (keep it in its own repository) and session volumes (an agent's workspace and conversation). Where they are gone after a restore (after a [reset](#reset), on a new host):
+  - a run that was working continues; its working step's agent starts a new session from the step's message, in an empty workspace (checked out again if the step names a repository);
+  - an open chat stays open with its transcript; its next turn (or the turn that was interrupted) starts a new agent session without the earlier conversation, in an empty workspace (checked out again if the chat names a repository).
+  - session volumes still on the engine (a restore on the same host without a reset of them) are used as they are.
 - **Archives are sensitive:** they hold chat content, run inputs and transcripts (no tokens from `deploy/.env`). Keep them mode 600 and encrypt copies off the host.
 - Schedule backups yourself, e.g. a nightly cron job with `--output-dir`; nothing prunes old archives.
 
@@ -484,7 +487,15 @@ docker network rm tendworks-sandboxes
 - `down -v` removes the containers, the gateway's network and the volumes `postgres-data`, `temporal-data`, `transcripts` and `agent-secrets`: all runs, chats, approvals, notifications and transcripts.
 - It does **not** remove sandboxes, session volumes, the sandbox network or images, hence the other commands. A stack started again on an empty store would remove leftover sandboxes and session volumes with its clean-up, but a reset should not depend on that.
 - Remove the sandboxes before `down`, with the worker stopped so it starts none meanwhile: while a sandbox of an MCP profile is attached to the gateway's network, `down` leaves that network behind ("Resource is still in use").
-- Replace `tendworks` with your installation name if you set one. Resources created before `v0.2.0` have no installation label: find them by name (`docker ps -a --filter name=tendworks-sandbox-`, `docker volume ls --filter name=tendworks-volume-`) and check the lists before removing, since other stacks on the same engine used the same names then.
+- Replace `tendworks` with your installation name if you set one.
+- **Resources from before `v0.2.0`** have no installation label, so neither the clean-up nor the commands above touch them. Stop every stack older than `v0.2.0` on the engine first, list them, check the list (other stacks used the same names then), and remove what you reviewed:
+
+  ```sh
+  docker ps -a --filter label=dev.tendworks.sandbox --format '{{.Names}}\t{{.Label "dev.tendworks.installation"}}\t{{.Status}}' | awk -F'\t' '$2 == ""'
+  docker volume ls --filter label=dev.tendworks.volume --format '{{.Name}}\t{{.Label "dev.tendworks.installation"}}' | awk -F'\t' '$2 == ""'
+  docker rm -f <sandbox names you reviewed>
+  docker volume rm <volume names you reviewed>
+  ```
 
 ### Cleaning images
 
@@ -503,8 +514,10 @@ docker network rm tendworks-sandboxes
 | `TEND_API_TOKEN is not set; ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits and restarts | no `deploy/.env`, or the token is empty; `scripts/setup-env.sh` (or `openssl rand -hex 32`), then `up -d --wait` |
 | `TEND_API_TOKEN must be at least 16 characters; ...` (same for `TEND_API_READ_TOKEN`) | server log | token too short; `openssl rand -hex 32`, then `up -d --wait` |
 | `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, ...` | server log | use two different values |
+| `TEND_POSTGRES_PASSWORD is not set; ...` | server or worker log, exits and restarts | add it to `deploy/.env` (`openssl rand -hex 32` for a new store; for a store created before `v0.2.0` without one: `tend`, or change it, [Rotation](#rotation)), then `up -d --wait` |
+| `password authentication failed for user "tend"` | server or worker log | `TEND_POSTGRES_PASSWORD` differs from the store's password, which the store took when it was created; set the old one or change it with `ALTER USER` ([Rotation](#rotation)) |
 | `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML counts (hidden directories such as `.github/` are skipped) |
-| `schema <schema>: migration <n> (<name>) failed: ...` or `... newer than this release knows ...; downgrades are not supported`; `/status` shows `<schema>-schema` unhealthy; every other request answers 503 `Platform stopped` | server or worker log, `/status` | see [Update](#update), migrations: fix and `up -d`, or go back with the backup |
+| `schema <schema>: migration <n> (<name>) failed: ...` or `... newer than this release knows ...; downgrades are not supported`; `/status` shows `<schema>-schema` unhealthy; every other request answers 503 `Platform stopped` (server) or `Worker stopped` (worker) | server or worker log, `/status` | see [Update](#update), migrations: fix and `up -d`, or go back with the backup |
 | `missing environment variable <NAME>` | server or worker log | a bundle setting is missing; only happens with a modified compose file |
 | `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; ...` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
 | run fails: `no harness credential configured: ...` | `tend run get` | as above |
