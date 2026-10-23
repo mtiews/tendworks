@@ -22,13 +22,16 @@ The stack is the laptop profile (`deploy/compose.yaml`): one operator, one machi
 | Service | Role | Published |
 | --- | --- | --- |
 | `postgres` | state of all domains, event bus | no |
-| `temporal` | durable execution engine in dev mode | engine web UI on `127.0.0.1:8233` (`TEND_ENGINE_UI_PORT`) |
+| `temporal` | durable execution engine in dev mode, without its web UI | no |
+| `temporal-ui` | the engine's web UI, only with `--profile debug` (no login) | `127.0.0.1:8233` (`TEND_ENGINE_UI_PORT`) |
 | `docker-proxy` | the worker's only way to the Docker API, restricted by path (ADR 0001) | no, internal network |
 | `server` | control plane API, trigger gateway, human interaction, platform MCP server (`/mcp`), web UI (`/ui/`) | `127.0.0.1:8080` (`TEND_PORT`) |
 | `worker` | workflow interpreter, agent runtime; creates sandboxes through the socket proxy | no |
 | sandboxes | one container per agent session (`tendworks-sandbox-<id>`), created by the worker, on the Docker network `tendworks-sandboxes` | no |
 
 Sandbox images are never pulled by the platform; you build them once (see [Install](#install)).
+
+Every long-running service has the restart policy `unless-stopped`: it comes back after a crash and after a host reboot (as long as the Docker service starts at boot), unless you stopped it yourself.
 
 ## Prerequisites
 
@@ -64,11 +67,10 @@ All commands run from the repository root; `deploy/.env` is picked up automatica
 2. **Create `deploy/.env`**
 
    ```sh
-   cp deploy/.env.example deploy/.env
-   chmod 600 deploy/.env
+   scripts/setup-env.sh
    ```
 
-   Fill it in as described in [Secrets](#secrets). At least: `TEND_POSTGRES_PASSWORD`, `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` (each `openssl rand -hex 32`) and a Claude Code credential. Leaving the tokens empty falls back to well-known defaults (`laptop-only-insecure-...`) that the server accepts without warning.
+   It copies `deploy/.env.example` to `deploy/.env`, fills in a random `TEND_API_TOKEN` and a different random `TEND_API_READ_TOKEN`, makes the file readable by you only (mode 600) and refuses to overwrite an existing `deploy/.env`. It never prints the tokens. Fill in the rest as described in [Secrets](#secrets): at least `TEND_POSTGRES_PASSWORD` (`openssl rand -hex 32`) and a Claude Code credential. There are no default tokens: the server refuses to start without both and names the variable to set.
 
 3. **Build the sandbox image** (the platform never pulls it)
 
@@ -122,16 +124,16 @@ Two places, strictly separated:
 
 ### Settings in `deploy/.env` besides secrets
 
-These are read by `deploy/compose.yaml` but not listed in `deploy/.env.example`:
+`deploy/.env.example` lists every variable `deploy/compose.yaml` reads; those with a default appear commented out (`# TEND_PORT=8080`). Besides the secrets:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `TEND_CONFIG_PATH` | `../examples/config` | configuration directory on the host; relative paths resolve against `deploy/`, so prefer an absolute path |
 | `TEND_PORT` | `8080` | API, UI and MCP port, published on `127.0.0.1` only |
-| `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only |
+| `TEND_ENGINE_UI_PORT` | `8233` | Temporal's web UI, published on `127.0.0.1` only and only with `--profile debug` |
 | `COMPOSE_PROJECT_NAME` | `tendworks` | only for parallel stacks; volume and image names follow it |
 | `TEND_PLATFORM_MCP_URL` | `http://host.docker.internal:<TEND_PORT>/mcp` | where sandboxes reach the platform MCP server; no working value on Linux yet ([Known gaps](#known-gaps-on-linux)) |
-| `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code (listed in `.env.example`) |
+| `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
 
 ### Your own configuration directory
 
@@ -167,7 +169,7 @@ Rules the loader enforces:
 
 **Target repository.** The example targets `mtiews/tendworks-playground`. To use your own repository, change `spec.source.issues.repository` in `triggers/playground-ready-for-agent.yaml` and scope both GitHub tokens to that repository. The workflow derives the clone URL from the issue (`https://github.com/<repository>.git`). The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
 
-**Restarts.** `docker compose -f deploy/compose.yaml restart server worker` after any configuration change is always enough; running runs resume after a restart (that is the milestone 1 success criterion), and open chats are taken up again by the worker.
+**Restarts.** `docker compose -f deploy/compose.yaml restart server worker` after any change to the configuration directory is always enough (after a change to `deploy/.env`, use `up -d --wait` instead: `restart` keeps the old environment); running runs resume after a restart (that is the milestone 1 success criterion), and open chats are taken up again by the worker.
 
 ## Secrets
 
@@ -227,15 +229,15 @@ A reference outside its prefix is a configuration error at startup. `TEND_API_TO
 - **Token in browser storage.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device". A script injected into the UI could read it; a strict CSP and sanitised agent output are the guards (ADR 0018). Don't tick "Stay signed in" on a shared browser.
 - **Socket proxy.** It filters paths, not request bodies: whoever reaches it can create a privileged container, i.e. become root on the host. Only the worker reaches it (ADR 0001).
 - **Isolation class `container`** shares the host kernel; a kernel exploit from a sandbox reaches the host. Put an outer boundary around it (dedicated VM) when agents process untrusted content such as public issues (ADR 0001).
-- **Temporal's web UI** on `127.0.0.1:8233` has no authentication; every local user of the host can open it.
+- **Temporal's web UI** has no authentication; while it runs (`--profile debug`, on `127.0.0.1:8233`), every local user of the host can open it. Stop it when you are done: `docker compose -f deploy/compose.yaml stop temporal-ui`.
 
 ## Access
 
-The stack publishes the API, UI and MCP endpoint on `127.0.0.1:8080` only, and the Temporal UI on `127.0.0.1:8233` (ADR 0018). Reach them from your laptop through an SSH tunnel:
+The stack publishes the API, UI and MCP endpoint on `127.0.0.1:8080` only (ADR 0018), and the Temporal UI on `127.0.0.1:8233` only while you run it with `docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui`. Reach them from your laptop through an SSH tunnel:
 
 ```sh
 ssh -L 8080:localhost:8080 <host>                               # API, UI, tend
-ssh -L 8080:localhost:8080 -L 8233:localhost:8233 <host>        # plus the Temporal UI
+ssh -L 8080:localhost:8080 -L 8233:localhost:8233 <host>        # plus the Temporal UI (profile debug)
 ```
 
 Then on the laptop: `http://localhost:8080/` in the browser, and `tend` with its default `TEND_URL=http://localhost:8080` (build it there as in [Install](#install), step 5, or run `tend` on the host over SSH).
@@ -309,7 +311,9 @@ Before you start:
 | Notifications, triggers, agents | `tend notification list`, `tend trigger list` (last check per binding), `tend agent list` (active sessions per profile) |
 | Chats | `tend chat <profile>`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
 | Live sandboxes | `docker ps --filter label=dev.tendworks.sandbox` |
-| Restart | `docker compose -f deploy/compose.yaml restart server worker` |
+| Restart (after a configuration change) | `docker compose -f deploy/compose.yaml restart server worker` |
+| Apply a change to `deploy/.env` | `docker compose -f deploy/compose.yaml up -d --wait` (`restart` keeps the old environment) |
+| Workflow engine UI (debugging) | `docker compose -f deploy/compose.yaml --profile debug up -d temporal-ui`, afterwards `... stop temporal-ui` |
 | Stop / start | `docker compose -f deploy/compose.yaml stop`, `... up -d --wait` |
 
 ### Where data lives
@@ -398,8 +402,8 @@ These labels are shared by every Tendworks stack and test run on the same Docker
 
 | Symptom or message | Where | Cause and fix |
 | --- | --- | --- |
+| `TEND_API_TOKEN is not set; ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits and restarts | no `deploy/.env`, or the token is empty in it; create the file with `scripts/setup-env.sh` (or fill in `openssl rand -hex 32`), then `up -d --wait` |
 | `TEND_API_TOKEN must be at least 16 characters; generate one with ...` (same for `TEND_API_READ_TOKEN`) | server log, server exits | token too short; `openssl rand -hex 32`, then `up -d --wait` |
-| `TEND_API_READ_TOKEN must be set: agent profile assistant lists the platform MCP server (mcp: [tendworks]), which reads with it` | server log, server exits | a profile lists `mcp: [tendworks]` and no read token reaches the server. With the compose defaults this cannot happen, only when the variable is set empty elsewhere |
 | `TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state` | server log, server exits | use two different values |
 | `<file>: neither a workflow nor a document with a kind ...`, `unknown kind`, `invalid YAML`, `... calls agent://<x>, but no agent profile '<x>' is configured` | server or worker log, exits | configuration invalid; the log lists every issue. Stray YAML (e.g. `.github/`) in the configuration directory counts |
 | `missing environment variable <NAME>` | server or worker log | a bundle setting is missing; only happens with a modified compose file |

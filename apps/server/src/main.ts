@@ -58,13 +58,13 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 const platformSecrets = createSecretResolver("platform", process.env);
 
 // Every operation but GET /status needs a token: the API token for anything, the
-// optional read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
-// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
-const apiToken = env("TEND_API_TOKEN");
+// read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
+// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)). Both must be
+// set; there are no defaults, and compose passes an unset variable as an empty string.
+const apiToken = process.env.TEND_API_TOKEN || undefined;
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
-// Profiles that list the platform MCP server read with the read-only token, so it must be set then.
-const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }), agentProfiles: configuration.agentProfiles });
-if (tokenProblems.length > 0) {
+const tokenProblems = apiTokenProblems({ ...(apiToken === undefined ? {} : { apiToken }), ...(readToken === undefined ? {} : { readToken }) });
+if (apiToken === undefined || readToken === undefined || tokenProblems.length > 0) {
   for (const problem of tokenProblems) console.error(problem);
   process.exit(1);
 }
@@ -134,7 +134,7 @@ const api = createControlPlaneApi({
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
-  ...(readToken === undefined ? {} : { readToken }),
+  readToken,
   ...(existsSync(webUiRoot) ? { webUi: { root: webUiRoot } } : {}),
 });
 console.log(existsSync(webUiRoot) ? `web UI: ${webUiRoot} under /ui/` : `web UI: no build at ${webUiRoot}; /ui/ answers 404`);

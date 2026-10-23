@@ -10,7 +10,7 @@ Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agent
 - `pnpm check`: generate types from `contracts/`, typecheck, lint (ESLint with type-aware rules), architecture rules (dependency-cruiser), unit and view tests (`tests/web`)
 - `pnpm coverage`: unit + integration tests with coverage thresholds (see `vitest.config.ts`); thresholds may only be raised, never lowered without a reason in the pull request
 - Pre-commit hook: Betterleaks scans staged changes for secrets (`.githooks/`, installed by `pnpm install`; needs `betterleaks` on PATH). Known dummy values carry `betterleaks:allow` with a reason
-- `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` and the browser tests (`tests/browser`, Playwright; `pnpm e2e:browser` alone) against it
+- `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` and the browser tests (`tests/browser`, Playwright; `pnpm e2e:browser` alone) against it. Needs `deploy/.env` with tokens: create it once with `scripts/setup-env.sh`, as an operator does (tests read the tokens from it)
 - `pnpm --filter @tendworks/web dev`: web UI dev server at `http://localhost:5173/ui/`, proxying the API to the running stack
 - `node apps/cli/dist/main.js status` after `pnpm build`: the `tend` CLI against `http://localhost:8080` (override with `--url` or `TEND_URL`)
 
