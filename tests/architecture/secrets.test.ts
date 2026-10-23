@@ -42,10 +42,14 @@ it("never lets an agent profile hand the read-only token into a sandbox", () => 
 });
 
 it("starts sandboxes on a network of their own, not on one of the stack's", () => {
-  const network = compose.services.worker?.environment?.TEND_SANDBOX_NETWORK;
-  const stack = ["default", ...Object.keys(compose.networks ?? {}), ...Object.values(compose.networks ?? {}).flatMap(({ name }) => (name ? [name] : []))];
+  // The sandbox adapter names it <installation>-sandboxes, the installation being the
+  // project name; compose names the stack's networks <project>_<network> unless they
+  // carry a name of their own.
+  const project = "tendworks";
+  const network = `${project}-sandboxes`;
+  const stack = ["default", ...Object.keys(compose.networks ?? {})].map((name) => `${project}_${name}`);
+  const named = Object.values(compose.networks ?? {}).flatMap(({ name }) => (name ? [name.replaceAll("${COMPOSE_PROJECT_NAME}", project)] : []));
 
-  expect(network).toEqual(expect.any(String));
-  expect(stack).not.toContain(network);
-  expect(stack.map((name) => `tendworks_${name}`)).not.toContain(network);
+  expect(compose.services.worker?.environment?.TEND_INSTALLATION).toBe("${COMPOSE_PROJECT_NAME}");
+  expect([...stack, ...named]).not.toContain(network);
 });

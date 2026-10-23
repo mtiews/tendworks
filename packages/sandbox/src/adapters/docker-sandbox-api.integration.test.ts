@@ -50,11 +50,20 @@ afterAll(async () => {
   if (leftovers) await docker("rm", "-f", "-v", ...leftovers.split(/\s+/));
   const volumes = await docker("volume", "ls", "-q", "--filter", `label=${runLabel}`);
   if (volumes) await docker("volume", "rm", "-f", ...volumes.split(/\s+/));
+  const networks = await docker("network", "ls", "-q", "--filter", `label=${runLabel}`);
+  if (networks) await docker("network", "rm", ...networks.split(/\s+/));
 });
 
-const createApi = () => createDockerSandboxApi({ url: proxyUrl, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
+// Installations of this run only, so nothing here meets another stack's sandboxes. The
+// neighbour's name starts like this installation's volume names, which must not confuse them.
+const installation = `tendworks-test-${crypto.randomUUID().slice(0, 8)}`;
+const neighbour = `${installation}-volume`;
+// Starting a sandbox on a network without traffic between its containers takes Docker
+// several times longer, so only the tests about the network use one.
+const createApi = (name = installation, { sandboxNetwork = false } = {}) =>
+  createDockerSandboxApi({ url: proxyUrl, installation: name, sandboxNetwork, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
 
-describeSandboxApi("Docker adapter through the socket proxy", () => ({ api: createApi(), image }));
+describeSandboxApi("Docker adapter through the socket proxy", () => ({ api: createApi(), neighbour: createApi(neighbour), image }));
 
 describe.concurrent("Docker adapter", () => {
   const created: string[] = [];
@@ -130,30 +139,70 @@ describe.concurrent("Docker adapter", () => {
   });
 });
 
-describe("Docker adapter with a sandbox network", () => {
-  const network = `tendworks-test-sandboxes-${crypto.randomUUID().slice(0, 8)}`;
-  const api = () => createDockerSandboxApi({ url: proxyUrl, network, labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! } });
+describe("Docker adapter resources of an installation", () => {
+  const own = `${installation}-own`;
   const created: { api: SandboxApi; id: string }[] = [];
+  const volumes: string[] = [];
+  const networked: SandboxTemplate = { apiVersion: "tendworks.dev/v1", kind: "SandboxTemplate", metadata: { name: "networked" }, spec: { image } };
+  const label = (kind: "container" | "volume" | "network", name: string, key: string) =>
+    docker(kind, "inspect", "--format", `{{index .${kind === "container" ? "Config.Labels" : "Labels"} "${key}"}}`, name);
 
   afterAll(async () => {
     await Promise.all(created.map(({ api, id }) => api.destroy(id)));
-    await docker("network", "rm", network).catch(() => {});
+    await Promise.all(volumes.map((volume) => createApi(own).deleteVolume(volume)));
   });
 
-  it("creates the network once, without traffic between sandboxes, and starts every sandbox on it", async () => {
+  it("names and labels sandboxes, volumes and the sandbox network after the installation", async () => {
     // Two adapters, as after a restart: the second finds the network the first created.
-    const first = api();
-    const second = api();
-    const sandboxes = await Promise.all([first, second].map(async (adapter) => {
-      const sandbox = await adapter.create({ apiVersion: "tendworks.dev/v1", kind: "SandboxTemplate", metadata: { name: "networked" }, spec: { image } });
-      created.push({ api: adapter, id: sandbox.id });
-      return sandbox;
-    }));
+    const adapters = [createApi(own, { sandboxNetwork: true }), createApi(own, { sandboxNetwork: true })];
+    const sandboxes = await Promise.all(
+      adapters.map(async (adapter, index) => {
+        const volume = `named-${index}-${crypto.randomUUID().slice(0, 8)}`;
+        volumes.push(volume);
+        const sandbox = await adapter.create(networked, { volumes: [{ volume, path: "/tmp" }], owner: `task-${index}` });
+        created.push({ api: adapter, id: sandbox.id });
+        return { ...sandbox, volume };
+      }),
+    );
 
-    for (const { id } of sandboxes) {
-      expect(await docker("inspect", "--format", "{{.HostConfig.NetworkMode}}", `tendworks-sandbox-${id}`)).toBe(network);
+    for (const [index, { id, volume }] of sandboxes.entries()) {
+      const container = `${own}-sandbox-${id}`;
+      expect(await docker("inspect", "--format", "{{.HostConfig.NetworkMode}}", container)).toBe(`${own}-sandboxes`);
+      expect(await label("container", container, "dev.tendworks.installation")).toBe(own);
+      expect(await label("container", container, "dev.tendworks.owner")).toBe(`task-${index}`);
+      expect(await label("volume", `${own}-volume-${volume}`, "dev.tendworks.installation")).toBe(own);
     }
-    expect(await docker("network", "inspect", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}', network)).toBe("false");
+    expect(await label("network", `${own}-sandboxes`, "dev.tendworks.installation")).toBe(own);
+    expect(await docker("network", "inspect", "--format", '{{index .Options "com.docker.network.bridge.enable_icc"}}', `${own}-sandboxes`)).toBe("false");
+  });
+
+  it("still lists and reaches sandboxes and volumes created before installations had labels", async () => {
+    // Before installation names, the only installation's resources carried names of the
+    // same scheme (`tendworks-sandbox-<id>`, `tendworks-volume-<volume>`), without its label.
+    const api = createApi(own);
+    const id = crypto.randomUUID().replaceAll("-", "");
+    const volume = `legacy-${id.slice(0, 8)}`;
+    volumes.push(volume);
+    await docker("volume", "create", "--label", runLabel, "--label", `dev.tendworks.volume=${volume}`, `${own}-volume-${volume}`);
+    await docker(
+      "run", "-d", "--name", `${own}-sandbox-${id}`, "--label", runLabel, "--label", `dev.tendworks.sandbox=${id}`,
+      "--label", "dev.tendworks.sandbox-template=legacy", "--entrypoint", "sleep", image, "infinity",
+    );
+    created.push({ api, id });
+
+    expect(await api.list()).toContainEqual(expect.objectContaining({ id, template: "legacy", state: "running" }));
+    expect(await api.listVolumes()).toContainEqual({ name: volume });
+    expect((await api.exec(id, { command: ["echo", "still here"] })).stdout).toBe("still here\n");
+  });
+
+  it("lists a sandbox that stopped as stopped", async () => {
+    const api = createApi(own);
+    const { id } = await api.create(networked);
+    created.push({ api, id });
+
+    await docker("stop", "-t", "0", `${own}-sandbox-${id}`);
+
+    expect(await api.list()).toContainEqual(expect.objectContaining({ id, state: "stopped" }));
   });
 });
 

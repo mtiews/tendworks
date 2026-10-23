@@ -10,9 +10,27 @@ info:
     on with them. Terms
     follow OpenSandbox so another backend can be placed behind it. Its first
     consumer, the agent runtime, calls it in-process; snapshot, restore,
-    pause and ports follow when needed.
+    pause and ports follow when needed. Every implementation serves one
+    installation: several installations may share a backend, but each one
+    lists, reaches and deletes only its own sandboxes and volumes.
 paths:
   /sandboxes:
+    get:
+      operationId: listSandboxes
+      summary: List the installation's sandboxes, running or not
+      description: >-
+        Every sandbox of this installation that still exists on the backend, also
+        those that have stopped (e.g. after the backend host restarted) and those
+        no consumer remembers any more, so they can be found and destroyed.
+      responses:
+        "200":
+          description: The installation's sandboxes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Sandbox"
     post:
       operationId: createSandbox
       summary: Create and start a sandbox from a sandbox template
@@ -45,6 +63,19 @@ paths:
       responses:
         "204":
           description: The sandbox no longer exists.
+  /volumes:
+    get:
+      operationId: listVolumes
+      summary: List the installation's volumes
+      responses:
+        "200":
+          description: The installation's volumes.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Volume"
   /volumes/{volumeName}:
     parameters:
       - name: volumeName
@@ -225,6 +256,26 @@ components:
             volume sees its files.
           items:
             $ref: "#/components/schemas/VolumeMount"
+        owner:
+          $ref: "#/components/schemas/Owner"
+    Owner:
+      type: string
+      minLength: 1
+      maxLength: 128
+      description: >-
+        Who a sandbox belongs to, e.g. the task it works for. Recorded on the sandbox
+        and on the volumes it creates, and returned when listing, so a consumer can
+        tell which resources are still in use.
+    Volume:
+      type: object
+      required: [name]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: "#/components/schemas/VolumeName"
+        owner:
+          $ref: "#/components/schemas/Owner"
+          description: Owner of the sandbox that created the volume; missing if it had none.
     VolumeName:
       type: string
       pattern: "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$"
@@ -252,10 +303,16 @@ components:
           $ref: "#/components/schemas/IsolationClass"
         state:
           type: string
-          enum: [running]
+          enum: [running, stopped]
+          description: >-
+            `stopped`: the sandbox no longer runs (e.g. its backend host restarted);
+            it can only be destroyed.
         createdAt:
           type: string
           format: date-time
+        owner:
+          $ref: "#/components/schemas/Owner"
+          description: The owner it was created with; missing if it had none.
     ExecRequest:
       type: object
       required: [command]

@@ -149,7 +149,7 @@ export function createClaudeCodeHarness({
     }
     observer.progress("starting a sandbox");
     try {
-      return { sandboxId: (await sandboxes.create(template, { volumes })).id, volumes };
+      return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId })).id, volumes };
     } catch (error) {
       // The task fails for good, so volumes the backend may have created go too.
       await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume).catch(() => {})));

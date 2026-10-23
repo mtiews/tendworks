@@ -148,9 +148,12 @@ services:
       # both, from the agent runtime itself; no profile can reference them.
       TEND_PLATFORM_MCP_URL: ${TEND_PLATFORM_MCP_URL:-http://host.docker.internal:${TEND_PORT:-8080}/mcp}
       TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
-      # Sandboxes run on their own Docker network, not on this stack's networks, so they
-      # cannot reach the server, worker, store or socket proxy by name or address.
-      TEND_SANDBOX_NETWORK: tendworks-sandboxes
+      # The installation, named after the compose project: sandboxes, session volumes and
+      # the sandbox network are named <installation>-sandbox-<id>, <installation>-volume-<name>
+      # and <installation>-sandboxes, so stacks on one Docker engine never touch each
+      # other's. Sandboxes run on that network of their own, not on this stack's networks,
+      # so they cannot reach the server, worker, store or socket proxy by name or address.
+      TEND_INSTALLATION: ${COMPOSE_PROJECT_NAME}
       # Pins of the deployment's sandbox images (x-sandbox-images above).
       TEND_SANDBOX_IMAGES: *sandbox-claude-code-image
       # Harness credentials from deploy/.env. Only the one TEND_CLAUDE_CODE_CREDENTIAL

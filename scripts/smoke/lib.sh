@@ -41,6 +41,10 @@ field() {
     });' "$1"
 }
 
+# The installation (the compose project name): sandboxes, session volumes and the sandbox
+# network are named after it.
+INSTALLATION=$(compose config --no-interpolate --format json | field 'r.name')
+
 # Every request sends the API token: reading needs a token too (ADR 0016).
 # Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.
 api_get() { curl -fsS "$URL$1" -H "authorization: Bearer $TEND_API_TOKEN" 2>/dev/null || true; }
@@ -97,17 +101,17 @@ check() {
 run_tasks() { api_get "/runs/$1" | field 'r.steps?.filter((s) => s.taskId).map((s) => s.taskId).join(" ")'; }
 
 # The sandboxes and volumes of tasks $@ (run steps' task ids or chat ids): a task's volumes
-# are tendworks-volume-<task>-workspace and -session, its sandbox mounts them. Only these
+# are <installation>-volume-<task>-workspace and -session, its sandbox mounts them. Only these
 # count, so debris of other runs on the Docker daemon (e.g. integration tests) does not.
 task_sandboxes() {
   local task
   for task in "$@"; do
-    docker ps -aq --filter "volume=tendworks-volume-$task-workspace" --filter "volume=tendworks-volume-$task-session"
+    docker ps -aq --filter "volume=$INSTALLATION-volume-$task-workspace" --filter "volume=$INSTALLATION-volume-$task-session"
   done | sort -u | wc -l
 }
 task_volumes() {
   local task
-  for task in "$@"; do docker volume ls -q --filter "name=tendworks-volume-$task-"; done | sort -u | wc -l
+  for task in "$@"; do docker volume ls -q --filter "name=$INSTALLATION-volume-$task-"; done | sort -u | wc -l
 }
 
 # Checks that no sandbox or volume of tasks $@ is left: check_no_leftovers $(run_tasks "$RUN_ID")
