@@ -9,4 +9,4 @@ if (!path) {
   process.exit(1);
 }
 const names = exportSecrets("agent", process.env, path);
-console.log(`agent secrets: ${names.length === 0 ? "none" : names.join(", ")}`);
+console.info(`agent secrets: ${names.length === 0 ? "none" : names.join(", ")}`);
