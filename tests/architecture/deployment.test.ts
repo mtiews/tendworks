@@ -10,11 +10,24 @@ const composeText = read("compose.yaml");
 const compose = parse(composeText) as {
   services: Record<
     string,
-    { image?: string; profiles?: string[]; restart?: string; ports?: string[]; environment?: Record<string, unknown>; command?: string[]; networks?: string[] }
+    {
+      image?: string;
+      profiles?: string[];
+      restart?: string;
+      ports?: string[];
+      environment?: Record<string, unknown>;
+      command?: string[];
+      networks?: string[];
+      depends_on?: Record<string, { condition: string }>;
+    }
   >;
   networks?: Record<string, { internal?: boolean } | null>;
 };
 const services = Object.entries(compose.services);
+/** Services that run once and end, which others wait for (e.g. the agent secrets exporter). */
+const oneShot = new Set(
+  services.flatMap(([, service]) => Object.entries(service.depends_on ?? {}).filter(([, { condition }]) => condition === "service_completed_successfully").map(([name]) => name)),
+);
 /** Services `up` starts without a profile, plus those of the given profiles. */
 const started = (...profiles: string[]) => services.filter(([, service]) => !service.profiles || service.profiles.some((profile) => profiles.includes(profile)));
 
@@ -29,7 +42,12 @@ describe("the compose stack", () => {
   });
 
   it("restarts every long-running service by itself, also after a host reboot", () => {
-    for (const [name, service] of started("debug")) expect(service.restart, name).toBe("unless-stopped");
+    for (const [name, service] of started("debug").filter(([name]) => !oneShot.has(name))) expect(service.restart, name).toBe("unless-stopped");
+  });
+
+  it("never restarts a service that runs once, which would run it again and again", () => {
+    expect(oneShot.size).toBeGreaterThan(0);
+    for (const name of oneShot) expect(compose.services[name]?.restart ?? "no", name).toBe("no");
   });
 
   it("publishes only the API without a profile; the workflow engine's UI only with the profile debug", () => {

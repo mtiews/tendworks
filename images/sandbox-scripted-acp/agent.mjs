@@ -13,10 +13,14 @@
 // answers at once with every chat prompt of the session so far ("I remember: a | b"),
 // kept in the session file, so it shows that a chat holds one agent session across turns.
 //
+// A prompt that starts with "secret:" answers with the SHA-256 digest of SCRIPTED_SECRET,
+// so the end-to-end tests see an agent secret arrive without the value in a transcript.
+//
 // A prompt "mcp:<tool>" calls that tool without arguments on the first HTTP MCP server the
 // session was given (the platform MCP server) and answers with what it returned, or with
 // why the call failed: "mcp <tool>: <text>" or "mcp <tool> failed: <reason>".
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
@@ -53,6 +57,13 @@ const connection = acp
     const session = sessions.get(ctx.params.sessionId);
     if (!session) throw acp.RequestError.resourceNotFound(ctx.params.sessionId);
     const said = ctx.params.prompt.map((block) => (block.type === "text" ? block.text : "")).join(" ");
+    if (said.startsWith("secret:")) {
+      // The SHA-256 digest of SCRIPTED_SECRET (an agent secret a profile passes in), never the value.
+      const value = process.env.SCRIPTED_SECRET;
+      const text = value ? `secret digest ${createHash("sha256").update(value).digest("hex")}` : "no secret";
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
     if (said.startsWith("mcp:")) {
       const tool = said.slice(4).trim();
       const text = await callTool(session.mcpServers, tool).then(

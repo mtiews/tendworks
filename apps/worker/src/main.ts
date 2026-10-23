@@ -16,6 +16,7 @@ import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
 import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platform";
 import { MigrationError } from "@tendworks/platform/migrations";
+import { readSecretsFile } from "@tendworks/platform/secrets-file";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -58,7 +59,10 @@ if ("problem" in selected && profiles.some((profile) => profile.spec.harness ===
 }
 // Secrets agent profiles pass into sandboxes (spec.env): only TENDWORKS_AGENT_* variables
 // resolve, so platform secrets never reach an agent (ADR 0008). Never log their values.
-const secrets = createSecretResolver("agent", process.env);
+// In the compose stack they come from the file agent-secrets writes from deploy/.env, read
+// again at every reference, so a secret added there needs no restart of the worker.
+const agentSecretsFile = process.env.TEND_AGENT_SECRETS_FILE || undefined;
+const secrets = createSecretResolver("agent", () => ({ ...process.env, ...(agentSecretsFile ? readSecretsFile(agentSecretsFile) : {}) }));
 for (const profile of profiles) {
   for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
     const problem = secrets.problem(secretRef.name);
