@@ -43,7 +43,7 @@ const requestsTo = (platform: Platform, pathname: string) => platform.requests.f
 const wait = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
 
 function notification(id: string, title: string): Notification {
-  return { id, kind: "run.completed", runId: `run-${id}`, title, createdAt: "2026-10-18T10:00:03.000Z", delivery: { status: "pending" } };
+  return { id, kind: "run.completed", runId: `run-${id}`, title, createdAt: "2026-10-18T10:00:03.000Z", deliveries: [] };
 }
 
 describe("polling", () => {

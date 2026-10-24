@@ -3,6 +3,7 @@ import { useCallback, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { formatCost, formatOrigin, totalCost } from "@tendworks/platform";
+import { Artifacts } from "./artifacts.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
 import { Time } from "./time.js";
@@ -168,25 +169,7 @@ function AgentStep({ runId, step, taskId, ended }: { runId: string; step: Step; 
         <span className="muted">{taskId}</span>
       </p>
       {step.error && <p className="message message-error failure">{describeError(step.error)}</p>}
-      {step.artifacts && step.artifacts.length > 0 && (
-        <ul className="artifacts">
-          {step.artifacts.map((artifact) => {
-            const href = safeHref(artifact.url);
-            return (
-              <li key={`${artifact.name} ${artifact.url}`}>
-                {href ? (
-                  <a href={href} target="_blank" rel="noopener noreferrer">
-                    {artifact.name}
-                  </a>
-                ) : (
-                  artifact.name
-                )}
-                {artifact.description && <span className="muted"> {artifact.description}</span>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <Artifacts artifacts={step.artifacts ?? []} />
       <LiveTranscript read={read} open={open} live={step.status === "running"} missing="No transcript was found for this step." onEnded={ended} />
     </section>
   );

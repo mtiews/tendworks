@@ -40,18 +40,23 @@ export function runStarted(run: RunContext, time: string): RunEvents.RunStartedE
   return { ...envelope(run, `${run.runId}:run.started`, time), type: "dev.tendworks.run.started", data: { workflow: run.workflow } };
 }
 
+/** A link a step's agent reported as a result of its task. */
+export type RunArtifact = RunEvents.RunCompletedEventData["artifacts"][number];
+
+/** The end of a run, with the artifacts its steps reported (in step order), so consumers need not read the run. */
 export function runFinished(
   run: RunContext,
   result: { status: "completed" } | { status: "failed"; error: RunEvents.WorkflowError },
+  artifacts: RunArtifact[],
   time: string,
 ): RunEvents.RunCompletedEvent | RunEvents.RunFailedEvent {
   if (result.status === "completed") {
-    return { ...envelope(run, `${run.runId}:run.completed`, time), type: "dev.tendworks.run.completed", data: { workflow: run.workflow } };
+    return { ...envelope(run, `${run.runId}:run.completed`, time), type: "dev.tendworks.run.completed", data: { workflow: run.workflow, artifacts } };
   }
   return {
     ...envelope(run, `${run.runId}:run.failed`, time),
     type: "dev.tendworks.run.failed",
-    data: { workflow: run.workflow, error: result.error },
+    data: { workflow: run.workflow, error: result.error, artifacts },
   };
 }
 

@@ -7,6 +7,7 @@ export type * as Chat from "./generated/chat.js";
 export type * as ChatEvents from "./generated/chat-events.js";
 export type * as ControlPlane from "./generated/control-plane.js";
 export type * as Health from "./generated/health.js";
+export type * as NotificationChannel from "./generated/notification-channel.js";
 export type * as Orchestration from "./generated/orchestration.js";
 export type * as Policy from "./generated/policy.js";
 export type * as RunEvents from "./generated/run-events.js";

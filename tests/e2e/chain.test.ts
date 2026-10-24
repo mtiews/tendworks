@@ -47,9 +47,17 @@ describe("the automated chain on the compose stack, with fakes", () => {
 
     const notification = await waitFor<Notification>("the run's notification", async () => {
       const { data } = await client.GET("/notifications");
-      return data?.items.find((item) => item.runId === run.id && item.delivery.status !== "pending");
+      return data?.items.find((item) => item.runId === run.id && item.deliveries.every(({ status }) => status !== "pending"));
     });
-    expect(notification).toMatchObject({ kind: "run.completed", delivery: { status: "delivered" } });
+    // The fixture channels: fake-log delivers, fake-refusing refuses (tests/fixtures/config/notifications).
+    expect(notification).toMatchObject({
+      kind: "run.completed",
+      artifacts: [{ name: "pull-request", url: "https://git.example/example/playground/pull/1" }],
+      deliveries: [
+        { channel: "fake-log", status: "delivered" },
+        { channel: "fake-refusing", status: "failed", error: "the fake channel refuses every notification" },
+      ],
+    });
 
     const { data: triggers } = await client.GET("/triggers");
     expect(triggers?.items.find((trigger) => trigger.name === BINDING)?.lastEvaluation).toMatchObject({ status: "succeeded" });

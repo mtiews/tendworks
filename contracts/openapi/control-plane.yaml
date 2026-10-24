@@ -769,10 +769,10 @@ paths:
       summary: List notifications, newest first
       description: >-
         Notifications the platform recorded, e.g. when a run completed or failed, with
-        the status of their delivery.
+        the artifacts of a finished run and the delivery status per notification channel.
       responses:
         "200":
-          description: Notifications with their delivery status.
+          description: Notifications with their delivery status per channel.
           content:
             application/json:
               schema:

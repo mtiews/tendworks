@@ -193,7 +193,7 @@ tendworks-config/
   policies/deploy.rego
   policies/deploy_test.rego
   integrations/mcp/github.yaml
-  integrations/notify/ntfy.yaml
+  notifications/phone.yaml
   sandboxes/node-gvisor.yaml
   secrets/integrations.sops.yaml
   deploy/compose.yaml
@@ -274,7 +274,7 @@ The human is only called via `ApprovalRequest`s, and whether one is created is d
 
 **An ApprovalRequest contains** the question in one sentence, 2–4 options (including "send back with comment"), links to diff, artifacts and transcript, a deadline and the behavior on expiry (cancel, safe default, escalate).
 
-**Delivery** via a notification port with adapters: Web Push to the UI (also mobile as a PWA), ntfy (self-hosted), optionally Matrix, Slack or email. Every message carries a deep link into the approval inbox. Decisions are only made in the UI (authenticated via OIDC), never by replying to an email.
+**Delivery** through notification channels (`kind: NotificationChannel`, ADR 0025 (notification-channels-deliver-selected-events-through-adapters)): each selects the events it receives and an adapter behind the notification delivery port; the delivery status is recorded per channel. Pushover is the first adapter, with the run's first artifact as the message's link; Web Push to the UI (also mobile as a PWA), ntfy, Matrix, Slack or email are further adapters later. Every message carries a deep link into the approval inbox. Decisions are only made in the UI (authenticated via OIDC), never by replying to an email.
 
 The policy part should be built as a separate, replaceable decision function: input is a JSON document (step, diff statistics, target, cost), output is `allow`, `deny` or `ask`. Open Policy Agent with Rego or a CEL expression fits this. That keeps the rule itself declarative and in Git.
 
@@ -442,7 +442,7 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 | container with Claude Code | sandbox from a SandboxTemplate (isolation class `container`; `gvisor` verified on a Linux host), controlled via ACP | further harnesses through the same port |
 | secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; harness credentials from the operator's own subscription (long-lived OAuth token) or an API key, selected by configuration (third-party or shared use requires an API key under the vendor's terms), and a fine-grained agent token limited to the playground repo; a separate platform token that only reads issues never enters the sandbox | injection via egress proxy, sandbox only sees placeholders; GitHub App installation token per repo and run |
 | commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), reported as the run's artifact; the run ends with it and the human merges in the forge, the platform performs no forge action (ADR 0024 (the-platform-has-no-pull-request-integration)); accepted risk: without repository rulesets (private repo on the free plan) the agent token could technically merge (what one account on the free plan can and cannot enforce: [GitHub access for agents](github-agent-access.md)) | deeper forge integration builds on artifacts, notifications and the generic human step; external actions through the Action Gateway with action journal |
-| — | notifications and approval requests are persisted first, then delivered through the notification port (fake adapter that only logs) | ntfy, Web Push |
+| — | notifications and approval requests are persisted first, then delivered to every notification channel that selects them (`fake`, Pushover; ADR 0025 (notification-channels-deliver-selected-events-through-adapters)) | Web Push, ntfy |
 
 **Success criterion (milestone 1):** An issue labeled `ready-for-agent` leads to a merged pull request without manual intervention; run status, transcript and cost are visible through the API and `tend run get`; restarting the platform mid-run resumes the run.
 

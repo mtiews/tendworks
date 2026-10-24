@@ -35,15 +35,15 @@ import { createInMemoryEventBus, createPostgresEventBus, type EventBus } from "@
 import { createStaticHealthProbe, type HealthProbe } from "@tendworks/health";
 import {
   createApprovals,
+  createFakeNotificationDelivery,
   createInMemoryApprovalStore,
-  createInMemoryNotificationChannel,
   createInMemoryNotificationStore,
-  createLoggingNotificationChannel,
   createPostgresApprovalStore,
   createPostgresNotificationStore,
+  createPushoverNotificationDelivery,
   type ApprovalEventPublisher,
   type ApprovalStore,
-  type NotificationChannel,
+  type NotificationDelivery,
   type NotificationStore,
 } from "@tendworks/human-interaction";
 import {
@@ -117,7 +117,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "human-interaction/ApprovalEventPublisher": port<ApprovalEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),
   "human-interaction/ApprovalStore": port<ApprovalStore>({ postgres: createPostgresApprovalStore, "in-memory": createInMemoryApprovalStore }),
   "human-interaction/NotificationStore": port<NotificationStore>({ postgres: createPostgresNotificationStore, "in-memory": createInMemoryNotificationStore }),
-  "human-interaction/NotificationChannel": port<NotificationChannel>({ logging: createLoggingNotificationChannel, "in-memory": createInMemoryNotificationChannel }),
+  "human-interaction/NotificationDelivery": port<NotificationDelivery>({ pushover: createPushoverNotificationDelivery, fake: createFakeNotificationDelivery }),
 
   "event-bus/EventBus": port<EventBus<never>>({ postgres: createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 

@@ -41,15 +41,17 @@ export function createRunActivities({ store, agents, http, now = () => new Date(
         },
       }),
     httpRequest: (request) => http.request(request),
+    // The event carries the steps' artifacts from orchestration's own record of the run.
     async runFinished(run, outcome) {
       const time = timestamp();
+      const artifacts = ((await store.get(run.runId))?.steps ?? []).flatMap((step) => step.artifacts ?? []);
       if (outcome.status === "completed") {
         await store.updateRun(run.runId, { status: "completed", output: outcome.output, finishedAt: time }, [
-          runFinished(run, { status: "completed" }, time),
+          runFinished(run, { status: "completed" }, artifacts, time),
         ]);
       } else {
         await store.updateRun(run.runId, { status: "failed", error: outcome.error!, finishedAt: time }, [
-          runFinished(run, { status: "failed", error: outcome.error! }, time),
+          runFinished(run, { status: "failed", error: outcome.error! }, artifacts, time),
         ]);
       }
     },

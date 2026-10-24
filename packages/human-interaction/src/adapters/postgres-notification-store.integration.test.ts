@@ -72,7 +72,8 @@ it("adopts a store created before versioned migrations, with its notifications",
       title: "Run of hello-agent failed",
       detail: "/do/0/implement: Agent task failed",
       createdAt: "2026-10-18T10:00:00.000Z",
-      delivery: { status: "pending" as const },
+      artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }],
+      deliveries: [{ channel: "phone", status: "pending" as const }],
     };
     await createPostgresNotificationStore(adopted).record("/tendworks/test before", notification);
 

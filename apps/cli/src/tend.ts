@@ -197,7 +197,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
 
   notification
     .command("list")
-    .description("list notifications, newest first, with their delivery status")
+    .description("list notifications, newest first, with their first link and the delivery status per channel")
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
@@ -998,16 +998,21 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
 
 function formatNotificationList(list: NotificationList): string {
   const rows = [
-    ["CREATED", "KIND", "RUN", "DELIVERY", "TITLE"],
+    ["CREATED", "KIND", "RUN", "LINK", "DELIVERY", "TITLE"],
     ...list.items.map((n) => [
       n.createdAt,
       n.kind,
       n.runId,
-      n.delivery.error ? `${n.delivery.status}: ${n.delivery.error}` : n.delivery.status,
+      n.artifacts?.[0]?.url ?? "-",
+      n.deliveries.map(({ channel, status }) => `${channel} ${status}`).join(", ") || "no channel",
       n.title,
     ]),
   ];
-  return table(rows);
+  // Reasons are long; they follow the table, one line per failed delivery.
+  const failures = list.items.flatMap((n) =>
+    n.deliveries.flatMap(({ channel, status, error }) => (status === "failed" ? [`${channel} failed for ${n.id}: ${error ?? "no reason given"}`] : [])),
+  );
+  return failures.length === 0 ? table(rows) : `${table(rows)}\n${failures.join("\n")}\n`;
 }
 
 function formatApprovalList(list: ApprovalRequestList): string {

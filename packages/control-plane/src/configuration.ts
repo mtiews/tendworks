@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentProfile, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
+import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
@@ -13,6 +13,7 @@ const schemas = new URL("../../../contracts/schemas/", import.meta.url);
 /** Schemas of the `kind`s in the apiVersion/kind/metadata/spec envelope. */
 const KINDS: Record<string, string> = {
   AgentProfile: "agent-profile.schema.yaml",
+  NotificationChannel: "notification-channel.schema.yaml",
   Policy: "policy.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
   TriggerBinding: "trigger-binding.schema.yaml",
@@ -39,11 +40,13 @@ export interface Configuration {
   workspaces: Workspace.Workspace[];
   /** Policies, ordered by name; they decide the human steps of workflows (ADR 0024). */
   policies: Policy.Policy[];
+  /** Notification channels, ordered by name; each receives the notifications it selects (ADR 0025). */
+  notificationChannels: NotificationChannel.NotificationChannel[];
 }
 
 /** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
 export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
-  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], ...overrides };
+  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], ...overrides };
 }
 
 let ajv: Ajv2020 | undefined;
@@ -78,6 +81,7 @@ export function loadConfiguration(dir: string): Configuration {
   const bindings = new Map<string, { file: string; binding: TriggerBinding.TriggerBinding }>();
   const workspaces = new Map<string, { file: string; workspace: Workspace.Workspace }>();
   const policies = new Map<string, { file: string; policy: Policy.Policy }>();
+  const channels = new Map<string, { file: string; channel: NotificationChannel.NotificationChannel }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -136,6 +140,13 @@ export function loadConfiguration(dir: string): Configuration {
       else policies.set(policy.metadata.name, { file, policy });
       continue;
     }
+    if (kind === "NotificationChannel") {
+      const channel = document as unknown as NotificationChannel.NotificationChannel;
+      const existing = channels.get(channel.metadata.name);
+      if (existing) issues.push(`${file}: notification channel '${channel.metadata.name}' is already defined in ${existing.file}`);
+      else channels.set(channel.metadata.name, { file, channel });
+      continue;
+    }
     if (kind !== "TriggerBinding") continue;
     const binding = document as unknown as TriggerBinding.TriggerBinding;
     const existing = bindings.get(binding.metadata.name);
@@ -183,6 +194,7 @@ export function loadConfiguration(dir: string): Configuration {
     triggerBindings: [...bindings.values()].map(({ binding }) => binding).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
     workspaces: [...workspaces.values()].map(({ workspace }) => workspace).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
     policies: [...policies.values()].map(({ policy }) => policy).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+    notificationChannels: [...channels.values()].map(({ channel }) => channel).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 

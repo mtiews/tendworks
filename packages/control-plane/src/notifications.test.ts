@@ -7,7 +7,8 @@ const delivered: Notification = {
   runId: "run-1",
   title: "Run run-1 of build completed",
   createdAt: "2026-10-18T10:00:03.000Z",
-  delivery: { status: "delivered", attemptedAt: "2026-10-18T10:00:03.000Z" },
+  artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }],
+  deliveries: [{ channel: "phone", status: "delivered", attemptedAt: "2026-10-18T10:00:03.000Z" }],
 };
 
 async function list(notifications?: NotificationsPort) {
@@ -23,7 +24,7 @@ async function list(notifications?: NotificationsPort) {
 }
 
 describe("notifications API", () => {
-  it("lists notifications with their delivery status", async () => {
+  it("lists notifications with their artifacts and delivery status per channel", async () => {
     const { status, body } = await list({ list: async () => [delivered] });
 
     expect(status).toBe(200);

@@ -12,7 +12,7 @@ import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from
 import {
   createApprovals,
   createInMemoryApprovalStore,
-  createInMemoryNotificationChannel,
+  createFakeNotificationDelivery,
   createInMemoryNotificationStore,
   createNotifier,
   type Policy,
@@ -662,9 +662,15 @@ describe("control plane: triggers, through the trigger gateway", () => {
 });
 
 describe("control plane: notifications", () => {
-  it("lists the notifications human interaction recorded", async () => {
+  it("lists the notifications human interaction recorded, with the run's artifacts and the delivery status of each selecting channel", async () => {
     const store = createInMemoryNotificationStore();
-    await createNotifier({ store, channel: createInMemoryNotificationChannel() }).handle({
+    const fake = (refuse = false) => createFakeNotificationDelivery({ refuse, log: () => {} });
+    const channels = [
+      { name: "phone", events: ["run.completed", "run.failed"] as const, delivery: fake(true) },
+      { name: "log", events: ["run.completed"] as const, delivery: fake() },
+      { name: "pager", events: ["run.failed"] as const, delivery: fake() },
+    ];
+    await createNotifier({ store, channels, now: () => new Date("2026-10-19T10:00:01.000Z") }).handle({
       specversion: "1.0",
       id: "r-1:run.completed",
       source: "/tendworks/orchestration",
@@ -673,13 +679,22 @@ describe("control plane: notifications", () => {
       datacontenttype: "application/json",
       runid: "r-1",
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-      data: { workflow: "hello-agent" },
+      data: { workflow: "develop-issue", artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }] },
     });
     const client = controlPlane({ notifications: store });
 
     const { data } = await client.GET("/notifications");
 
-    expect(data?.items).toHaveLength(1);
+    expect(data?.items).toEqual([
+      expect.objectContaining({
+        kind: "run.completed",
+        artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }],
+        deliveries: [
+          { channel: "log", status: "delivered", attemptedAt: "2026-10-19T10:00:01.000Z" },
+          { channel: "phone", status: "failed", attemptedAt: "2026-10-19T10:00:01.000Z", error: "the fake channel refuses every notification" },
+        ],
+      }),
+    ]);
   });
 
   it("answers 503 without a notification store", async () => {
