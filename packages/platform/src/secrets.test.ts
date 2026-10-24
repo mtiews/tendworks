@@ -27,6 +27,19 @@ describe("secret references for agents", () => {
   });
 });
 
+describe("secret references against an environment that changes while the platform runs", () => {
+  it("resolves against the environment as it is at each reference, so a new secret needs no restart", () => {
+    let current: Record<string, string> = {};
+    const secrets = createSecretResolver("agent", () => current);
+
+    expect(secrets.problem("TENDWORKS_AGENT_NEW_TOKEN")).toBe("secret TENDWORKS_AGENT_NEW_TOKEN is not set");
+    current = { TENDWORKS_AGENT_NEW_TOKEN: "new-token" };
+
+    expect(secrets.resolve("TENDWORKS_AGENT_NEW_TOKEN")).toBe("new-token");
+    expect(secrets.problem("TENDWORKS_AGENT_NEW_TOKEN")).toBeUndefined();
+  });
+});
+
 describe("secret references for platform integrations", () => {
   const secrets = createSecretResolver("platform", environment);
 

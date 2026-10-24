@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { ControlPlane } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { baseUrl, client, READ_TOKEN } from "./support/control-plane.js";
+import { volumeOf } from "./support/installation.js";
 
 type Chat = ControlPlane.components["schemas"]["chat"];
 type Entry = ControlPlane.components["schemas"]["transcriptEntry"];
@@ -92,7 +93,7 @@ describe.skipIf(!credentialSelected())("a chat across a platform restart and an 
     const { data: started, response } = await client.POST("/chats", { body: { agent: "scripted-assistant", text: "Write the files" } });
     expect(response.status).toBe(201);
     const chatId = started!.id;
-    const volume = `tendworks-volume-${chatId}-session`;
+    const volume = volumeOf(`${chatId}-session`);
     const followed = follow(chatId, (entry) => entry.type === "input-required");
     for (const deadline = Date.now() + 120_000; !(await transcript(chatId)).some((entry) => entry.type === "tool-call"); await pause(500)) {
       if (Date.now() > deadline) throw new Error(`chat ${chatId} never started its turn`);
@@ -112,7 +113,7 @@ describe.skipIf(!credentialSelected())("a chat across a platform restart and an 
     for (const deadline = Date.now() + 180_000; (await docker("ps", "-aq", "--filter", `volume=${volume}`)) !== ""; await pause(2_000)) {
       if (Date.now() > deadline) throw new Error(`the sandbox of idle chat ${chatId} is still there`);
     }
-    const volumesWhileIdle = await docker("volume", "ls", "-q", "--filter", `name=tendworks-volume-${chatId}`);
+    const volumesWhileIdle = await docker("volume", "ls", "-q", "--filter", `name=${volumeOf(chatId)}`);
 
     await say(chatId, "chat: Still there?");
     const answered = await waiting(chatId, 120_000);
@@ -120,7 +121,7 @@ describe.skipIf(!credentialSelected())("a chat across a platform restart and an 
     const listed = await waiting(chatId, 120_000);
     await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
 
-    expect(volumesWhileIdle.split("\n").sort()).toEqual([`tendworks-volume-${chatId}-session`, `tendworks-volume-${chatId}-workspace`]);
+    expect(volumesWhileIdle.split("\n").sort()).toEqual([volumeOf(`${chatId}-session`), volumeOf(`${chatId}-workspace`)]);
     expect(answered).toMatchObject({ status: "input-required", message: "I remember: Remember me. | Still there?" });
     expect(listed.message).toMatch(/^resumed session scripted-[0-9a-f-]+\nafter\.txt\nbefore\.txt$/);
     // One agent session throughout: every new sandbox resumed it. How often depends on how

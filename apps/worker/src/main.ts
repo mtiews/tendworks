@@ -7,13 +7,17 @@ import {
   createClaudeCodeHarness,
   createFileTranscriptStore,
   createPostgresTaskStore,
+  createSandboxCleanup,
   loadAgentProfiles,
   loadSkills,
   migrateAgentRuntimeStore,
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
-import { createHealthApi } from "@tendworks/health";
+import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platform";
+import { migrateOrStop } from "@tendworks/platform/migrations";
+import { readSecretsFile } from "@tendworks/platform/secrets-file";
+import { storeConnectionString } from "@tendworks/platform/store-connection";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -39,7 +43,8 @@ let templates;
 let skills;
 try {
   profiles = loadAgentProfiles(env("TEND_CONFIG_DIR"));
-  templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"));
+  // The deployment's own sandbox images with their pins; templates name them by repository.
+  templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"), { pinnedImages: env("TEND_SANDBOX_IMAGES", "").split(/[\s,]+/).filter(Boolean) });
   skills = loadSkills(env("TEND_CONFIG_DIR"));
 } catch (error) {
   if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError)) throw error;
@@ -55,28 +60,38 @@ if ("problem" in selected && profiles.some((profile) => profile.spec.harness ===
 }
 // Secrets agent profiles pass into sandboxes (spec.env): only TENDWORKS_AGENT_* variables
 // resolve, so platform secrets never reach an agent (ADR 0008). Never log their values.
-const secrets = createSecretResolver("agent", process.env);
+// In the compose stack they come from the file agent-secrets writes from deploy/.env, read
+// again at every reference, so a secret added there needs no restart of the worker.
+const agentSecretsFile = process.env.TEND_AGENT_SECRETS_FILE || undefined;
+const secrets = createSecretResolver("agent", () => ({ ...process.env, ...(agentSecretsFile ? readSecretsFile(agentSecretsFile) : {}) }));
 for (const profile of profiles) {
   for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
     const problem = secrets.problem(secretRef.name);
     if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
-// The platform MCP server (ADR 0016): its address as sandboxes reach it (configuration,
-// since it depends on how sandboxes reach the server's published port) and the read-only
-// token. Both go only to sessions of profiles that list it (mcp: [tendworks]); the API
-// token never enters a sandbox. Never log the token.
+// The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
+// token, and the network of the MCP-only gateway that sandboxes reach it on (ADR 0019).
+// They go only to sessions of profiles that list it (mcp: [tendworks]), whose sandboxes
+// alone join that network; the API token never enters a sandbox. Never log the token.
 const platformMcpUrl = process.env.TEND_PLATFORM_MCP_URL || undefined;
+const platformMcpNetwork = process.env.TEND_PLATFORM_MCP_NETWORK || undefined;
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
-const platformMcp = platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken } : undefined;
+const platformMcp =
+  platformMcpUrl && readToken ? { url: platformMcpUrl, token: readToken, ...(platformMcpNetwork ? { network: platformMcpNetwork } : {}) } : undefined;
 for (const profile of profiles) {
   if (listsPlatformMcpServer(profile) && !platformMcp) {
     console.warn(`agent profile ${profile.metadata.name}: lists the platform MCP server, but TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN is not set; its tasks will fail until this is fixed`);
   }
 }
 const sandboxBackendUrl = env("TEND_SANDBOX_BACKEND_URL");
+const sandboxes = createDockerSandboxApi({
+  url: sandboxBackendUrl,
+  ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}),
+  networks: platformMcpNetwork ? [platformMcpNetwork] : [],
+});
 const claudeCode = createClaudeCodeHarness({
-  sandboxes: createDockerSandboxApi({ url: sandboxBackendUrl, ...(process.env.TEND_SANDBOX_NETWORK ? { network: process.env.TEND_SANDBOX_NETWORK } : {}) }),
+  sandboxes,
   templates: (name) => templates.get(name),
   credential: "credential" in selected ? selected.credential : undefined,
   skills,
@@ -86,21 +101,53 @@ const claudeCode = createClaudeCodeHarness({
 });
 
 const engineAddress = env("TEND_EXECUTION_ENGINE_ADDRESS");
-const pool = new pg.Pool({ connectionString: env("TEND_DATABASE_URL") });
-await migrateOrchestrationStore(pool);
-await migrateAgentRuntimeStore(pool);
-await migrateEventBus(pool);
+// The store's password has no default (scripts/setup-env.sh generates it); never log it.
+let connectionString: string;
+try {
+  connectionString = storeConnectionString(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+const pool = new pg.Pool({ connectionString });
+// Each domain brings its own tables to the version this release needs (docs/platform-implementation.md,
+// "Schema migrations"). A failed migration was rolled back; the worker then stops working
+// and only answers GET /health, which names it, so the server's GET /status shows it (ADR 0021).
+await migrateOrStop(
+  pool,
+  [
+    ["orchestration", migrateOrchestrationStore],
+    ["agent runtime", migrateAgentRuntimeStore],
+    ["event bus", migrateEventBus],
+  ],
+  {
+    bundle: "worker",
+    answers: "GET /health",
+    stop: (error) => {
+      const stopped = createStoppedBundleApi({
+        title: "Worker stopped",
+        probes: [createStaticHealthProbe(error.component, { status: "unhealthy", message: error.message }), createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
+      });
+      serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8081")) });
+    },
+  },
+);
 
 // Run, step and chat events go onto the event bus in the transaction of the state they describe.
 const bus = createPostgresEventBus({ pool });
 // Orchestration reaches the agent runtime only through the A2A boundary (in process for now).
 // Tasks are durable, so a task interrupted by a restart is resumed rather than started again.
+const tasks = createPostgresTaskStore({ pool, publisher: bus });
 const agents = createAgentRuntime({
   profiles,
   harnesses: { "claude-code": claudeCode },
-  store: createPostgresTaskStore({ pool, publisher: bus }),
+  store: tasks,
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
 });
+// Sandboxes and session volumes of this installation that belong to no live task or open
+// chat go, on start and every 5 minutes; each removal is logged, failed ones are logged,
+// shown as the unhealthy component sandbox-cleanup and retried by the next pass.
+const sandboxCleanup = createSandboxCleanup({ sandboxes, store: tasks });
 const store = createPostgresRunStore({ pool, publisher: bus });
 const engine = await createTemporalRunEngine({ address: engineAddress });
 // Other domains' events that name a run (e.g. approval.decided) go to that run, whose
@@ -121,7 +168,7 @@ const runWorker = await createTemporalRunWorker({ address: engineAddress, activi
 // Internal APIs for the control plane, never published: health (contracts/openapi/health.yaml),
 // the agent runtime (contracts/openapi/agent-runtime.yaml) and orchestration (contracts/openapi/orchestration.yaml).
 const health = createHealthApi({
-  probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl)],
+  probes: [createExecutionEngineProbe(engineAddress), createSandboxBackendProbe(sandboxBackendUrl), sandboxCleanup],
 });
 const orchestration = createOrchestrationApi({ store, engine, runtime });
 const agentRuntime = createAgentRuntimeApi({ runtime: agents });
@@ -138,6 +185,7 @@ const server = serve({ fetch, port }, () => console.log(`worker internal API lis
 // Chats have no run whose engine would resend their message after a restart: the agent
 // runtime takes up their interrupted turns and idle times itself (ADR 0015).
 agents.resumeChats().catch((error: unknown) => console.error("cannot resume chats:", error));
+sandboxCleanup.start();
 
 const stopped = runWorker.run().catch((error: unknown) => {
   console.error("run worker failed:", error);
@@ -145,6 +193,7 @@ const stopped = runWorker.run().catch((error: unknown) => {
 });
 
 async function shutdown() {
+  await sandboxCleanup.stop();
   runWorker.shutdown();
   server.close();
   // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.

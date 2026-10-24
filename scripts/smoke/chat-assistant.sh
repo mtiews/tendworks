@@ -12,14 +12,18 @@
 #   harness credential, TEND_API_TOKEN and TEND_API_READ_TOKEN, stack up), `pnpm build` (for
 #   the tend CLI) and the scripted ACP image for the active run:
 #   docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp
+# - the stack on the fixture configuration, which adds the active run's workflow
+#   (restart-scripted) to the starter configuration: `node tests/fixtures/fixture-configuration.ts`
+#   assembles it, then TEND_CONFIG_PATH=../tests/fixtures/assembled-config in deploy/.env and
+#   `docker compose -f deploy/compose.yaml up -d --wait`.
 # - the developer agent's binding scheduled: playground-ready-for-agent without
 #   `suspend: true` and TENDWORKS_PLATFORM_GITHUB_TOKEN set (pull request smoke test, step 9),
 #   with no open playground issue labelled ready-for-agent (each would start a paid run).
 #   Another binding: TEND_SMOKE_BINDING=<name>.
-# - Linux: TEND_PLATFORM_MCP_URL set to an address sandboxes reach the server's port at
-#   (docs); the script checks it from a sandbox before the chat starts.
+# - The platform MCP server is reached through the MCP-only gateway (ADR 0019) on Linux and
+#   Docker Desktop alike; the script checks it from a sandbox before the chat starts.
 # - Optional: lower the idle wait. The script waits for the assistant's idle time
-#   (spec.chat.idleMinutes, 5 in examples/config/agents/assistant.md). To wait less, set it
+#   (spec.chat.idleMinutes, 5 in agents/assistant.md of the configuration). To wait less, set it
 #   to 1 there, restart server and worker, and run with TEND_SMOKE_IDLE_MINUTES=1. Revert
 #   afterwards.
 #
@@ -122,14 +126,18 @@ has_cost() { [ "$(field 'String((r.cost?.amount ?? r.cost?.usd ?? 0) > 0)' <<<"$
 
 [ -f apps/cli/dist/main.js ] || { echo "The tend CLI is not built; run pnpm build first."; exit 1; }
 api_get /agents | field 'r.items.map((a) => a.name).join(" ")' | grep -qw assistant ||
-  { echo "The control plane lists no agent profile assistant (examples/config/agents/assistant.md)."; exit 1; }
+  { echo "The control plane lists no agent profile assistant ($CONFIG/agents/assistant.md)."; exit 1; }
+api_get /agents | field 'r.items.map((a) => a.name).join(" ")' | grep -qw scripted-developer ||
+  { echo "The active run needs the fixture configuration (workflow restart-scripted): run"; \
+    echo "node tests/fixtures/fixture-configuration.ts, set TEND_CONFIG_PATH=../tests/fixtures/assembled-config"; \
+    echo "in deploy/.env and docker compose -f deploy/compose.yaml up -d --wait."; exit 1; }
 docker image inspect tendworks/sandbox-scripted-acp:test >/dev/null 2>&1 ||
   { echo "Build the scripted ACP image first: docker compose -f deploy/compose.yaml --profile test-images build sandbox-scripted-acp"; exit 1; }
 
 BINDING_STATE=$(api_get /triggers | field "(() => { const t = r.items.find((t) => t.name === '$BINDING'); return t ? (t.suspended ? 'suspended' : 'scheduled') : 'missing'; })()")
 if [ "$BINDING_STATE" != scheduled ]; then
   echo "The trigger binding $BINDING is ${BINDING_STATE:-unknown}; question 3 needs it scheduled."
-  echo "Remove 'suspend: true' in examples/config/triggers/$BINDING.yaml, set its token in deploy/.env and restart the server."
+  echo "Remove 'suspend: true' in $CONFIG/triggers/$BINDING.yaml, set its token in deploy/.env and restart the server."
   exit 1
 fi
 if [ "$BINDING" = playground-ready-for-agent ] && command -v gh >/dev/null; then
@@ -142,26 +150,33 @@ if [ "$BINDING" = playground-ready-for-agent ] && command -v gh >/dev/null; then
 fi
 
 # The address the worker gives chat sessions for the platform MCP server, tried from a
-# container of the assistant's sandbox image on the sandbox network, as a sandbox sees it.
+# container of the assistant's sandbox image on the sandbox network and the MCP-only
+# gateway's network, as the assistant's sandboxes see it.
 MCP_URL=$(worker_env TEND_PLATFORM_MCP_URL)
+MCP_NETWORK=$(worker_env TEND_PLATFORM_MCP_NETWORK)
 READ_TOKEN=$(worker_env TEND_API_READ_TOKEN)
-NETWORK=$(worker_env TEND_SANDBOX_NETWORK)
-IMAGE=$(grep -E '^[[:space:]]*image:' examples/config/sandboxes/claude-code.yaml | awk '{print $2}')
+NETWORK="$INSTALLATION-sandboxes"
+# The template names the image by its repository; the worker holds the pin (TEND_SANDBOX_IMAGES).
+TEMPLATE_IMAGE=$(grep -E '^[[:space:]]*image:' "$CONFIG/sandboxes/claude-code.yaml" | awk '{print $2}')
+IMAGE=$(worker_env TEND_SANDBOX_IMAGES | tr ', ' '\n\n' | grep -m 1 -E "^$TEMPLATE_IMAGE[:@]" || echo "$TEMPLATE_IMAGE")
 [ -n "$MCP_URL" ] && [ -n "$READ_TOKEN" ] || { echo "The worker has no TEND_PLATFORM_MCP_URL or TEND_API_READ_TOKEN."; exit 1; }
 docker network inspect "$NETWORK" >/dev/null 2>&1 ||
   docker network create --driver bridge --opt com.docker.network.bridge.enable_icc=false "$NETWORK" >/dev/null
 echo "Checking the platform MCP server at $MCP_URL from a sandbox ..."
-MCP_TOOLS=$(MSYS_NO_PATHCONV=1 MCP_URL="$MCP_URL" READ_TOKEN="$READ_TOKEN" docker run --rm --network "$NETWORK" \
+PROBE=$(MSYS_NO_PATHCONV=1 MCP_URL="$MCP_URL" READ_TOKEN="$READ_TOKEN" docker create --network "$NETWORK" \
   -e MCP_URL -e READ_TOKEN --entrypoint node "$IMAGE" -e '
     fetch(process.env.MCP_URL, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: "Bearer " + process.env.READ_TOKEN },
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
     }).then((r) => r.json()).then((b) => console.log(b.result.tools.map((t) => t.name).sort().join(" ")), (e) => console.log("unreachable: " + e.cause?.code));
-  ' 2>&1 || true)
+  ')
+[ -z "$MCP_NETWORK" ] || docker network connect "$MCP_NETWORK" "$PROBE" >/dev/null
+MCP_TOOLS=$(docker start --attach "$PROBE" 2>&1 || true)
+docker rm -f "$PROBE" >/dev/null
 if [ "$MCP_TOOLS" != "get_run list_agents list_runs list_triggers" ]; then
   echo "FAIL: a sandbox cannot use the platform MCP server at $MCP_URL: $MCP_TOOLS"
-  echo "On Linux set TEND_PLATFORM_MCP_URL (docs/platform-implementation.md, chat smoke test)."
+  echo "Check that the gateway runs: docker compose -f deploy/compose.yaml ps mcp-gateway"
   exit 1
 fi
 echo "  ok    a sandbox lists the platform tools: $MCP_TOOLS"
@@ -213,16 +228,16 @@ A3=$(chat_field 'r.message')
 sleep 3
 touch "$TMP/leave"
 wait "$WATCHER_PID" || true
-SANDBOX_WHILE_WAITING=$(docker ps -q --filter "volume=tendworks-volume-$CHAT-session" | wc -l)
+SANDBOX_WHILE_WAITING=$(docker ps -q --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)
 
 # --- Idle sandbox -------------------------------------------------------------------------
 
 echo
 echo "Waiting for the idle sandbox to go (idle time $IDLE_MINUTES minutes, up to $((IDLE_MINUTES + 3))) ..."
 deadline=$((SECONDS + (IDLE_MINUTES + 3) * 60))
-while [ $SECONDS -lt $deadline ] && [ "$(docker ps -aq --filter "volume=tendworks-volume-$CHAT-session" | wc -l)" -gt 0 ]; do sleep 10; done
-SANDBOX_WHILE_IDLE=$(docker ps -aq --filter "volume=tendworks-volume-$CHAT-session" | wc -l)
-VOLUMES_WHILE_IDLE=$(docker volume ls -q --filter "name=tendworks-volume-$CHAT" | wc -l)
+while [ $SECONDS -lt $deadline ] && [ "$(docker ps -aq --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)" -gt 0 ]; do sleep 10; done
+SANDBOX_WHILE_IDLE=$(docker ps -aq --filter "volume=$INSTALLATION-volume-$CHAT-session" | wc -l)
+VOLUMES_WHILE_IDLE=$(docker volume ls -q --filter "name=$INSTALLATION-volume-$CHAT" | wc -l)
 STATUS_WHILE_IDLE=$(chat_field 'r.status')
 
 # --- Platform restart mid-turn ------------------------------------------------------------

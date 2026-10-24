@@ -7,6 +7,7 @@ import {
   createAgentRuntimeClient,
   createControlPlaneApi,
   createOrchestrationClient,
+  createStoppedControlPlaneApi,
   createStoreProbe,
   createTriggerGatewayClient,
   loadConfiguration,
@@ -33,6 +34,8 @@ import {
 } from "@tendworks/trigger-gateway";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
+import { migrateOrStop } from "@tendworks/platform/migrations";
+import { storeConnectionString } from "@tendworks/platform/store-connection";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -58,22 +61,48 @@ console.log(`configuration: trigger bindings ${configuration.triggerBindings.map
 const platformSecrets = createSecretResolver("platform", process.env);
 
 // Every operation but GET /status needs a token: the API token for anything, the
-// optional read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
-// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
-const apiToken = env("TEND_API_TOKEN");
+// read-only token for reading only (ADR 0014 (interim-bearer-token-on-the-control-plane-api),
+// ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)). Both must be
+// set; there are no defaults, and compose passes an unset variable as an empty string.
+const apiToken = process.env.TEND_API_TOKEN || undefined;
 const readToken = process.env.TEND_API_READ_TOKEN || undefined;
-// Profiles that list the platform MCP server read with the read-only token, so it must be set then.
-const tokenProblems = apiTokenProblems({ apiToken, ...(readToken === undefined ? {} : { readToken }), agentProfiles: configuration.agentProfiles });
-if (tokenProblems.length > 0) {
+const tokenProblems = apiTokenProblems({ ...(apiToken === undefined ? {} : { apiToken }), ...(readToken === undefined ? {} : { readToken }) });
+if (apiToken === undefined || readToken === undefined || tokenProblems.length > 0) {
   for (const problem of tokenProblems) console.error(problem);
   process.exit(1);
 }
 
-const databaseUrl = env("TEND_DATABASE_URL");
+// The store's password has no default (scripts/setup-env.sh generates it); never log it.
+let databaseUrl: string;
+try {
+  databaseUrl = storeConnectionString(process.env);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
 const pool = new pg.Pool({ connectionString: databaseUrl });
-await migrateEventBus(pool);
-await migrateHumanInteractionStore(pool);
-await migrateTriggerGatewayStore(pool);
+// Each domain brings its own tables to the version this release needs (docs/platform-implementation.md,
+// "Schema migrations"). A failed migration was rolled back; the server then stops working
+// and only answers GET /status, which names it, so it never runs on a half-migrated store (ADR 0021).
+await migrateOrStop(
+  pool,
+  [
+    ["event bus", migrateEventBus],
+    ["human interaction", migrateHumanInteractionStore],
+    ["trigger gateway", migrateTriggerGatewayStore],
+  ],
+  {
+    bundle: "server",
+    answers: "GET /status",
+    stop: (error) => {
+      const stopped = createStoppedControlPlaneApi({
+        probes: [createStoreProbe(databaseUrl), { name: error.component, check: async () => ({ status: "unhealthy", message: error.message }) }],
+        bundles: [{ name: "worker", baseUrl: env("TEND_WORKER_URL") }],
+      });
+      serve({ fetch: (request) => stopped.fetch(request), port: Number(env("PORT", "8080")) });
+    },
+  },
+);
 
 // Human interaction: run outcomes and approval requests from the event bus become
 // notifications, recorded before the notification channel (a log for now) delivers them.
@@ -134,7 +163,7 @@ const api = createControlPlaneApi({
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
-  ...(readToken === undefined ? {} : { readToken }),
+  readToken,
   ...(existsSync(webUiRoot) ? { webUi: { root: webUiRoot } } : {}),
 });
 console.log(existsSync(webUiRoot) ? `web UI: ${webUiRoot} under /ui/` : `web UI: no build at ${webUiRoot}; /ui/ answers 404`);

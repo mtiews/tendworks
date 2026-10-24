@@ -12,8 +12,8 @@ FROM node:24.21.0-trixie-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /repo /app
-# Mount point of the transcript volume; a new volume takes over this ownership.
-RUN mkdir -p /var/lib/tendworks/transcripts && chown node:node /var/lib/tendworks/transcripts
+# Mount points of the transcript and agent secrets volumes; a new volume takes over this ownership.
+RUN mkdir -p /var/lib/tendworks/transcripts /var/lib/tendworks/agent-secrets  && chown node:node /var/lib/tendworks/transcripts  && chown node:node /var/lib/tendworks/agent-secrets && chmod 700 /var/lib/tendworks/agent-secrets
 USER node
 
 FROM runtime AS server

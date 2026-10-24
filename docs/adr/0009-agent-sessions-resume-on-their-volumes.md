@@ -17,5 +17,5 @@ On resume the harness destroys the abandoned sandbox, creates a new one on the s
 
 - The socket proxy opens `VOLUMES` (with `POST`, writes too), so the worker can delete session volumes. This adds no new class of risk: whoever reaches the proxy can already create privileged containers (ADR 0001).
 - The fake agent still resumes by its elapsed time; the end-to-end restart test uses it. Resuming Claude Code is covered by the scripted ACP agent in the unit suites and by a manual smoke test with the real harness (docs/platform-implementation.md).
-- Volumes of a session interrupted for good (e.g. its run is never resumed) are not cleaned up yet; a sweeper over volumes without an unfinished task follows with operations work.
+- Volumes of a session interrupted for good were not cleaned up at first. Since milestone 2 the worker's sandbox clean-up removes, on start and periodically, the installation's sandboxes and session volumes whose owner (the task) has ended or is unknown; a removal that fails when a session ends is recorded in the transcript and retried by the clean-up. A run's task that is never resumed stays unfinished, so its volumes stay until the task ends.
 - Two workers resuming the same task at once would mount the same volumes; the lease from ADR 0004 is still needed before scaling workers out.

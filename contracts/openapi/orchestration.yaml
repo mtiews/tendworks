@@ -6,6 +6,8 @@ info:
     Internal API of the orchestration domain, served by the worker bundle. The control
     plane starts and reads runs through it; it is never published. Orchestration owns
     runs and steps and keeps them after the execution engine has forgotten them.
+    A worker that stopped, e.g. after a failed schema migration, answers every operation
+    with 503 and a problem titled `Worker stopped`; its health API names the reason.
 paths:
   /runs:
     post:
@@ -45,7 +47,9 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "503":
           description: >-
-            The execution engine did not accept the run. The run is recorded as failed.
+            The execution engine did not accept the run, which is recorded as failed; or
+            the worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`, and no run is recorded.
           content:
             application/json:
               schema:
@@ -60,6 +64,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RunList"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /runs/{runId}:
     get:
       operationId: getRun
@@ -79,6 +91,14 @@ paths:
                 $ref: "../schemas/run.schema.yaml#/$defs/run"
         "404":
           description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: >-
+            The worker stopped, e.g. after a failed schema migration (ADR 0021): a problem
+            titled `Worker stopped`; its `GET /health` names the component that stopped it.
           content:
             application/json:
               schema:

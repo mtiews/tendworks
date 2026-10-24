@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -14,6 +13,7 @@ import {
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * The platform MCP server (ADR 0016) as a chat agent's harness sees it: an MCP client
@@ -28,7 +28,7 @@ const READ_TOKEN = "contract-test-read-token";
 
 /** The platform MCP server on a control plane whose agent runtime is `agentRuntime` (in memory by default). */
 function platform(agentRuntime: AgentRuntimePort = createInMemoryAgentRuntime()) {
-  const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+  const configuration = loadConfiguration(fixtureConfiguration());
   const runs = createInMemoryRuns();
   const triggers = createInMemoryTriggers([
     { name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" },

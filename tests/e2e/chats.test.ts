@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import type { ControlPlane } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { API_TOKEN, client } from "./support/control-plane.js";
+import { volumeOf } from "./support/installation.js";
 
 type Chat = ControlPlane.components["schemas"]["chat"];
 
@@ -148,7 +149,7 @@ describe("chats", () => {
       const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text: "chat: What is my name?" } });
       expect(sent.response.status).toBe(200);
       const answered = await waiting(chatId);
-      const volume = `tendworks-volume-${chatId}-session`;
+      const volume = volumeOf(`${chatId}-session`);
       const whileOpen = await docker("ps", "-q", "--filter", `volume=${volume}`);
       const { data: ended } = await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
 
@@ -156,10 +157,28 @@ describe("chats", () => {
       expect(whileOpen).not.toBe("");
       expect(ended).toMatchObject({ status: "ended" });
       expect(await docker("ps", "-aq", "--filter", `volume=${volume}`)).toBe("");
-      expect(await docker("volume", "ls", "-q", "--filter", `name=tendworks-volume-${chatId}`)).toBe("");
+      expect(await docker("volume", "ls", "-q", "--filter", `name=${volumeOf(chatId)}`)).toBe("");
       const { data: transcript } = await client.GET("/chats/{chatId}/transcript", { params: { path: { chatId } } });
       expect(transcript?.items.filter((entry) => entry.type === "session-started")).toHaveLength(1);
       expect(transcript?.items.at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED" });
+    },
+  );
+
+  it.skipIf(!credentialSelected())(
+    "lets the agent of a profile that lists the platform MCP server call one of its tools through the gateway",
+    { timeout: 180_000 },
+    async () => {
+      // "mcp:<tool>" makes the scripted agent call that tool on the MCP server its session was given.
+      const { data: started, response } = await client.POST("/chats", { body: { agent: "scripted-mcp-assistant", text: "mcp:list_agents" } });
+      expect(response.status).toBe(201);
+      const chatId = started!.id;
+      const answered = await waiting(chatId, 120_000);
+      await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
+
+      expect(answered.status).toBe("input-required");
+      expect(answered.message).toMatch(/^mcp list_agents: /);
+      const listed = JSON.parse(answered.message!.replace(/^mcp list_agents: /, "")) as { items: { name: string }[] };
+      expect(listed.items.map((agent) => agent.name)).toContain("scripted-mcp-assistant");
     },
   );
 

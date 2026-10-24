@@ -4,6 +4,16 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "include": ["src"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.suite.ts"]
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.suite.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/platform"
+    }
+  ]
 }

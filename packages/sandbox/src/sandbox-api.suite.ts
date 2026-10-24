@@ -20,6 +20,10 @@ export interface SandboxApiSuiteContext {
   api: SandboxApi;
   /** An image present on the backend that provides busybox-style `sh`, `echo`, `cat`, `id`, `pwd`. */
   image: string;
+  /** The same backend as `api`, but serving another installation. */
+  neighbour: SandboxApi;
+  /** A network on the backend that `api` allows sandboxes to join. */
+  network: string;
 }
 
 /**
@@ -292,6 +296,78 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
       await withVolume(volume);
 
       await expect(context.api.deleteVolume(volume)).rejects.toMatchObject({ code: "volume-in-use" });
+    });
+
+    it("lists its sandboxes with their owner until they are destroyed", async () => {
+      const owned = await context.api.create(template({}, "listed"), { owner: "task-4711" });
+      created.push(owned.id);
+      const unowned = await create();
+
+      const listed = await context.api.list();
+
+      expect(violations("Sandbox", owned)).toEqual([]);
+      for (const sandbox of listed) expect(violations("Sandbox", sandbox)).toEqual([]);
+      expect(listed.find(({ id }) => id === owned.id)).toMatchObject({ template: "listed", state: "running", owner: "task-4711" });
+      expect(listed.find(({ id }) => id === unowned.id)).not.toHaveProperty("owner");
+
+      await context.api.destroy(owned.id);
+      expect((await context.api.list()).map(({ id }) => id)).not.toContain(owned.id);
+    });
+
+    it("lists the volumes its sandboxes created, with the sandbox's owner and when they were created, until they are deleted", async () => {
+      const volume = volumeName();
+      const sandbox = await context.api.create(template(), { volumes: [{ volume, path: "/tmp" }], owner: "task-0815" });
+      await context.api.destroy(sandbox.id);
+
+      const listed = await context.api.listVolumes();
+
+      for (const entry of listed) expect(violations("Volume", entry)).toEqual([]);
+      const entry = listed.find(({ name }) => name === volume);
+      expect(entry).toEqual({ name: volume, owner: "task-0815", createdAt: expect.any(String) });
+      expect(Date.now() - Date.parse(entry!.createdAt)).toBeLessThan(10 * 60_000);
+
+      await context.api.deleteVolume(volume);
+      expect((await context.api.listVolumes()).map(({ name }) => name)).not.toContain(volume);
+    });
+
+    it("neither lists nor reaches nor deletes what another installation on the same backend has", async () => {
+      const { neighbour } = context;
+      const volume = volumeName();
+      const theirs = await neighbour.create(template(), { volumes: [{ volume, path: "/tmp" }], owner: "their-task" });
+      try {
+        await neighbour.writeFile(theirs.id, "/tmp/theirs.txt", encode("theirs"));
+
+        expect((await context.api.list()).map(({ id }) => id)).not.toContain(theirs.id);
+        expect((await context.api.listVolumes()).map(({ name }) => name)).not.toContain(volume);
+        await expect(context.api.exec(theirs.id, { command: ["echo"] })).rejects.toMatchObject({ code: "sandbox-not-found" });
+        await context.api.destroy(theirs.id);
+        expect(new TextDecoder().decode(await neighbour.readFile(theirs.id, "/tmp/theirs.txt"))).toBe("theirs");
+
+        await neighbour.destroy(theirs.id);
+        await context.api.deleteVolume(volume);
+        expect((await neighbour.listVolumes()).map(({ name }) => name)).toContain(volume);
+      } finally {
+        await neighbour.destroy(theirs.id);
+        await neighbour.deleteVolume(volume);
+      }
+    });
+
+    it("joins a network the installation allows when asked, and lists it", async () => {
+      const joined = await context.api.create(template(), { networks: [context.network] });
+      created.push(joined.id);
+      const plain = await create();
+
+      const listed = await context.api.list();
+
+      expect(violations("Sandbox", joined)).toEqual([]);
+      expect(joined.networks).toEqual([context.network]);
+      expect(listed.find(({ id }) => id === joined.id)?.networks).toEqual([context.network]);
+      expect(plain).not.toHaveProperty("networks");
+      expect(listed.find(({ id }) => id === plain.id)).not.toHaveProperty("networks");
+    });
+
+    it("refuses a network the installation does not allow", async () => {
+      await expect(context.api.create(template(), { networks: ["not-allowed-for-sandboxes"] })).rejects.toMatchObject({ code: "invalid-request" });
     });
 
     it("keeps files of different sandboxes apart", async () => {

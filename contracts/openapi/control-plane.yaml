@@ -9,6 +9,9 @@ info:
     decide an approval request, start, continue or end a chat) need the platform's API token; reading accepts the API
     token or the read-only token. This is an interim scheme until identity (OIDC)
     arrives.
+    A platform that stopped, e.g. after a failed schema migration, answers every
+    operation but `GET /status` with 503 and a problem titled `Platform stopped`,
+    whatever token is presented; `GET /status` names the failed component.
 # Reading accepts either token; operations that change state narrow this to `apiToken`.
 security:
   - apiToken: []
@@ -61,6 +64,12 @@ paths:
               description: "`Bearer`"
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The platform stopped, e.g. after a failed schema migration.
           content:
             application/json:
               schema:
@@ -716,6 +725,12 @@ paths:
               description: "`Bearer`"
               schema:
                 type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The platform stopped, e.g. after a failed schema migration.
           content:
             application/json:
               schema:

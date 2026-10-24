@@ -13,6 +13,21 @@ FAILED=0
 
 compose() { docker compose -f deploy/compose.yaml "$@"; }
 
+# The configuration folder the stack mounts, as compose resolves it: TEND_CONFIG_PATH from
+# the shell, else from deploy/.env, else the starter configuration; relative to deploy/.
+config_dir() {
+  local path="${TEND_CONFIG_PATH:-}"
+  if [ -z "$path" ] && [ -f deploy/.env ]; then
+    path=$(sed -n 's/^[[:space:]]*TEND_CONFIG_PATH=//p' deploy/.env | tail -n 1 | tr -d "\r\"'")
+  fi
+  path="${path:-../examples/config}"
+  case "$path" in
+    /* | [A-Za-z]:*) echo "$path" ;;
+    *) echo "deploy/$path" ;;
+  esac
+}
+CONFIG=$(config_dir)
+
 # Prints one field of the JSON on stdin, e.g. `field 'r.steps?.[0]?.transcript'`; prints
 # nothing for empty or non-JSON input, so polling loops keep waiting instead of failing.
 field() {
@@ -25,6 +40,10 @@ field() {
       process.stdout.write(v === undefined || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v));
     });' "$1"
 }
+
+# The installation (the compose project name): sandboxes, session volumes and the sandbox
+# network are named after it.
+INSTALLATION=$(compose config --format json | field 'r.name')
 
 # Every request sends the API token: reading needs a token too (ADR 0016).
 # Polls tolerate errors (e.g. 503 while the worker restarts); they just yield no data.
@@ -82,17 +101,17 @@ check() {
 run_tasks() { api_get "/runs/$1" | field 'r.steps?.filter((s) => s.taskId).map((s) => s.taskId).join(" ")'; }
 
 # The sandboxes and volumes of tasks $@ (run steps' task ids or chat ids): a task's volumes
-# are tendworks-volume-<task>-workspace and -session, its sandbox mounts them. Only these
+# are <installation>-volume-<task>-workspace and -session, its sandbox mounts them. Only these
 # count, so debris of other runs on the Docker daemon (e.g. integration tests) does not.
 task_sandboxes() {
   local task
   for task in "$@"; do
-    docker ps -aq --filter "volume=tendworks-volume-$task-workspace" --filter "volume=tendworks-volume-$task-session"
+    docker ps -aq --filter "volume=$INSTALLATION-volume-$task-workspace" --filter "volume=$INSTALLATION-volume-$task-session"
   done | sort -u | wc -l
 }
 task_volumes() {
   local task
-  for task in "$@"; do docker volume ls -q --filter "name=tendworks-volume-$task-"; done | sort -u | wc -l
+  for task in "$@"; do docker volume ls -q --filter "name=$INSTALLATION-volume-$task-"; done | sort -u | wc -l
 }
 
 # Checks that no sandbox or volume of tasks $@ is left: check_no_leftovers $(run_tasks "$RUN_ID")
@@ -148,7 +167,7 @@ wait_triggered_run() {
   suspended=$(api_get /triggers | field 'r.items.find((t) => t.name === "playground-ready-for-agent")?.suspended')
   if [ "$suspended" = true ]; then
     echo "The binding playground-ready-for-agent is suspended. Remove 'suspend: true' in" >&2
-    echo "examples/config/triggers/playground-ready-for-agent.yaml and restart the server." >&2
+    echo "$CONFIG/triggers/playground-ready-for-agent.yaml and restart the server." >&2
     exit 1
   fi
   while [ $SECONDS -lt $deadline ]; do
@@ -171,7 +190,7 @@ pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
 # True when the policy ask-before-merge lists develop-issue under spec.workflows (comments
 # in the file do not count).
 asks_for_develop_issue() {
-  grep -E '^[[:space:]]*workflows:' examples/config/policies/ask-before-merge.yaml | grep -q 'develop-issue'
+  grep -E '^[[:space:]]*workflows:' "$CONFIG/policies/ask-before-merge.yaml" | grep -q 'develop-issue'
 }
 
 # Fails early with a hint when the control plane does not answer, e.g. because server or

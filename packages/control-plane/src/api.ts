@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent, listsPlatformMcpServer } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
@@ -56,28 +56,19 @@ const MINIMUM_TOKEN_LENGTH = 16;
 const ACTIVE_RUN: ReadonlySet<Schemas["run"]["status"]> = new Set(["pending", "running"]);
 
 /**
- * Why the server must not start with these tokens (empty when it may): each must be long
- * enough to resist guessing, and the read-only token must not be the API token. Agent
- * profiles that list the platform MCP server need the read-only token (ADR 0016), so it
- * must be set when any of `agentProfiles` does.
+ * Why the server must not start with these tokens (empty when it may): both must be set
+ * (ADR 0014, ADR 0016), each long enough to resist guessing, and the read-only token must
+ * not be the API token. Each problem names the variable to set.
  */
-export function apiTokenProblems({
-  apiToken,
-  readToken,
-  agentProfiles = [],
-}: Pick<ControlPlaneApiOptions, "apiToken" | "readToken"> & { agentProfiles?: Configuration["agentProfiles"] }): string[] {
+export function apiTokenProblems({ apiToken, readToken }: { apiToken?: string; readToken?: string }): string[] {
+  const unset = (name: string) => `${name} is not set; set it in deploy/.env; scripts/setup-env.sh creates one with random tokens`;
   const tooShort = (name: string) => `${name} must be at least ${MINIMUM_TOKEN_LENGTH} characters; generate one with \`openssl rand -hex 32\``;
   const problems: string[] = [];
-  if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
-  const readers = agentProfiles.filter(listsPlatformMcpServer).map((profile) => profile.metadata.name);
-  if (readToken === undefined && readers.length > 0) {
-    const profiles = `agent profile${readers.length > 1 ? "s" : ""} ${readers.join(", ")} list${readers.length > 1 ? "" : "s"}`;
-    problems.push(`TEND_API_READ_TOKEN must be set: ${profiles} the platform MCP server (mcp: [tendworks]), which reads with it`);
-  }
-  if (readToken !== undefined) {
-    if (readToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_READ_TOKEN"));
-    else if (readToken === apiToken) problems.push("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state");
-  }
+  if (!apiToken) problems.push(unset("TEND_API_TOKEN"));
+  else if (apiToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_TOKEN"));
+  if (!readToken) problems.push(unset("TEND_API_READ_TOKEN"));
+  else if (readToken.length < MINIMUM_TOKEN_LENGTH) problems.push(tooShort("TEND_API_READ_TOKEN"));
+  else if (readToken === apiToken) problems.push("TEND_API_READ_TOKEN must differ from TEND_API_TOKEN, or it could change state");
   return problems;
 }
 

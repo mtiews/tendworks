@@ -1,4 +1,5 @@
 import type { A2A } from "@tendworks/shared";
+import { migrate, type Migration } from "@tendworks/platform/migrations";
 import type pg from "pg";
 import type { HarnessSession } from "../harness.js";
 import type { ChatEventPublisher } from "../chat-events.js";
@@ -8,7 +9,16 @@ import { TERMINAL_STATES, type StoredTask, type TaskKind, type TaskStore } from 
 const ACTIVE = `(task->'status'->>'state') not in (${TERMINAL_STATES.map((state) => `'${state}'`).join(", ")})`;
 
 // The agent runtime owns the schema `agent_runtime`; no other domain reads these tables.
-const SCHEMA = `
+/**
+ * The agent runtime's schema, one migration per change (docs/platform-implementation.md,
+ * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
+ * migrations; its `if not exists` statements adopt such a store with its data.
+ */
+export const agentRuntimeMigrations: readonly Migration[] = [
+  {
+    version: 1,
+    name: "initial",
+    sql: `
 create schema if not exists agent_runtime;
 create table if not exists agent_runtime.tasks (
   message_id  text primary key,
@@ -25,19 +35,16 @@ alter table agent_runtime.tasks add column if not exists kind text not null defa
 create index if not exists tasks_kind_started_at on agent_runtime.tasks (kind, started_at desc);
 -- The tasks that have not ended: the active agent sessions.
 create index if not exists tasks_active on agent_runtime.tasks (started_at desc) where ${ACTIVE};
-`;
+`,
+  },
+];
 
-/** Creates the agent runtime's tables if they do not exist yet. */
-export async function migrateAgentRuntimeStore(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    // Serialises concurrent starts of several workers.
-    await client.query("select pg_advisory_lock(hashtext('agent_runtime.migrate'))");
-    await client.query(SCHEMA);
-  } finally {
-    await client.query("select pg_advisory_unlock(hashtext('agent_runtime.migrate'))").catch(() => {});
-    client.release();
-  }
+/**
+ * Brings the agent runtime's tables to the latest version under its advisory lock. Throws
+ * `MigrationError` when a migration fails (it is rolled back); the service must stop then.
+ */
+export function migrateAgentRuntimeStore(pool: pg.Pool): Promise<{ from: number; to: number }> {
+  return migrate(pool, { schema: "agent_runtime", migrations: agentRuntimeMigrations });
 }
 
 /** The part of a database connection a publisher needs to write inside the store's transaction. */

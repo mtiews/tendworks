@@ -7,7 +7,7 @@ import type { A2A, AgentProfile } from "@tendworks/shared";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
-import { dyingWorker, scriptedSandboxes, scriptedTemplate, type AgentScript } from "./claude-code/scripted-acp-agent.stub.js";
+import { dyingWorker, refusingRemovals, scriptedSandboxes, scriptedTemplate, type AgentScript } from "./claude-code/scripted-acp-agent.stub.js";
 import {
   ChatBusyError,
   ChatEndedError,
@@ -162,6 +162,28 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     await vi.waitFor(() => expect(sandboxes.sandboxes.size).toBe(0));
     expect([...sandboxes.volumes.keys()].sort()).toEqual([`${id}-session`, `${id}-workspace`]);
     expect(await runtime.getChat(id)).toMatchObject({ status: "input-required" });
+  });
+
+  it("records an idle chat's sandbox it cannot remove, and removes it with the next turn", async () => {
+    const sandboxes = scriptedSandboxes({ recall: true });
+    const removals = refusingRemovals(sandboxes.api);
+    const { runtime, idle } = setup({ recall: true }, { sandboxes, api: removals.api });
+    const { id } = await runtime.startChat("assistant", say("My name is Ada."));
+    await waiting(runtime, id);
+    removals.refused.add("sandbox1");
+
+    await vi.waitFor(() => expect(idle.waiting).not.toEqual([]));
+    idle.pass();
+    await vi.waitFor(async () => expect(((await runtime.transcript(id)) ?? []).map((entry) => entry.type)).toContain("error"));
+    removals.refused.clear();
+    await runtime.sendChatMessage(id, say("What is my name?"));
+    const chat = await waiting(runtime, id);
+
+    expect(((await runtime.transcript(id)) ?? []).find((entry) => entry.type === "error")).toMatchObject({
+      message: expect.stringMatching(/^cannot remove the idle chat's sandbox: .*sandbox1/),
+    });
+    expect(chat).toMatchObject({ status: "input-required", message: "I remember: My name is Ada. | What is my name?" });
+    expect([...sandboxes.sandboxes.keys()]).toEqual(["sandbox2"]);
   });
 
   it("resumes the same agent session in a new sandbox with the next message after the idle time, and records the resume", async () => {
@@ -335,6 +357,23 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(sandboxes.sandboxes.size).toBe(0);
     expect(sandboxes.volumes.size).toBe(0);
     expect(((await runtime.transcript(id)) ?? []).at(-1)).toMatchObject({ type: "task-ended", state: "TASK_STATE_COMPLETED" });
+  });
+
+  it("ends a chat whose sandbox cannot be removed, and records why", async () => {
+    const sandboxes = scriptedSandboxes({ recall: true });
+    const removals = refusingRemovals(sandboxes.api);
+    const { runtime } = setup({ recall: true }, { sandboxes, api: removals.api });
+    const { id } = await runtime.startChat("assistant", say("Hello"));
+    await waiting(runtime, id);
+    removals.refused.add("sandbox1");
+
+    const ended = await runtime.endChat(id);
+
+    expect(ended).toMatchObject({ id, status: "ended" });
+    expect(((await runtime.transcript(id)) ?? []).find((entry) => entry.type === "error")).toMatchObject({
+      message: expect.stringMatching(/^cannot remove the chat's sandbox or volumes: .*sandbox1/),
+    });
+    expect([...sandboxes.sandboxes.keys()]).toEqual(["sandbox1"]);
   });
 
   it("ends a chat while a turn runs", async () => {

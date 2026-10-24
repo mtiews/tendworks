@@ -176,6 +176,8 @@ interface FakeSandbox {
   /** Volumes by mount path; their files by absolute path in the sandbox. */
   mounts: { path: string; files: Files }[];
   kill: () => void;
+  owner?: string;
+  createdAt: string;
 }
 
 /**
@@ -189,7 +191,9 @@ export function scriptedSandboxes(
 ) {
   const sandboxes = new Map<string, FakeSandbox>();
   const volumes = new Map<string, Files>();
-  const created: { template: SandboxTemplate; volumes: VolumeMount[] }[] = [];
+  const volumeOwners = new Map<string, string>();
+  const volumesCreatedAt = new Map<string, string>();
+  const created: { template: SandboxTemplate; volumes: VolumeMount[]; owner?: string; networks: string[] }[] = [];
   const destroyed: string[] = [];
   const deletedVolumes: string[] = [];
   const attached: Attached[] = [];
@@ -206,13 +210,23 @@ export function scriptedSandboxes(
   const api: Sandboxes = {
     async create(template, options = {}) {
       const id = `sandbox${created.length + 1}`;
-      created.push({ template, volumes: options.volumes ?? [] });
+      created.push({ template, volumes: options.volumes ?? [], ...(options.owner === undefined ? {} : { owner: options.owner }), networks: options.networks ?? [] });
       const mounts = (options.volumes ?? []).map(({ volume, path }) => {
-        if (!volumes.has(volume)) volumes.set(volume, new Map());
+        if (!volumes.has(volume)) {
+          volumes.set(volume, new Map());
+          volumesCreatedAt.set(volume, new Date().toISOString());
+          if (options.owner !== undefined) volumeOwners.set(volume, options.owner);
+        }
         return { path, files: volumes.get(volume)! };
       });
-      sandboxes.set(id, { files: new Map(), mounts, kill: () => {} });
+      sandboxes.set(id, { files: new Map(), mounts, kill: () => {}, createdAt: new Date().toISOString(), ...(options.owner === undefined ? {} : { owner: options.owner }) });
       return { id };
+    },
+    async list() {
+      return [...sandboxes].map(([id, { owner, createdAt }]) => ({ id, createdAt, ...(owner === undefined ? {} : { owner }) }));
+    },
+    async listVolumes() {
+      return [...volumes.keys()].map((name) => ({ name, createdAt: volumesCreatedAt.get(name)!, ...(volumeOwners.has(name) ? { owner: volumeOwners.get(name)! } : {}) }));
     },
     async attach(sandboxId, request) {
       const sandbox = find(sandboxId);
@@ -248,6 +262,8 @@ export function scriptedSandboxes(
     async deleteVolume(volume) {
       deletedVolumes.push(volume);
       volumes.delete(volume);
+      volumeOwners.delete(volume);
+      volumesCreatedAt.delete(volume);
     },
   };
   return { api, created, destroyed, deletedVolumes, attached, execs, observed, sandboxes, volumes };
@@ -273,3 +289,18 @@ export const scriptedTemplate: SandboxTemplate = {
   metadata: { name: "claude-code" },
   spec: { image: "tendworks/sandbox-claude-code:test" },
 };
+
+/**
+ * The sandbox API with removals that fail: destroying a sandbox or deleting a volume
+ * whose id or name is in `refused` rejects, as a backend that cannot remove it would.
+ */
+export function refusingRemovals(api: Sandboxes) {
+  const refused = new Set<string>();
+  const refuse = (what: string) => Promise.reject(new Error(`the backend cannot remove ${what}`));
+  const wrapped: Sandboxes = {
+    ...api,
+    destroy: (sandboxId) => (refused.has(sandboxId) ? refuse(sandboxId) : api.destroy(sandboxId)),
+    deleteVolume: (volume) => (refused.has(volume) ? refuse(volume) : api.deleteVolume(volume)),
+  };
+  return { api: wrapped, refused };
+}

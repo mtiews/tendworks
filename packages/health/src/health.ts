@@ -50,6 +50,27 @@ export function createHealthApi({ probes, probeTimeoutMs }: HealthOptions): { fe
   return { fetch: async (request) => app.fetch(request) };
 }
 
+export interface StoppedBundleOptions extends HealthOptions {
+  /** The title of the problem every other operation is refused with, e.g. `Worker stopped`. */
+  title: string;
+}
+
+/**
+ * The internal APIs of a bundle that must not work, e.g. because a schema migration failed
+ * (ADR 0021): `GET /health` still reports its components, including the one that stopped
+ * it, and every other request is refused with 503 and a problem that names no reason, so
+ * callers learn it stopped and the health API stays the one place that says why.
+ */
+export function createStoppedBundleApi({ title, ...health }: StoppedBundleOptions): { fetch(request: Request): Promise<Response> } {
+  const api = createHealthApi(health);
+  return {
+    fetch: async (request) =>
+      new URL(request.url).pathname === "/health"
+        ? api.fetch(request)
+        : Response.json({ title, status: 503, detail: "This bundle stopped working; its GET /health names the component that stopped it." }, { status: 503 }),
+  };
+}
+
 async function checkComponent(probe: HealthProbe, timeoutMs: number): Promise<ComponentStatus> {
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {

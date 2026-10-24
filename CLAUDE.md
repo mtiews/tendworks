@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0020) is designed; its tickets follow.
+**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0021) is implemented; its acceptance on the operator's Ubuntu host (issue #66) is pending, then `v0.2.0` is tagged (release notes: `docs/releases/v0.2.0.md`).
 
 ## Commands
 
@@ -10,7 +10,7 @@ Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agent
 - `pnpm check`: generate types from `contracts/`, typecheck, lint (ESLint with type-aware rules), architecture rules (dependency-cruiser), unit and view tests (`tests/web`)
 - `pnpm coverage`: unit + integration tests with coverage thresholds (see `vitest.config.ts`); thresholds may only be raised, never lowered without a reason in the pull request
 - Pre-commit hook: Betterleaks scans staged changes for secrets (`.githooks/`, installed by `pnpm install`; needs `betterleaks` on PATH). Known dummy values carry `betterleaks:allow` with a reason
-- `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` and the browser tests (`tests/browser`, Playwright; `pnpm e2e:browser` alone) against it
+- `pnpm e2e`: build and start the compose stack (`deploy/compose.yaml`), then run `tests/e2e` and the browser tests (`tests/browser`, Playwright; `pnpm e2e:browser` alone) against it. Needs `deploy/.env` with tokens: create it once with `scripts/setup-env.sh`, as an operator does (tests read the tokens from it)
 - `pnpm --filter @tendworks/web dev`: web UI dev server at `http://localhost:5173/ui/`, proxying the API to the running stack
 - `node apps/cli/dist/main.js status` after `pnpm build`: the `tend` CLI against `http://localhost:8080` (override with `--url` or `TEND_URL`)
 
@@ -79,7 +79,7 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 2. **Milestone 1b – chat path:** a chat (API and `tend chat`) starts an agent session without a run (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`); agent output followed live (ADR 0015–0017).
 3. **Milestone 1c – web UI:** React + Vite SPA under `/ui/` of the server, signed in with an API token until OIDC (ADR 0018): status, runs with live transcripts, approvals, notifications, chats; localhost only.
 
-After the skeleton, **milestone 2 – clean single-host deployment on Linux** (Ubuntu 24.04, Docker Engine): tagged releases, no default tokens, restart policies, versioned schema migrations per domain, backup and restore scripts, sandboxes named per installation with orphan clean-up, the platform MCP server through an MCP-only gateway (ADR 0019), remote access only through a TLS layer in front of localhost (ADR 0020).
+After the skeleton, **milestone 2 – clean single-host deployment on Linux** (Ubuntu 24.04, Docker Engine): tagged releases, no default tokens, restart policies, versioned schema migrations per domain, backup and restore scripts, sandboxes named per installation with orphan clean-up, the platform MCP server through an MCP-only gateway (ADR 0019), remote access only through a TLS layer in front of localhost (ADR 0020). The operator guide (`docs/operator-guide.md`) covers its whole lifecycle; each release gets notes in `docs/releases/<tag>.md` naming migrations and configuration changes.
 
 Build order (slices S0–S5) and skeleton rules: [docs/platform-implementation.md](docs/platform-implementation.md#walking-skeleton-build-order-milestone-1).
 

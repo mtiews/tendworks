@@ -1,4 +1,3 @@
-import { fileURLToPath } from "node:url";
 import { createAgentRuntime } from "@tendworks/agent-runtime";
 import { createControlPlaneApi, createOrchestrationClient, loadConfiguration } from "@tendworks/control-plane";
 import {
@@ -21,6 +20,7 @@ import type { ControlPlane } from "@tendworks/shared";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
+import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
  * The merge step across its seams in one process: orchestration's `call: http` reaches
@@ -34,10 +34,10 @@ const contracts = guardedContracts("orchestration", "control-plane");
 const API_TOKEN = "contract-test-token";
 
 type Run = ControlPlane.components["schemas"]["run"];
-const PR = "https://git.example/example/playground/pull/1"; // examples/config/agents/fake-pr-developer.md
+const PR = "https://git.example/example/playground/pull/1"; // tests/fixtures/config/agents/fake-pr-developer.md
 
 function platform({ pullRequests = [{ url: PR, headBranch: "tendworks/fake", state: "open" }] }: { pullRequests?: FakePullRequest[] } = {}) {
-  const configuration = loadConfiguration(fileURLToPath(new URL("../../examples/config", import.meta.url)));
+  const configuration = loadConfiguration(fixtureConfiguration());
   const repository = createFakePullRequests(pullRequests);
   const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep: async () => {} });
   const store = createInMemoryRunStore();
@@ -139,7 +139,7 @@ describe("merge step through the control plane's merge gate", () => {
     const runId = await start("fake-develop-and-ask");
 
     const approval = await pendingApproval(runId);
-    expect(approval).toMatchObject({ action: "merge", pullRequest: PR, policy: "ask-before-merge", status: "pending" });
+    expect(approval).toMatchObject({ action: "merge", pullRequest: PR, policy: "ask-before-merge-fakes", status: "pending" });
     expect(merged()).toEqual([]);
     const { response } = await client.POST("/approval-requests/{approvalRequestId}/decision", {
       params: { path: { approvalRequestId: approval.id } },

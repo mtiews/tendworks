@@ -28,11 +28,12 @@ export interface ClaudeCodeHarnessOptions {
   /** How long one session may run before it is cancelled and the task fails. */
   timeoutMs?: number;
   /**
-   * The platform MCP server (ADR 0016): its address as sandboxes reach it and the read-only
-   * token it is read with. Only sessions of profiles that list it (`mcp: [tendworks]`) get
-   * either; without it, their tasks fail with a hint.
+   * The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
+   * token it is read with, and the network on which sandboxes reach that address (ADR 0019).
+   * Only sessions of profiles that list it (`mcp: [tendworks]`) get any of them; their
+   * sandboxes join the network. Without it, their tasks fail with a hint.
    */
-  platformMcp?: { url: string; token: string };
+  platformMcp?: { url: string; token: string; network?: string };
   /** How long a cancelled turn of a chat gets to stop before its harness process is given up; 10 s by default. */
   cancelGraceMs?: number;
 }
@@ -95,6 +96,18 @@ export function createClaudeCodeHarness({
 }: ClaudeCodeHarnessOptions): Harness {
   const failed = (message: string): HarnessResult => ({ state: "TASK_STATE_FAILED", message });
 
+  /**
+   * Removes a sandbox or a volume; a failure is recorded in the transcript instead of
+   * failing the task, and the sandbox clean-up retries the removal once the task has ended.
+   */
+  async function remove(observer: HarnessObserver, what: string, removal: () => Promise<void>): Promise<void> {
+    try {
+      await removal();
+    } catch (error) {
+      observer.record({ type: "error", message: `cannot remove ${what}: ${error instanceof Error ? error.message : String(error)}; the sandbox clean-up retries it` });
+    }
+  }
+
   /** Validation: what the task needs before anything is started; a failure names what is missing. */
   function validate(profile: LoadedAgentProfile): { template: SandboxTemplate; credential: ClaudeCodeCredential } | { failure: HarnessResult } {
     if (!credential) {
@@ -121,13 +134,19 @@ export function createClaudeCodeHarness({
     return { env };
   }
 
-  /** MCP servers: the platform MCP server, configured for the session only when the profile lists it. */
-  function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers } | { failure: HarnessResult } {
-    if (!listsPlatformMcpServer(profile)) return { mcpServers: [] };
+  /**
+   * MCP servers: the platform MCP server, configured for the session only when the profile
+   * lists it, with the network its sandbox reaches the server on.
+   */
+  function mcpServersOf(profile: LoadedAgentProfile): { mcpServers: McpServers; networks: string[] } | { failure: HarnessResult } {
+    if (!listsPlatformMcpServer(profile)) return { mcpServers: [], networks: [] };
     if (!platformMcp) {
       return { failure: failed(`agent profile ${profile.metadata.name} lists the platform MCP server, but none is configured: set TEND_PLATFORM_MCP_URL and TEND_API_READ_TOKEN for the worker`) };
     }
-    return { mcpServers: [{ type: "http", name: PLATFORM_MCP_SERVER, url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }] };
+    return {
+      mcpServers: [{ type: "http", name: PLATFORM_MCP_SERVER, url: platformMcp.url, headers: [{ name: "Authorization", value: `Bearer ${platformMcp.token}` }] }],
+      networks: platformMcp.network === undefined ? [] : [platformMcp.network],
+    };
   }
 
   /**
@@ -138,21 +157,21 @@ export function createClaudeCodeHarness({
    */
   async function startSandbox(
     taskId: string,
-    template: SandboxTemplate,
+    { template, networks }: Pick<Prepared, "template" | "networks">,
     session: HarnessSession | undefined,
     observer: HarnessObserver,
   ): Promise<{ sandboxId: string; volumes: VolumeMount[] } | { failure: HarnessResult }> {
     const volumes = volumesOf(taskId);
     if (session?.sandboxId !== undefined) {
       observer.progress("removing the sandbox of the interrupted session");
-      await sandboxes.destroy(session.sandboxId).catch(() => {});
+      await remove(observer, `sandbox ${session.sandboxId}`, () => sandboxes.destroy(session.sandboxId!));
     }
     observer.progress("starting a sandbox");
     try {
-      return { sandboxId: (await sandboxes.create(template, { volumes })).id, volumes };
+      return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId, ...(networks.length === 0 ? {} : { networks }) })).id, volumes };
     } catch (error) {
       // The task fails for good, so volumes the backend may have created go too.
-      await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume).catch(() => {})));
+      await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
       return { failure: failed(`cannot create a sandbox from template ${template.metadata.name}: ${error instanceof Error ? error.message : String(error)}`) };
     }
   }
@@ -207,7 +226,7 @@ export function createClaudeCodeHarness({
     if ("failure" in servers) return servers;
     const hidden = [valid.credential.value, ...Object.values(resolved.env), platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
-    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, redact };
+    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, networks: servers.networks, redact };
   }
 
   /** ACP turn: the harness's ACP adapter over stdio, one prompt turn, resumed when the session was interrupted. */
@@ -271,7 +290,7 @@ export function createClaudeCodeHarness({
       const requested = workspaceOf(message);
       if ("problem" in requested) return failed(requested.problem);
 
-      const started = await startSandbox(taskId, valid.template, session, observer);
+      const started = await startSandbox(taskId, valid, session, observer);
       if ("failure" in started) return started.failure;
       const { sandboxId, volumes } = started;
       try {
@@ -290,8 +309,8 @@ export function createClaudeCodeHarness({
       } finally {
         // Destroying the sandbox also ends background commands a cancel leaves running.
         // The session has ended, so its volumes go too; only an interrupted session keeps them.
-        await sandboxes.destroy(sandboxId);
-        await Promise.all(volumes.map(({ volume }) => sandboxes.deleteVolume(volume)));
+        await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
+        await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
       }
     },
 
@@ -317,7 +336,7 @@ export function createClaudeCodeHarness({
           await current.acp.close();
           current = undefined;
         }
-        const started = await startSandbox(taskId, prepared.template, kept, observer);
+        const started = await startSandbox(taskId, prepared, kept, observer);
         if ("failure" in started) return started;
         const { sandboxId } = started;
         await keep({ ...kept, sandboxId });
@@ -327,7 +346,7 @@ export function createClaudeCodeHarness({
           // A workspace kept on its volume (e.g. after idle time) stays as it is.
           const checkoutFailure = await checkOut(sandboxId, workspace, prepared.env, observer, prepared.redact);
           if (checkoutFailure) {
-            await sandboxes.destroy(sandboxId).catch(() => {});
+            await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
             return { failure: checkoutFailure };
           }
         }
@@ -347,7 +366,7 @@ export function createClaudeCodeHarness({
           ...(kept?.sessionId === undefined ? {} : { resume: { sessionId: kept.sessionId } }),
         });
         if ("outcome" in acp) {
-          await sandboxes.destroy(sandboxId).catch(() => {});
+          await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
           return { failure: failed(prepared.redact(acp.error)) };
         }
         current = { sandboxId, acp };
@@ -388,8 +407,12 @@ export function createClaudeCodeHarness({
           const sandboxId = suspended?.sandboxId ?? kept?.sandboxId;
           current = undefined;
           if (sandboxId === undefined) return;
-          await sandboxes.destroy(sandboxId).catch(() => {});
-          await suspended?.acp.close();
+          // A sandbox that cannot be removed stays kept, so the next turn removes it.
+          try {
+            await sandboxes.destroy(sandboxId);
+          } finally {
+            await suspended?.acp.close();
+          }
           if (kept?.sandboxId === sandboxId) {
             const { sandboxId: _gone, ...rest } = kept;
             await keep(rest);
@@ -397,11 +420,21 @@ export function createClaudeCodeHarness({
         },
         async end() {
           // Destroying the sandbox first also ends a running turn and its background commands.
+          // Every removal is tried; those that fail are named together, for the sandbox clean-up to retry.
+          const failures: string[] = [];
+          const attempt = async (what: string, removal: () => Promise<void>) => {
+            try {
+              await removal();
+            } catch (error) {
+              failures.push(`${what}: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          };
           const sandboxIds = new Set([current?.sandboxId, kept?.sandboxId].filter((id) => id !== undefined));
-          for (const sandboxId of sandboxIds) await sandboxes.destroy(sandboxId).catch(() => {});
+          for (const sandboxId of sandboxIds) await attempt(`sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
           await current?.acp.close();
           current = undefined;
-          await Promise.all(volumesOf(taskId).map(({ volume }) => sandboxes.deleteVolume(volume)));
+          await Promise.all(volumesOf(taskId).map(({ volume }) => attempt(`volume ${volume}`, () => sandboxes.deleteVolume(volume))));
+          if (failures.length > 0) throw new Error(`${failures.join("; ")}; the sandbox clean-up retries it`);
         },
       };
     },
@@ -416,6 +449,8 @@ interface Prepared {
   credential: ClaudeCodeCredential;
   env: Record<string, string>;
   mcpServers: McpServers;
+  /** Networks the session's sandbox joins besides its own. */
+  networks: string[];
   redact: (text: string) => string;
 }
 

@@ -1,6 +1,7 @@
-import { createHealthApi } from "@tendworks/health";
+import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
+import { MigrationError } from "@tendworks/platform/migrations";
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, type HealthProbe, type PlatformStatus } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, createStoppedControlPlaneApi, type HealthProbe, type PlatformStatus } from "./index.js";
 
 const noRuns = { configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] }, runs: createInMemoryRuns(), apiToken: "test-token" };
 
@@ -117,6 +118,56 @@ describe("GET /status", () => {
     expect(body.components).toEqual([
       { name: "store", status: "healthy" },
       { name: "worker", status: "unhealthy", message: "fetch failed" },
+    ]);
+  });
+});
+
+describe("GET /status: a failed schema migration", () => {
+  // What a bundle builds from the MigrationError that stopped it.
+  const failed = new MigrationError("human_interaction", 'migration 2 (add-channel) failed: column "channel" already exists', {
+    version: 2,
+    migration: "add-channel",
+  });
+  const failure = createStaticHealthProbe(failed.component, { status: "unhealthy", message: failed.message });
+
+  it("shows the server's own failed migration while the stopped server refuses everything else", async () => {
+    const api = createStoppedControlPlaneApi({ probes: [healthy("store"), failure] });
+
+    const status = await api.fetch(new Request("http://tend.test/status"));
+    const runs = await api.fetch(new Request("http://tend.test/runs", { headers: { authorization: "Bearer test-token" } }));
+
+    expect(status.status).toBe(503);
+    expect(((await status.json()) as PlatformStatus).components).toEqual([
+      { name: "store", status: "healthy" },
+      {
+        name: "human-interaction-schema",
+        status: "unhealthy",
+        message: 'schema human_interaction: migration 2 (add-channel) failed: column "channel" already exists',
+      },
+    ]);
+    expect(runs.status).toBe(503);
+    // The reason, with whatever the store said, only in GET /status, which reveals no more than the platform's health.
+    expect(await runs.json()).toEqual({
+      title: "Platform stopped",
+      status: 503,
+      detail: "The platform stopped working; GET /status names the component that stopped it.",
+    });
+  });
+
+  it("shows a worker's failed migration from the worker's health API", async () => {
+    const worker = createHealthApi({ probes: [failure] });
+    const api = createControlPlaneApi({
+      ...noRuns,
+      probes: [healthy("store")],
+      bundles: [{ name: "worker", baseUrl: "http://worker.test", fetch: (request) => worker.fetch(request) }],
+    });
+
+    const response = await api.fetch(new Request("http://tend.test/status"));
+
+    expect(response.status).toBe(503);
+    expect(((await response.json()) as PlatformStatus).components).toEqual([
+      { name: "store", status: "healthy" },
+      { name: "human-interaction-schema", status: "unhealthy", message: failed.message },
     ]);
   });
 });
