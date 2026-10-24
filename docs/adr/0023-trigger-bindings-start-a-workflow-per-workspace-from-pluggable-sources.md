@@ -7,7 +7,7 @@ Trigger kinds:
 - **`schedule`:** cron or interval; the tick is the item.
 - **`github-issues`:** labels, state, interval and a read-only platform token. The source reads the issues of each git workspace's repository. It never uses the workspace's agent credential, so the server holds no agent secrets.
 
-Trigger sources sit behind a port in the trigger gateway. A source returns items with a stable key, a title and a link. Deduplication ("once per item") is generic: the gateway persists the key per binding and workspace.
+Trigger sources sit behind a port in the trigger gateway. A source returns items with a stable key, a title and a link. It is created with the binding's settings and workspaces when the platform starts, and refuses a binding it cannot serve with the reason, which stops the start like any invalid configuration: `github-issues` refuses a binding without workspaces and any workspace that is not a git repository on GitHub. Deduplication ("once per item") is generic: the gateway persists the key per binding and workspace.
 
 Source implementations live in their own packages outside the domain packages. They are built into the same server bundle and selected by the trigger kind. A source can later move to its own repository, or out of process, without a change to the gateway.
 

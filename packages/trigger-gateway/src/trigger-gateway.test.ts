@@ -374,4 +374,24 @@ describe("trigger gateway", () => {
       createTriggerGateway({ bindings: [binding([])], sources: { fake: () => ({ schedule: { cron: "61 * * * *" }, items: async () => [] }) }, store, runs }),
     ).toThrow("trigger binding 'ready-issues': cron expression '61 * * * *' is invalid");
   });
+
+  it("creates each source with the binding's workspaces, and refuses a binding its source cannot serve", () => {
+    const store = createInMemoryFiringStore();
+    const runs = createInMemoryRunStarter();
+    const given: string[][] = [];
+    const picky: TriggerSources = {
+      fake: (settings: TriggerBinding.FakeTrigger, { workspaces }) => {
+        given.push(workspaces.map((workspace) => workspace.metadata.name));
+        if (workspaces.some((workspace) => workspace.metadata.name === "web")) throw new Error("workspace 'web' cannot be read");
+        return createFakeTriggerSource(settings);
+      },
+    };
+    const options = { workspaces: WORKSPACES, sources: picky, store, runs };
+
+    createTriggerGateway({ ...options, bindings: [binding([], { workspaces: ["app"] }), { ...binding([]), metadata: { name: "none" } }] });
+    expect(given).toEqual([["app"], []]);
+    expect(() => createTriggerGateway({ ...options, bindings: [binding([], { workspaces: ["web", "app"] })] })).toThrow(
+      "trigger binding 'ready-issues': workspace 'web' cannot be read",
+    );
+  });
 });

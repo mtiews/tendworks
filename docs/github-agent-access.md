@@ -12,7 +12,16 @@ So the setup keeps production **out of the agent token's reach**: no access to w
 
 ## Setup
 
-### 1. Agent token (`TENDWORKS_AGENT_GITHUB_TOKEN`)
+A setup needs exactly two kinds of token, both fine-grained personal access tokens, and no other GitHub credential:
+
+| Token | Used by | Where it lives | Can |
+| --- | --- | --- | --- |
+| **Issues token** `TENDWORKS_PLATFORM_GITHUB_TOKEN`, one per setup | the `github-issues` trigger (`token` of the binding) | server only, never a sandbox | read issues |
+| **Agent token**, one per workspace, e.g. `TENDWORKS_AGENT_GITHUB_TOKEN` | the workspace (`spec.credentials` of its `Workspace`) | worker and the sandboxes of that workspace's tasks, never the server | push branches, open pull requests |
+
+The trigger never uses an agent token, and agents never see the issues token.
+
+### 1. Agent token per workspace (`TENDWORKS_AGENT_GITHUB_TOKEN`)
 
 GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
 
@@ -27,11 +36,21 @@ GitHub → Settings → Developer settings → Fine-grained tokens → Generate 
 
 The token is the workspace's credential (`spec.credentials` of its `Workspace`, ADR 0022): git clones and pushes with it through the sandbox's credential helper, and the session sees it as `GH_TOKEN` for `gh` when the workspace sets `env: GH_TOKEN`, as the starter's `playground` does. For another repository, declare another workspace with its own `TENDWORKS_AGENT_*` token; agent profiles hold none.
 
-### 2. Platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
+### 2. Issues token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
 
-A second fine-grained token, used only by the server to read issues for trigger bindings, never in a sandbox: same repositories, **Issues** read, **Metadata** read (set automatically), everything else no access. It cannot write anything.
+The `github-issues` trigger reads the issues of each workspace's repository on github.com with this token, and only reads. GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
 
-Put both in `deploy/.env` (`chmod 600`) and recreate the stack with `docker compose -f deploy/compose.yaml up -d`; `restart` does not reload `.env`.
+| Setting | Value |
+| --- | --- |
+| Expiration | 30–90 days |
+| Repository access | Only select repositories: the repositories of all workspaces the `github-issues` bindings name |
+| Issues | Read-only |
+| Metadata | Read (set automatically) |
+| **Everything else** | **No access**. It cannot write anything, not even a comment or a label |
+
+The binding refers to it as `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }`. A binding may only name `TENDWORKS_PLATFORM_*` secrets, so it cannot take an agent token. When you add a workspace to a binding, add its repository to this token too; for a private repository the checks of that workspace fail with GitHub's `404` until you do.
+
+Put the issues token and every agent token in `deploy/.env` (`chmod 600`) and recreate the stack with `docker compose -f deploy/compose.yaml up -d`; `restart` does not reload `.env`.
 
 ### 3. Keep production behind you, not behind `main`
 

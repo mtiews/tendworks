@@ -61,7 +61,8 @@ interface Bound {
 
 /**
  * Creates the trigger gateway. Throws when a binding's trigger kind has no deployed
- * source or its schedule cannot be read, so such a binding stops the start.
+ * source, the source refuses the binding (e.g. its workspaces) or its schedule cannot be
+ * read, so such a binding stops the start.
  */
 export function createTriggerGateway({
   bindings,
@@ -73,8 +74,8 @@ export function createTriggerGateway({
   now = () => new Date(),
   log = (line) => console.info(line),
 }: TriggerGatewayOptions): TriggerGateway {
-  const byName = new Map(bindings.map((binding) => [binding.metadata.name, bind(binding, sources, secrets)]));
   const workspacesByName = new Map(workspaces.map((workspace) => [workspace.metadata.name, workspace]));
+  const byName = new Map(bindings.map((binding) => [binding.metadata.name, bind(binding, sources, secrets, workspacesByName)]));
   const timers = new Map<string, NodeJS.Timeout>();
   const running = new Map<string, Promise<unknown>>();
   let started = false;
@@ -195,8 +196,12 @@ export function createTriggerGateway({
   };
 }
 
-/** The binding's trigger source, created by the factory its trigger kind selects. */
-function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, secrets: SecretResolver): Bound {
+/**
+ * The binding's trigger source, created by the factory its trigger kind selects with the
+ * binding's configured workspaces. A workspace that is not configured is left out here;
+ * its checks fail.
+ */
+function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, secrets: SecretResolver, workspaces: ReadonlyMap<string, Workspace.Workspace>): Bound {
   const name = binding.metadata.name;
   const [kind, settings] = Object.entries(binding.spec.trigger)[0] ?? [];
   if (kind === undefined) throw new Error(`trigger binding '${name}' has no trigger`);
@@ -205,8 +210,10 @@ function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, s
     const deployed = Object.keys(sources).sort().join(", ") || "none";
     throw new Error(`trigger binding '${name}' has a trigger of kind '${kind}', but no trigger source '${kind}' is deployed (deployed: ${deployed})`);
   }
-  const source = create(settings as never, { secrets });
+  const bound = (binding.spec.workspaces ?? []).flatMap((workspace) => workspaces.get(workspace) ?? []);
+  let source: TriggerSource;
   try {
+    source = create(settings as never, { secrets, workspaces: bound });
     checkSchedule(source.schedule);
   } catch (error) {
     throw new Error(`trigger binding '${name}': ${errorMessage(error)}`, { cause: error });

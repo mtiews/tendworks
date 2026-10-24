@@ -36,10 +36,17 @@ export interface TriggerSource {
 export interface TriggerSourceContext {
   /** Resolves secret references: only platform secrets (ADR 0008). */
   secrets: SecretResolver;
+  /** The workspaces the binding names, in its order; empty for a binding without workspaces. */
+  workspaces: readonly Workspace.Workspace[];
 }
 
-/** Creates the source of one binding from its settings, which the binding schema has validated. */
+/**
+ * Creates the source of one binding from its settings, which the binding schema has
+ * validated, when the platform starts. Throws with the reason when the source cannot serve
+ * the binding (e.g. a workspace of a kind it cannot read), so the platform refuses the
+ * configuration instead of failing every check.
+ */
 export type TriggerSourceFactory<Settings> = (settings: Settings, context: TriggerSourceContext) => TriggerSource;
 
-/** The trigger sources deployed with the platform, by trigger kind (`schedule`, `github-issues`, …). */
+/** The trigger sources deployed with the platform, by trigger kind (`schedule`, …). */
 export type TriggerSources = Readonly<Record<string, TriggerSourceFactory<never>>>;
