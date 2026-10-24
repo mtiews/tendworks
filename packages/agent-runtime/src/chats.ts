@@ -1,12 +1,11 @@
 import type { A2A, Chat as Contract } from "@tendworks/shared";
 import { COST, TRANSCRIPT } from "./agent-tasks.js";
 import type { Cost } from "./harness.js";
-import { workspaceOf } from "./workspace.js";
 
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
 
-/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent }`. */
+/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent, repository? }`. */
 export const CHAT = "dev.tendworks/chat";
 
 export interface ChatFacts {
@@ -20,6 +19,8 @@ export interface ChatFacts {
   startedAt: string;
   /** The trace the chat started; its events belong to it. */
   traceparent: string;
+  /** The public repository checked out as the chat's workspace, on its default branch; absent for an empty workspace. */
+  repository?: string;
 }
 
 /** The chat a task is, or undefined for a task of a run. */
@@ -42,7 +43,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
   const message = task.status.message?.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
   const cost = task.metadata?.[COST] as Cost | undefined;
   const transcript = task.metadata?.[TRANSCRIPT];
-  const repository = repositoryOf(task);
+  const { repository } = facts;
   return {
     id: task.id,
     agent: facts.agent,
@@ -65,23 +66,13 @@ export function addCost(total: Cost | undefined, turn: Cost | undefined): Cost |
   return { amount: Math.round((total.amount + turn.amount) * 1e6) / 1e6, currency: total.currency };
 }
 
-/** A chat's repository, from the workspace its first message asked for. */
-function repositoryOf(task: A2A.Task): string | undefined {
-  const workspace = workspaceOf(task.history?.[0] ?? { messageId: "", role: "ROLE_USER", parts: [] });
-  return "workspace" in workspace ? workspace.workspace?.repository : undefined;
-}
-
 /**
- * Why a chat cannot start with the workspace its first message asks for, if it cannot: a
- * chat's profile holds no repository credential, so only a repository reachable without
- * one, by an `https` or `http` URL that carries no credential itself, can be its workspace.
+ * Why a chat cannot start with `repository` as its workspace, if it cannot: a chat holds
+ * no repository credential, so only a repository reachable without one, by an `https` or
+ * `http` URL that carries no credential itself, can be its workspace.
  */
-export function workspaceProblem(message: A2A.Message): string | undefined {
-  const rule = "it must be an https or http clone URL without user name or password, e.g. https://github.com/acme/playground.git";
-  const requested = workspaceOf(message);
-  if ("problem" in requested) return `the repository is malformed (${requested.problem}): ${rule}`;
-  if (!requested.workspace) return undefined;
-  const { repository } = requested.workspace;
+export function repositoryProblem(repository: string): string | undefined {
+  const rule = "it must be an https or http clone URL without user name or password, e.g. https://git.example/acme/playground.git";
   let url: URL;
   try {
     url = new URL(repository);

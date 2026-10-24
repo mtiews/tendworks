@@ -7,11 +7,14 @@ import {
   createInMemoryTranscriptStore,
   createPostgresTaskStore,
   createSandboxCleanup,
+  createEmptyWorkspace,
+  createGitWorkspace,
   type ChatEventPublisher,
   type Harness,
   type Sandboxes,
   type TaskStore,
   type TranscriptStore,
+  type Workspace,
 } from "@tendworks/agent-runtime";
 import {
   createAgentRuntimeClient,
@@ -95,6 +98,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "agent-runtime/TranscriptStore": port<TranscriptStore>({ files: createFileTranscriptStore, "in-memory": createInMemoryTranscriptStore }),
   "agent-runtime/Sandboxes": port<Sandboxes>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
   "agent-runtime/ChatEventPublisher": port<ChatEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),
+  "agent-runtime/Workspace": port<Workspace>({ git: createGitWorkspace, empty: createEmptyWorkspace }),
 
   "sandbox/SandboxApi": port<SandboxApi>({ docker: createDockerSandboxApi, fake: createFakeSandboxApi }),
 

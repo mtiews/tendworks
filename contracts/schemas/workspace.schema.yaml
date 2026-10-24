@@ -1,0 +1,102 @@
+$id: https://tendworks.dev/schemas/v1/schemas/workspace.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Workspace
+description: >-
+  A workspace agents work in, declared once and referred to by name (ADR 0022): workflows
+  name it in the `dev.tendworks/workspace` metadata of an agent task
+  (contracts/schemas/a2a.schema.yaml#/$defs/workspace). A `git` workspace is a repository
+  on any git host, cloned in the agent's sandbox with the workspace's own credential.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: Workspace
+  metadata:
+    type: object
+    title: WorkspaceMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        $ref: '#/$defs/workspaceName'
+  spec:
+    title: WorkspaceSpec
+    type: object
+    required: [git]
+    additionalProperties: false
+    properties:
+      git:
+        $ref: '#/$defs/gitWorkspace'
+      credentials:
+        $ref: '#/$defs/workspaceCredentials'
+$defs:
+  workspaceName:
+    title: WorkspaceName
+    type: string
+    pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+    description: Name workflows, trigger bindings and chats refer to the workspace by.
+  gitWorkspace:
+    title: GitWorkspace
+    description: >-
+      A git repository. The agent runtime clones it into the sandbox's workspace, then
+      checks out the branch the workflow asks for (created from `defaultBranch` when the
+      remote does not have it yet), or stays on `defaultBranch`.
+    type: object
+    required: [url, defaultBranch]
+    additionalProperties: false
+    examples:
+      - url: https://git.example/acme/app.git
+        defaultBranch: main
+    properties:
+      url:
+        type: string
+        maxLength: 2048
+        # http(s) without user name or password in the URL (the credential is a secret
+        # reference), or a file URL of a repository inside the sandbox image.
+        pattern: ^(?:https?://[^/@\s]+(?:/\S*)?|file:///\S+)$
+        description: >-
+          Clone URL: `https://` or `http://` without credentials in it, or `file:///` for a
+          repository the sandbox image carries.
+      defaultBranch:
+        type: string
+        pattern: ^[^-\s]\S*$
+        description: The branch new branches start from, and the one checked out when a task asks for none.
+  workspaceCredentials:
+    title: WorkspaceCredentials
+    description: >-
+      The workspace's credential, its own agent secret (ADR 0008), so each repository can
+      have a token scoped to it. git uses it through a credential helper for the
+      repository's host only. The agent session also sees it under `env` when set, e.g.
+      `GH_TOKEN` for a forge's command line tool.
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    examples:
+      - secretRef: { name: TENDWORKS_AGENT_APP_TOKEN }
+        env: GH_TOKEN
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^TENDWORKS_AGENT_[A-Z0-9_]+$
+            description: Name of the agent secret, e.g. `TENDWORKS_AGENT_APP_TOKEN`.
+      username:
+        type: string
+        pattern: ^[^\s:]+$
+        default: x-access-token
+        description: >-
+          User name git sends with the token. Hosts that accept any user name with a token
+          need none; others want the account or a fixed name.
+      env:
+        type: string
+        pattern: ^[A-Z_][A-Z0-9_]*$
+        description: >-
+          Environment variable under which the agent session sees the credential. Without
+          it, only git reaches the credential.

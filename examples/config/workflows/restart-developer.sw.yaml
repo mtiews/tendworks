@@ -1,6 +1,6 @@
 # Restart smoke test for the real developer agent: a task that takes over a minute, so the
-# platform can be restarted while the agent works. Needs the sandbox image, a harness
-# credential and the agent token; see docs/platform-implementation.md.
+# platform can be restarted while the agent works. Needs the sandbox image and a harness
+# credential; see docs/platform-implementation.md.
 # Start it with: POST /runs {"workflow": "restart-developer"}
 document:
   dsl: '1.0.3'

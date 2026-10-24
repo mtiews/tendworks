@@ -1,0 +1,28 @@
+# End-to-end workspace test through the Claude Code harness with a scripted ACP agent:
+# the step works in the workspace its input names, on the branch its input names, and the
+# agent answers with the branch it finds checked out.
+# Start it with: POST /runs {"workflow": "workspace-scripted", "input": {"workspace": "scripted-playground", "branch": "tendworks/e2e"}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: workspace-scripted
+  version: '0.1.0'
+  summary: Asks the scripted ACP agent what its workspace checkout is.
+do:
+  - inspect:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://scripted-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: 'workspace: which branch is checked out?'
+            metadata:
+              dev.tendworks/workspace:
+                name: '${ .workspace }'
+                branch: '${ .branch }'
+      output:
+        as: '${ { state: .status.state, reply: .status.message.parts[0].text } }'

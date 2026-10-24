@@ -185,11 +185,12 @@ Rules the loader enforces:
 | `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows` (all workflows without it); the strictest applicable policy wins, and without one the step asks | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `NotificationChannel` | `notifications/*.yaml` | `spec.events` (out of `approval.requested`, `run.failed`, `run.completed`); `spec.integration: pushover` with `spec.pushover.token` and `user` as references to `TENDWORKS_PLATFORM_PUSHOVER_TOKEN` and `TENDWORKS_PLATFORM_PUSHOVER_USER` in `deploy/.env`, optional `priority` (-2 to 1); several channels, e.g. failures with `priority: 1`. A run's first artifact (its pull request) is the message's link | server |
-| `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
+| `Workspace` | `workspaces/*.yaml` | `spec.git.url` (any host; `https://` or `http://` without credentials in it) and `spec.git.defaultBranch`; `spec.credentials.secretRef` (an agent secret), `username` (default `x-access-token`) and `env` (e.g. `GH_TOKEN`: the session sees the credential under that name too) | server and worker |
+| `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow`; `spec.input.workspace`: the workspace its runs work in | server |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
 
-**Target repository.** The starter targets `mtiews/tendworks-playground`. For your own repository, change `spec.source.issues.repository` in `triggers/playground-ready-for-agent.yaml` and scope both GitHub tokens to it. The workflow derives the clone URL from the issue (`https://github.com/<repository>.git`). The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
+**Target repository.** The starter targets `mtiews/tendworks-playground`, declared once as the workspace `playground` (`workspaces/playground.yaml`, ADR 0022). For your own repository, declare a workspace with its clone URL and its own agent token, name it in `spec.input.workspace` of the trigger binding, change `spec.source.issues.repository` there, and scope the tokens to it. Agent profiles carry no repository token; a workflow or binding that names an unknown workspace is refused at startup. The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
 
 ## Secrets
 
@@ -205,14 +206,14 @@ All secrets live in `deploy/.env`. Configuration only references them (ADR 0008)
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with your subscription | worker → every Claude Code sandbox, in the agent process's environment | — | `claude setup-token` | model usage on your subscription |
 | `ANTHROPIC_API_KEY` | Claude Code with an API key, billed per use | worker → every Claude Code sandbox, as above | a key for this purpose only; spend limits in the Anthropic Console | Anthropic Console | spend on your API account |
-| `TENDWORKS_AGENT_GITHUB_TOKEN` | the `developer` agent pushes its branch and opens the pull request (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of profiles that reference it | [GitHub access](#before-the-first-real-run-github-access) | fine-grained token | push to any branch and open, edit or merge pull requests in its repositories |
+| `TENDWORKS_AGENT_GITHUB_TOKEN` | credential of the `playground` workspace: git clones and pushes with it, the `developer` agent opens the pull request with it (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of tasks in that workspace | [GitHub access](#before-the-first-real-run-github-access) | fine-grained token | push to any branch and open, edit or merge pull requests in its repositories |
 | `TENDWORKS_PLATFORM_GITHUB_TOKEN` | the trigger reads issues | server only, never a sandbox | as above | fine-grained token, issues read only | read issues in its repositories |
 
 Notes:
 
 - **Credential terms.** `oauth-token` is a subscription token, for single-operator use only under Anthropic's terms. If anyone else uses your installation, use `api-key`.
-- **Agents read their own secrets.** Nothing stops an agent (or code it runs) from reading the credential and `GH_TOKEN` in its environment and sending them anywhere: there is no egress allowlist yet. Transcripts and replies redact the values (`***`), which protects the logs, not the secret.
-- **`hello-developer` needs the agent token too**: the `developer` profile references it, and a task fails when a referenced secret is not set.
+- **Agents read their own secrets.** Nothing stops an agent (or code it runs) from reading the credential and the workspace's credential (`TENDWORKS_GIT_PASSWORD`, and `GH_TOKEN` where the workspace exposes it) in its environment and sending them anywhere: there is no egress allowlist yet. Transcripts and replies redact the values (`***`), which protects the logs, not the secret.
+- **A task needs the secrets of its profile and its workspace only**: `hello-developer` works without a workspace and needs no repository token; a task in a workspace whose secret is not set fails, naming it.
 
 ### Secret references (ADR 0008)
 
@@ -220,7 +221,8 @@ Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`, resol
 
 | Who references | May resolve | Example |
 | --- | --- | --- |
-| agent profiles (`spec.env`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }` |
+| workspaces (`spec.credentials`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `credentials: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN }, env: GH_TOKEN }` |
+| agent profiles (`spec.env`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `API_KEY: { secretRef: { name: TENDWORKS_AGENT_SEARCH_KEY } }` |
 | trigger bindings | only `TENDWORKS_PLATFORM_*` | `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }` |
 
 A reference outside its prefix is a configuration error at startup. `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` and the database URL can never be referenced.
@@ -228,8 +230,8 @@ A reference outside its prefix is a configuration error at startup. `TEND_API_TO
 **Adding an agent secret:**
 
 1. Add `TENDWORKS_AGENT_<NAME>=<value>` to `deploy/.env`.
-2. Reference it in the profile's `spec.env`.
-3. `docker compose -f deploy/compose.yaml up -d --wait` (and `restart server worker` for the profile change).
+2. Reference it in the workspace's `spec.credentials` or the profile's `spec.env`.
+3. `docker compose -f deploy/compose.yaml up -d --wait` (and `restart server worker` for the configuration change).
 
 No compose edit: the one-shot service `agent-secrets` gets `deploy/.env` as a whole, has no network, writes only its `TENDWORKS_AGENT_*` variables to `agent-secrets.json` (mode 600) on the volume `<installation>_agent-secrets` and ends. The worker reads that file at every reference and never sees the platform's secrets. Only `deploy/.env` counts: not variables exported in your shell, not a file given with `--env-file`. A new `TENDWORKS_PLATFORM_*` secret still needs a line in the `server` environment of `deploy/compose.yaml`.
 
@@ -524,7 +526,8 @@ docker network rm tendworks-sandboxes
 | `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; ...` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
 | run fails: `no harness credential configured: ...` | `tend run get` | as above |
 | `TEND_CLAUDE_CODE_CREDENTIAL selects api-key, but ANTHROPIC_API_KEY is empty` | worker log | fill the selected variable |
-| run fails: `agent profile developer: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning | add the line to `deploy/.env` (not your shell), `up -d --wait` |
+| run fails: `workspace: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning | add the line to `deploy/.env` (not your shell), `up -d --wait` |
+| run fails: `no workspace 'NAME' is configured` | `tend run get` | the run's input names a workspace no `Workspace` document declares: add it or fix the name, `restart server worker` |
 | `... is not an agent secret: agents may only reference TENDWORKS_AGENT_* secrets` (or `platform integrations may only reference TENDWORKS_PLATFORM_*`) | log, run | a reference outside its prefix; rename the variable |
 | `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the token did not reach the server; set it, `up -d --wait` (`restart` keeps the old environment) |
 | binding never checks | `tend trigger list` | `spec.suspend: true`; remove it and restart the server |

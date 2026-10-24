@@ -83,7 +83,7 @@ const transcripts: Record<string, TranscriptEntry[]> = {
     { position: 2, time: at("12:00:02"), type: "session-resume-failed", sessionId: "session-1", reason: "gone" },
     { position: 3, time: at("12:00:02"), type: "session-resumed", sessionId: "session-2" },
     { position: 4, time: at("12:00:02"), type: "plan", steps: [{ content: "Read the diff", status: "completed" }, { content: "Comment", status: "in-progress" }] },
-    { position: 5, time: at("12:00:03"), type: "workspace-checkout", workspace: { repository: "https://git.example/acme/app.git", branch: "tendworks/run-1" }, exitCode: 0, output: "" },
+    { position: 5, time: at("12:00:03"), type: "workspace-checkout", workspace: { url: "https://git.example/acme/app.git", name: "app", branch: "tendworks/run-1" }, exitCode: 0, output: "" },
     { position: 6, time: at("12:00:03"), type: "permission", tool: "Write review.md", granted: true },
     { position: 7, time: at("12:00:03"), type: "harness-output", text: "warning: slow" },
     { position: 8, time: at("12:00:04"), type: "error", message: "the harness ended unexpectedly" },

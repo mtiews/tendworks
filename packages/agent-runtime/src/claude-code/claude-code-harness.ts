@@ -4,11 +4,11 @@ import type { A2A } from "@tendworks/shared";
 import { openAcpSession, runAcpTurn, type AcpSession, type AcpSessionOptions, type AcpTurn } from "../acp/acp-turn.js";
 import type { LoadedAgentProfile } from "../agent-profiles.js";
 import { parseReportedArtifacts, toArtifact } from "../artifacts.js";
-import type { Harness, HarnessObserver, HarnessResult, HarnessSession } from "../harness.js";
+import type { Harness, HarnessObserver, HarnessResult, HarnessSession, HarnessSessionTask } from "../harness.js";
 import type { Sandboxes, SandboxProcess, SandboxTemplate, VolumeMount } from "../sandboxes.js";
 import type { SkillFile } from "../skills.js";
 import type { TranscriptRecord } from "../transcripts/transcript-store.js";
-import { checkoutCommand, workspaceOf, type Workspace } from "../workspace.js";
+import { createEmptyWorkspace, workspaceVolume, type PreparedWorkspace } from "../workspace.js";
 import { CREDENTIAL_VARIABLES, type ClaudeCodeCredential } from "./credentials.js";
 
 export interface ClaudeCodeHarnessOptions {
@@ -58,11 +58,13 @@ const CHAT_CONTINUE =
   "The platform restarted while you were working on the operator's last message, and your turn was interrupted. " +
   "Check the state of the workspace, then continue where you left off and answer the operator.";
 
-/** The volumes of a task's agent session, mounted into every sandbox it runs in. */
-const volumesOf = (taskId: string): VolumeMount[] => [
-  { volume: `${taskId}-workspace`, path: WORKSPACE },
-  { volume: `${taskId}-session`, path: SESSION },
-];
+/** The volume of a task's agent session that holds the harness's home and config directory. */
+const sessionVolume = (taskId: string): VolumeMount => ({ volume: `${taskId}-session`, path: SESSION });
+
+/** The volumes a task's agent session owns, removed when it ends: its workspace's and its own. */
+const volumesOf = (taskId: string): VolumeMount[] => [{ volume: workspaceVolume(taskId), path: WORKSPACE }, sessionVolume(taskId)];
+
+const emptyWorkspace = createEmptyWorkspace();
 
 /** What a chat's session is told about the platform, after the profile's role description. */
 const CHAT_INSTRUCTIONS = `You are in a chat with an operator of the Tendworks platform, who reads your answers and replies turn by turn; ask when you need something.
@@ -157,11 +159,11 @@ export function createClaudeCodeHarness({
    */
   async function startSandbox(
     taskId: string,
-    { template, networks }: Pick<Prepared, "template" | "networks">,
+    { template, networks, workspace }: Pick<Prepared, "template" | "networks" | "workspace">,
     session: HarnessSession | undefined,
     observer: HarnessObserver,
   ): Promise<{ sandboxId: string; volumes: VolumeMount[] } | { failure: HarnessResult }> {
-    const volumes = volumesOf(taskId);
+    const volumes = [{ volume: workspace.mount.volume, path: WORKSPACE }, sessionVolume(taskId)];
     if (session?.sandboxId !== undefined) {
       observer.progress("removing the sandbox of the interrupted session");
       await remove(observer, `sandbox ${session.sandboxId}`, () => sandboxes.destroy(session.sandboxId!));
@@ -183,20 +185,21 @@ export function createClaudeCodeHarness({
     }
   }
 
-  /** Checkout: the workspace the task asks for, with the profile's secrets (e.g. a repository token). */
+  /** Checkout: what the workspace fetches into the sandbox, with only the checkout's environment (e.g. the workspace's credential). */
   async function checkOut(
     sandboxId: string,
-    workspace: Workspace,
-    env: Record<string, string>,
+    { checkout }: PreparedWorkspace,
     observer: HarnessObserver,
     redact: (text: string) => string,
   ): Promise<HarnessResult | undefined> {
-    observer.progress(`checking out ${workspace.branch ?? workspace.repository}`);
-    const checkout = await sandboxes.exec(sandboxId, { ...checkoutCommand(workspace), workingDirectory: WORKSPACE, env });
-    observer.record({ type: "workspace-checkout", workspace, exitCode: checkout.exitCode, output: redact(checkout.stderr.trim()) });
-    if (checkout.exitCode === 0) return undefined;
-    const on = workspace.branch === undefined ? "" : ` on ${workspace.branch}`;
-    return failed(redact(`cannot check out ${workspace.repository}${on}: ${checkout.stderr.trim().slice(-1_000)}`));
+    if (!checkout) return undefined;
+    const { describes } = checkout;
+    observer.progress(`checking out ${describes.branch ?? describes.url}`);
+    const result = await sandboxes.exec(sandboxId, { command: checkout.command, workingDirectory: WORKSPACE, env: checkout.env });
+    observer.record({ type: "workspace-checkout", workspace: describes, exitCode: result.exitCode, output: redact(result.stderr.trim()) });
+    if (result.exitCode === 0) return undefined;
+    const on = describes.branch === undefined ? "" : ` on ${describes.branch}`;
+    return failed(redact(`cannot check out ${describes.url}${on}: ${result.stderr.trim().slice(-1_000)}`));
   }
 
   /** Adapter: the harness's ACP adapter started over stdio in the sandbox, with the profile's secrets and the one credential. */
@@ -216,17 +219,23 @@ export function createClaudeCodeHarness({
     });
   }
 
-  /** Preparation: validation, secrets and MCP servers, and how to redact secrets from what the harness writes. */
-  function prepare(profile: LoadedAgentProfile): Prepared | { failure: HarnessResult } {
+  /**
+   * Preparation: validation, secrets, MCP servers and the workspace, and how to redact
+   * secrets from what the harness writes. The session's environment is the profile's
+   * secrets plus what the workspace gives the session.
+   */
+  async function prepare({ taskId, profile, workspace = emptyWorkspace, branch }: HarnessSessionTask): Promise<Prepared | { failure: HarnessResult }> {
     const valid = validate(profile);
     if ("failure" in valid) return valid;
     const resolved = resolveSecrets(profile);
     if ("failure" in resolved) return resolved;
     const servers = mcpServersOf(profile);
     if ("failure" in servers) return servers;
-    const hidden = [valid.credential.value, ...Object.values(resolved.env), platformMcp?.token ?? ""].filter((value) => value !== "");
+    const prepared = await workspace.prepare({ taskId, ...(branch === undefined ? {} : { branch }) });
+    if ("problem" in prepared) return { failure: failed(`workspace: ${prepared.problem}`) };
+    const hidden = [valid.credential.value, ...Object.values(resolved.env), ...prepared.secrets, platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
-    return { ...valid, env: resolved.env, mcpServers: servers.mcpServers, networks: servers.networks, redact };
+    return { ...valid, env: { ...resolved.env, ...prepared.sessionEnv }, workspace: prepared, mcpServers: servers.mcpServers, networks: servers.networks, redact };
   }
 
   /** ACP turn: the harness's ACP adapter over stdio, one prompt turn, resumed when the session was interrupted. */
@@ -283,12 +292,11 @@ export function createClaudeCodeHarness({
   }
 
   return {
-    async run({ taskId, profile, message, session }, observer) {
-      const valid = prepare(profile);
+    async run(task, observer) {
+      const { taskId, profile, message, session } = task;
+      const valid = await prepare(task);
       if ("failure" in valid) return valid.failure;
       const { env, mcpServers, redact } = valid;
-      const requested = workspaceOf(message);
-      if ("problem" in requested) return failed(requested.problem);
 
       const started = await startSandbox(taskId, valid, session, observer);
       if ("failure" in started) return started.failure;
@@ -298,10 +306,8 @@ export function createClaudeCodeHarness({
         await observer.saveSession({ ...session, sandboxId });
         await completeOnboarding(sandboxes, sandboxId, profile);
         await copySkills(sandboxId, profile);
-        if (requested.workspace) {
-          const checkoutFailure = await checkOut(sandboxId, requested.workspace, env, observer, redact);
-          if (checkoutFailure) return checkoutFailure;
-        }
+        const checkoutFailure = await checkOut(sandboxId, valid.workspace, observer, redact);
+        if (checkoutFailure) return checkoutFailure;
         const turn = await runTurn({ sandboxId, profile, message, session, env, credential: valid.credential, mcpServers, observer, redact });
         return await toResult(turn, sandboxId, taskId, observer, redact);
       } catch (error) {
@@ -320,7 +326,8 @@ export function createClaudeCodeHarness({
      * adapter is gone (e.g. after a restart) resumes on the kept volumes with the next
      * turn. The volumes go only when the session ends.
      */
-    open({ taskId, profile, session, workspace }, observer) {
+    open(task, observer) {
+      const { taskId, profile, session } = task;
       let kept = session;
       let current: { sandboxId: string; acp: AcpSession } | undefined;
       const keep = async (next: HarnessSession) => {
@@ -342,21 +349,18 @@ export function createClaudeCodeHarness({
         await keep({ ...kept, sandboxId });
         await completeOnboarding(sandboxes, sandboxId, profile);
         await copySkills(sandboxId, profile);
-        if (workspace) {
-          // A workspace kept on its volume (e.g. after idle time) stays as it is.
-          const checkoutFailure = await checkOut(sandboxId, workspace, prepared.env, observer, prepared.redact);
-          if (checkoutFailure) {
-            await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
-            return { failure: checkoutFailure };
-          }
+        // A workspace kept on its volume (e.g. after idle time) stays as it is.
+        const checkoutFailure = await checkOut(sandboxId, prepared.workspace, observer, prepared.redact);
+        if (checkoutFailure) {
+          await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
+          return { failure: checkoutFailure };
         }
         const process = await attachAdapter(sandboxId, prepared.env, prepared.credential);
         observer.progress("harness started");
-        const checkedOut = workspace ? `Your workspace is a checkout of ${workspace.repository}.` : "";
         const acp = await openAcpSession({
           process,
           cwd: WORKSPACE,
-          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS, checkedOut].filter(Boolean).join("\n\n") } },
+          sessionMeta: { systemPrompt: { append: [profile.role, CHAT_INSTRUCTIONS, prepared.workspace.instructions].filter(Boolean).join("\n\n") } },
           observer,
           redact: prepared.redact,
           mcpServers: prepared.mcpServers,
@@ -379,7 +383,7 @@ export function createClaudeCodeHarness({
       return {
         async turn(message, { interrupted = false } = {}) {
           cancelled = false;
-          const prepared = prepare(profile);
+          const prepared = await prepare(task);
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
           try {
             const connected = await connect(prepared);
@@ -447,7 +451,9 @@ type McpServers = NonNullable<AcpSessionOptions["mcpServers"]>;
 interface Prepared {
   template: SandboxTemplate;
   credential: ClaudeCodeCredential;
+  /** The session's environment: the profile's secrets and what the workspace gives the session. */
   env: Record<string, string>;
+  workspace: PreparedWorkspace;
   mcpServers: McpServers;
   /** Networks the session's sandbox joins besides its own. */
   networks: string[];

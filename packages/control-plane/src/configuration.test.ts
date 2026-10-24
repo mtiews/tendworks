@@ -45,6 +45,15 @@ spec:
     issue: '\${ .issue }'
 `;
 
+const workspace = (name: string, extra = "") => `
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata: { name: ${name} }
+spec:
+  git: { url: https://git.example/acme/${name}.git, defaultBranch: main }
+  ${extra}
+`;
+
 function issuesOf(dir: string): string[] {
   try {
     loadConfiguration(dir);
@@ -95,7 +104,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, NotificationChannel, Policy, SandboxTemplate, TriggerBinding)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, NotificationChannel, Policy, SandboxTemplate, TriggerBinding, Workspace)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -304,6 +313,54 @@ do:
     expect(loadConfiguration(dir).workflowNames).toEqual(["notify"]);
   });
 
+  it("loads git workspaces with their credentials", () => {
+    const dir = folder({
+      "workspaces/app.yaml": workspace("app", "credentials: { secretRef: { name: TENDWORKS_AGENT_APP_TOKEN }, env: GH_TOKEN }"),
+      "workspaces/docs.yaml": workspace("docs"),
+    });
+
+    expect(loadConfiguration(dir).workspaces).toEqual([
+      {
+        apiVersion: "tendworks.dev/v1",
+        kind: "Workspace",
+        metadata: { name: "app" },
+        spec: { git: { url: "https://git.example/acme/app.git", defaultBranch: "main" }, credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" }, env: "GH_TOKEN" } },
+      },
+      { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "docs" }, spec: { git: { url: "https://git.example/acme/docs.git", defaultBranch: "main" } } },
+    ]);
+  });
+
+  it("rejects a workspace with credentials in its URL, a platform secret as credential, and duplicates", () => {
+    const dir = folder({
+      "workspaces/a.yaml": workspace("app"),
+      "workspaces/b.yaml": workspace("app"),
+      "workspaces/c.yaml": workspace("leaky").replace("https://git.example", "https://user:pass@git.example"),
+      "workspaces/d.yaml": workspace("platform", "credentials: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "workspaces/b.yaml: workspace 'app' is already defined in workspaces/a.yaml",
+      expect.stringMatching(/^workspaces\/c\.yaml: \/spec\/git\/url: must match pattern/),
+      `workspaces/d.yaml: /spec/credentials/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
+    ]);
+  });
+
+  it("refuses a workflow or trigger binding that names a workspace that is not configured", () => {
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build").replace("parts: [{ kind: text, text: build it }]", "parts: [{ kind: text, text: build it }]\n            metadata: { dev.tendworks/workspace: { name: ghost } }"),
+      "workflows/scan.sw.yaml": workflow("scan").replace("parts: [{ kind: text, text: build it }]", "parts: [{ kind: text, text: scan it }]\n            metadata: { dev.tendworks/workspace: { name: '${ .workspace }' } }"),
+      "agents/developer.md": agent("developer"),
+      "triggers/scan.yaml": trigger("scan", "scan").replace("issue: '${ .issue }'", "issue: '${ .issue }'\n    workspace: phantom"),
+      "triggers/app.yaml": trigger("app", "scan").replace("issue: '${ .issue }'", "issue: '${ .issue }'\n    workspace: app"),
+      "workspaces/app.yaml": workspace("app"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "workflows/build.sw.yaml: /do/0/implement works in workspace 'ghost', but no workspace 'ghost' is configured",
+      "triggers/scan.yaml: trigger binding 'scan' starts its runs in workspace 'phantom', but no workspace 'phantom' is configured",
+    ]);
+  });
+
   it("rejects a folder that does not exist", () => {
     expect(() => loadConfiguration(join(tmpdir(), "tend-config-missing"))).toThrow(/cannot read configuration folder/);
   });
@@ -329,6 +386,13 @@ do:
       ["developer", "claude-code"],
     ]);
     expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([["playground-ready-for-agent", true]]);
+    expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_GITHUB_TOKEN"]]);
+  });
+
+  it("keeps repository credentials out of every starter agent profile: workspaces bring their own", () => {
+    const starter = loadConfiguration(fileURLToPath(new URL("../../../examples/config", import.meta.url)));
+
+    expect(starter.agentProfiles.filter((profile) => profile.spec.env !== undefined).map((profile) => profile.metadata.name)).toEqual([]);
   });
 
   it("gives the platform MCP server only to the example assistant, never to an agent with push rights", () => {

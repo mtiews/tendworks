@@ -975,7 +975,7 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
         line(entry.time, "turn", entry.reason);
         break;
       case "workspace-checkout":
-        line(entry.time, "checkout", `${[entry.workspace.repository, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
+        line(entry.time, "checkout", `${[entry.workspace.url, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
         break;
       case "artifacts":
         for (const artifact of entry.artifacts) line(entry.time, "artifact", `${artifact.name} ${artifact.url}`);

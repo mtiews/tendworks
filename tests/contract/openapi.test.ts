@@ -491,7 +491,10 @@ describe("control plane: agents", () => {
 
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
-    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+    // No repository token in a profile: workspaces bring their own credentials (ADR 0022).
+    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", sessions: [] });
+    expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("secrets");
+    expect(data?.items.find((agent) => agent.name === "scripted-secret-assistant")).toMatchObject({ secrets: ["TENDWORKS_AGENT_E2E_SECRET"] });
     expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("chat");
     expect(data?.items.find((agent) => agent.name === "assistant")).toMatchObject({ chat: { idleMinutes: 5 }, mcp: ["tendworks"] });
   });

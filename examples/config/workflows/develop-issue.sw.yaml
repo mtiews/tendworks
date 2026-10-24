@@ -1,9 +1,10 @@
 # Automated path: the developer agent implements an issue and opens a pull request.
-# Input: { issue: { repository: <owner>/<name>, number, title, body, url } }, as a trigger
-# binding with the default input mapping passes it. The agent works on a checkout of the
-# issue's repository on a branch fixed by the run, so a retry updates the same branch and
-# pull request. The agent opens the pull request itself and reports it as its
-# `pull-request` artifact; the run ends with it. A human reviews and merges in the forge.
+# Input: { workspace: <name>, issue: { number, title, body, url } }: the workspace the
+# issue belongs to by name (kind Workspace) and the issue, as a trigger binding passes
+# them. The agent works on a checkout of the workspace on a branch fixed by the run, so a
+# retry updates the same branch and pull request. The agent opens the pull request itself
+# with the workspace's credential and reports it as its `pull-request` artifact; the run
+# ends with it. A human reviews and merges in the forge.
 document:
   dsl: '1.0.3'
   namespace: examples
@@ -24,17 +25,18 @@ do:
             parts:
               - kind: text
                 text: >-
-                  ${ "Implement issue #\(.issue.number) of \(.issue.repository): \(.issue.title)\n\n"
+                  ${ "Implement issue #\(.issue.number): \(.issue.title)\n\n"
                   + (.issue.body // "(no description)")
                   + "\n\nIssue: \(.issue.url)\n"
                   + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.issue.number)." }
             metadata:
               dev.tendworks/workspace:
-                repository: '${ "https://github.com/\(.issue.repository).git" }'
+                name: '${ .workspace }'
                 branch: '${ .branch }'
       output:
         as: >-
           ${ {
+            workspace: $input.workspace,
             issue: $input.issue.number,
             branch: $input.branch,
             taskId: .id,

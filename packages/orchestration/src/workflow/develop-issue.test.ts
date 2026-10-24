@@ -39,7 +39,7 @@ describe("example workflow develop-issue", () => {
   it("hands the issue's title and body to the developer agent as its task", async () => {
     const executor = developer();
 
-    await runWorkflow(definition, { runId, input: { issue }, executor });
+    await runWorkflow(definition, { runId, input: { workspace: "playground", issue }, executor });
 
     expect(executor.requests).toHaveLength(1);
     expect(executor.requests[0]?.agent).toBe("developer");
@@ -50,27 +50,27 @@ describe("example workflow develop-issue", () => {
     expect(text).toContain(issue.url);
   });
 
-  it("asks for a checkout of the issue's repository on a branch fixed by the run", async () => {
+  it("asks for the workspace the input names, on a branch fixed by the run", async () => {
     const first = developer();
     const again = developer();
     const other = developer();
 
-    await runWorkflow(definition, { runId, input: { issue }, executor: first });
-    await runWorkflow(definition, { runId, input: { issue }, executor: again });
-    await runWorkflow(definition, { runId: "7f1d2a9e-other-run", input: { issue }, executor: other });
+    await runWorkflow(definition, { runId, input: { workspace: "playground", issue }, executor: first });
+    await runWorkflow(definition, { runId, input: { workspace: "playground", issue }, executor: again });
+    await runWorkflow(definition, { runId: "7f1d2a9e-other-run", input: { workspace: "playground", issue }, executor: other });
 
     const workspace = (executor: InMemoryAgentTaskExecutor) => executor.requests[0]?.request.message.metadata?.["dev.tendworks/workspace"];
-    expect(workspace(first)).toEqual({ repository: "https://github.com/acme/playground.git", branch: "tendworks/issue-12-0b6c4c1e" });
+    expect(workspace(first)).toEqual({ name: "playground", branch: "tendworks/issue-12-0b6c4c1e" });
     expect(workspace(again)).toEqual(workspace(first));
     expect(workspace(other)).not.toEqual(workspace(first));
   });
 
   it("records the workspace the run handed to the agent on the step that reported the pull request", async () => {
-    const run = await runWorkflow(definition, { runId, input: { issue }, executor: developer(PR), events: new EventQueue() });
+    const run = await runWorkflow(definition, { runId, input: { workspace: "playground", issue }, executor: developer(PR), events: new EventQueue() });
 
     expect(run.steps[0]).toMatchObject({
       name: "implement",
-      workspace: { repository: "https://github.com/acme/playground.git", branch: "tendworks/issue-12-0b6c4c1e" },
+      workspace: { name: "playground", branch: "tendworks/issue-12-0b6c4c1e" },
       artifacts: [{ name: "pull-request", url: PR }],
     });
   });
@@ -78,7 +78,7 @@ describe("example workflow develop-issue", () => {
   it("ends after the agent step, with the reported pull request in its output and no call to the platform", async () => {
     const http = new InMemoryHttpExecutor();
 
-    const run = await runWorkflow(definition, { runId, input: { issue }, http, executor: developer(PR), events: new EventQueue() });
+    const run = await runWorkflow(definition, { runId, input: { workspace: "playground", issue }, http, executor: developer(PR), events: new EventQueue() });
 
     expect(http.requests).toEqual([]);
     expect(run).toMatchObject({

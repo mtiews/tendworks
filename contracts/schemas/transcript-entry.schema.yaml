@@ -318,10 +318,25 @@ $defs:
       time: { $ref: '#/$defs/time' }
       type: { const: workspace-checkout }
       workspace:
-        $ref: './a2a.schema.yaml#/$defs/workspace'
+        $ref: '#/$defs/checkedOutWorkspace'
       exitCode:
         type: integer
       output:
+        type: string
+  checkedOutWorkspace:
+    title: CheckedOutWorkspace
+    description: >-
+      What was checked out: the clone URL, the configured workspace's name when the task
+      named one, and the branch when the task asked for one.
+    type: object
+    additionalProperties: false
+    required: [url]
+    properties:
+      url:
+        type: string
+      name:
+        type: string
+      branch:
         type: string
   artifactsReported:
     title: ArtifactsReportedEntry

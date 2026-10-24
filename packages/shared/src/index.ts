@@ -17,3 +17,4 @@ export type * as TriggerBinding from "./generated/trigger-binding.js";
 export type * as TriggerEvents from "./generated/trigger-events.js";
 export type * as TriggerGateway from "./generated/trigger-gateway.js";
 export type * as Workflow from "./generated/serverless-workflow.js";
+export type * as Workspace from "./generated/workspace.js";

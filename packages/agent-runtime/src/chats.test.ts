@@ -566,7 +566,6 @@ function checkoutFrom(url: string, remote: string): Parameters<typeof scriptedSa
   };
 }
 
-const withRepository = (text: string, repository: string): A2A.Message => ({ ...say(text), metadata: { "dev.tendworks/workspace": { repository } } });
 
 // The checkout runs git synchronously; on Windows, inside the parallel unit suite, that can take a while.
 describe("chats with a repository as workspace", { timeout: 20_000 }, () => {
@@ -575,7 +574,7 @@ describe("chats with a repository as workspace", { timeout: 20_000 }, () => {
   it("finds the public repository checked out in its workspace when the first turn starts, without any credential", async () => {
     const { runtime, sandboxes } = setup({ reply: ["Read it."] }, { exec: checkoutFrom(url, localRepository()) });
 
-    const started = await runtime.startChat("assistant", withRepository("What is in the README?", url));
+    const started = await runtime.startChat("assistant", say("What is in the README?"), { repository: url });
     const chat = await waiting(runtime, started.id, 15_000);
 
     expect(chat).toMatchObject({ status: "input-required", repository: url });
@@ -605,8 +604,8 @@ describe("chats with a repository as workspace", { timeout: 20_000 }, () => {
   ])("refuses %s as repository with the reason, before anything starts", async (_, repository) => {
     const { runtime, sandboxes } = setup();
 
-    await expect(runtime.startChat("assistant", withRepository("Hello", repository))).rejects.toThrow(InvalidRepositoryError);
-    await expect(runtime.startChat("assistant", withRepository("Hello", repository))).rejects.toThrow(/repository .*https/);
+    await expect(runtime.startChat("assistant", say("Hello"), { repository })).rejects.toThrow(InvalidRepositoryError);
+    await expect(runtime.startChat("assistant", say("Hello"), { repository })).rejects.toThrow(/repository .*https/);
     expect(sandboxes.created).toEqual([]);
     expect(await runtime.listChats()).toEqual([]);
   });
@@ -614,7 +613,7 @@ describe("chats with a repository as workspace", { timeout: 20_000 }, () => {
   it("fails the chat with git's reason when the repository cannot be checked out", async () => {
     const { runtime, sandboxes } = setup({ reply: ["Hi"] }, { exec: checkoutFrom(url, join(tmpdir(), "tend-no-such-repository.git")) });
 
-    const started = await runtime.startChat("assistant", withRepository("Hello", url));
+    const started = await runtime.startChat("assistant", say("Hello"), { repository: url });
     const chat = await waiting(runtime, started.id, 15_000);
 
     expect(chat).toMatchObject({ status: "failed", message: expect.stringMatching(/cannot check out https:\/\/git\.example\/acme\/app\.git/) });

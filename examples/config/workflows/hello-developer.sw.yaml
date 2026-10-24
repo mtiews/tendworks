@@ -1,6 +1,6 @@
 # Smoke test for the real developer agent: one small task in the sandbox workspace.
-# Needs the sandbox image, a harness credential and the agent token (the developer profile
-# passes it in); see docs/platform-implementation.md.
+# Needs the sandbox image and a harness credential, no repository (the workspace starts
+# empty); see docs/platform-implementation.md.
 # Start it with: POST /runs {"workflow": "hello-developer"}
 document:
   dsl: '1.0.3'
