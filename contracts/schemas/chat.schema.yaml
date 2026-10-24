@@ -46,11 +46,16 @@ $defs:
         description: >-
           Reference to the transcript of the chat's agent session; read it through the
           chat's transcript endpoints.
-      repository:
-        $ref: '#/$defs/repository'
+      workspace:
+        $ref: './workspace.schema.yaml#/$defs/workspaceName'
         description: >-
-          The repository checked out as the chat's workspace; absent when the chat
-          started with an empty workspace.
+          The workspace the chat is about, when it was started with the workspace's
+          assistant; absent for a chat in an empty workspace.
+      write:
+        type: boolean
+        description: >-
+          Whether the workspace assistant may change the workspace (its `assistant.write`
+          when the chat started); present with `workspace`.
   chatStatus:
     title: ChatStatus
     description: >-
@@ -73,24 +78,33 @@ $defs:
           $ref: '#/$defs/chat'
   startChatRequest:
     title: StartChatRequest
+    description: >-
+      Exactly one of `agent` and `workspace`: a chat with an agent profile in an empty
+      workspace (e.g. the platform assistant `assistant`), or with the assistant of a
+      configured workspace, by the workspace's name only (ADR 0022).
     type: object
     additionalProperties: false
-    required: [agent, text]
+    required: [text]
+    oneOf:
+      - required: [agent]
+        not:
+          required: [workspace]
+      - required: [workspace]
+        not:
+          required: [agent]
     properties:
       agent:
         type: string
         description: Name of an agent profile that allows chats (`spec.chat`).
+      workspace:
+        $ref: './workspace.schema.yaml#/$defs/workspaceName'
+        description: >-
+          Name of a configured workspace whose assistant is enabled (`assistant.enabled`);
+          the chat is held with the assistant's profile, on the workspace.
       text:
         type: string
         minLength: 1
         description: The first message to the agent.
-      repository:
-        $ref: '#/$defs/repository'
-        description: >-
-          A public Git repository to check out as the chat's workspace before the first
-          turn, on its default branch; without it the workspace starts empty. A chat's
-          agent profile holds no repository credential, so the agent can change files in
-          its workspace but cannot push.
   chatMessageRequest:
     title: ChatMessageRequest
     type: object
@@ -101,11 +115,3 @@ $defs:
         type: string
         minLength: 1
         description: The next message to the agent.
-  repository:
-    title: ChatRepository
-    description: >-
-      Clone URL of a Git repository reachable without credentials: an `https` or `http`
-      URL without user name or password, e.g. `https://github.com/acme/playground.git`.
-    type: string
-    maxLength: 2048
-    pattern: ^https?://[^\s/@]+(/\S*)?$

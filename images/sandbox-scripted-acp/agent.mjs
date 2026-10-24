@@ -25,6 +25,10 @@
 //
 // A prompt "write: <file>" writes <file> into the working directory and answers
 // "wrote <file>", or "cannot write <file>: <reason>" (e.g. on a read-only workspace).
+//
+// A prompt "push: <branch>" pushes the checkout's HEAD to <branch> on its remote and
+// answers "pushed <branch>" or "cannot push <branch>: <git's last line>", followed by
+// "git credential: none" or "git credential: present" (whether the session got one).
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -85,6 +89,20 @@ const connection = acp
       } catch (error) {
         text = `cannot write ${name}: ${error instanceof Error ? error.message : String(error)}`;
       }
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
+    if (said.startsWith("push:")) {
+      const branch = said.slice(5).trim();
+      let text;
+      try {
+        execFileSync("git", ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { cwd: session.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        text = `pushed ${branch}`;
+      } catch (error) {
+        const output = String(error?.stderr ?? error?.message ?? error).trim().split("\n").at(-1);
+        text = `cannot push ${branch}: ${output}`;
+      }
+      text += `\ngit credential: ${process.env.TENDWORKS_GIT_PASSWORD ? "present" : "none"}`;
       await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
       return { stopReason: "end_turn" };
     }

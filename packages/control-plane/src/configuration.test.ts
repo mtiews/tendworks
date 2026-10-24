@@ -399,6 +399,22 @@ do:
     ]);
   });
 
+  it("refuses a workspace whose enabled assistant's profile is not configured or allows no chats", () => {
+    const dir = folder({
+      "agents/workspace-assistant.md": agent("workspace-assistant", "harness: fake\n  chat: {}"),
+      "agents/developer.md": agent("developer"),
+      "workspaces/app.yaml": workspace("app", "assistant: { enabled: true }"),
+      "workspaces/docs.yaml": workspace("docs", "assistant: { enabled: true, profile: developer, write: true }"),
+      "workspaces/site.yaml": workspace("site", "assistant: { enabled: true, profile: ghost }"),
+      "workspaces/off.yaml": workspace("off", "assistant: { enabled: false, profile: ghost }"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "workspaces/docs.yaml: workspace 'docs' has its assistant held with agent profile 'developer', which allows no chats (spec.chat)",
+      "workspaces/site.yaml: workspace 'site' has its assistant held with agent profile 'ghost', but no agent profile 'ghost' is configured",
+    ]);
+  });
+
   it("rejects a folder that does not exist", () => {
     expect(() => loadConfiguration(join(tmpdir(), "tend-config-missing"))).toThrow(/cannot read configuration folder/);
   });
@@ -422,9 +438,19 @@ do:
     expect(starter.agentProfiles.map((profile) => [profile.metadata.name, profile.spec.harness]).sort()).toEqual([
       ["assistant", "claude-code"],
       ["developer", "claude-code"],
+      ["workspace-assistant", "claude-code"],
     ]);
     expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([["playground-ready-for-agent", true]]);
     expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_GITHUB_TOKEN"]]);
+  });
+
+  it("ships a read-only workspace assistant: a chat profile without the platform MCP server, enabled on the playground without writing", () => {
+    const starter = loadConfiguration(fileURLToPath(new URL("../../../examples/config", import.meta.url)));
+
+    const profile = starter.agentProfiles.find((candidate) => candidate.metadata.name === "workspace-assistant");
+    expect(profile?.spec.chat).toBeDefined();
+    expect(profile?.spec.mcp).toBeUndefined();
+    expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.assistant])).toEqual([["playground", { enabled: true }]]);
   });
 
   it("keeps repository credentials out of every starter agent profile: workspaces bring their own", () => {

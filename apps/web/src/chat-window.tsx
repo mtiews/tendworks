@@ -65,7 +65,7 @@ export function ChatWindow({ chatId }: { chatId: string }) {
   const fields: [string, ReactNode][] = [
     ["Agent", chat.agent],
     ["Status", <span className={`status status-${chat.status}`}>{chat.status}</span>],
-    ...(chat.repository ? [["Repository", <code>{chat.repository}</code>] as [string, ReactNode]] : []),
+    ...(chat.workspace ? [["Workspace", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`] as [string, ReactNode]] : []),
     ["Started", <Time value={chat.startedAt} />],
     ["Last activity", <Time value={chat.lastActivityAt} />],
     ...(chat.endedAt ? [["Ended", <Time value={chat.endedAt} />] as [string, ReactNode]] : []),

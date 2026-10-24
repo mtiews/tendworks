@@ -186,7 +186,7 @@ Rules the loader enforces:
 | `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows` (all workflows without it); the strictest applicable policy wins, and without one the step asks | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `NotificationChannel` | `notifications/*.yaml` | `spec.events` (out of `approval.requested`, `run.failed`, `run.completed`); `spec.integration: pushover` with `spec.pushover.token` and `user` as references to `TENDWORKS_PLATFORM_PUSHOVER_TOKEN` and `TENDWORKS_PLATFORM_PUSHOVER_USER` in `deploy/.env`, optional `priority` (-2 to 1); several channels, e.g. failures with `priority: 1`. A run's first artifact (its pull request) is the message's link | server |
-| `Workspace` | `workspaces/*.yaml` | either `spec.directory.path` (a host directory under `TEND_WORKSPACE_ROOTS`, [Directory workspaces](#directory-workspaces)) or `spec.git.url` (any host; `https://` or `http://` without credentials in it) and `spec.git.defaultBranch`; `spec.credentials.secretRef` (an agent secret), `username` (default `x-access-token`) and `env` (e.g. `GH_TOKEN`: the session sees the credential under that name too) | server and worker |
+| `Workspace` | `workspaces/*.yaml` | either `spec.directory.path` (a host directory under `TEND_WORKSPACE_ROOTS`, [Directory workspaces](#directory-workspaces)) or `spec.git.url` (any host; `https://` or `http://` without credentials in it) and `spec.git.defaultBranch`; `spec.credentials.secretRef` (an agent secret), `username` (default `x-access-token`) and `env` (e.g. `GH_TOKEN`: the session sees the credential under that name too); `spec.assistant` (`enabled`, `profile` default `workspace-assistant`, `write` default `false`): its [workspace assistant](#workspace-assistants) | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`; `spec.workspaces`: names of workspaces, one run per workspace (none: runs without a workspace); `spec.suspend: true/false`; `spec.trigger` with exactly one kind: `schedule` (`cron: '0 2 * * *'`, UTC, or `every` with `days`, `hours`, `minutes`, `seconds`) or `github-issues` (`labels`, `state`, `every`, `token`; reads the issues of each workspace's repository on github.com, pull requests left out, with the read-only issues token; a binding without workspaces or with a workspace that is not a git repository on github.com stops the server). The workflow gets `{ workspace, item }` | server |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
@@ -375,7 +375,29 @@ spec:
 You are a helpful assistant working in your workspace. Keep answers short.
 ```
 
-Restart server and worker, then `tend chat helper` (optionally `--repo https://github.com/<owner>/<public-repo>`).
+Restart server and worker, then `tend chat helper`. It works in an empty workspace; to talk about a repository or directory, enable that workspace's assistant instead.
+
+### Workspace assistants
+
+A workspace's assistant answers questions about its contents in a chat (ADR 0022). Enable it in the workspace:
+
+```yaml
+spec:
+  git: { url: https://github.com/<owner>/<name>.git, defaultBranch: main }
+  credentials:
+    secretRef: { name: TENDWORKS_AGENT_<NAME>_TOKEN }
+  assistant:
+    enabled: true
+    # profile: workspace-assistant   # the default; any agent profile with spec.chat
+    # write: false                   # the default
+```
+
+Restart server and worker, then `tend chat --workspace <name>` or "New chat" in the web UI; `tend workspace list` shows which workspaces have one. The starter enables it on `playground` with the starter profile `workspace-assistant`, which has no platform MCP server; add `mcp: [tendworks]` to a profile only if its chats should also read the platform.
+
+- **`write: false`** (default): a git workspace is cloned with its credential, which then is neither in the session's environment nor in its credential helper, so the assistant cannot push. A directory is mounted read-only. The assistant may still change files in its git checkout; those changes stay in the chat's volume.
+- **`write: true`**: the session gets the credential like a workflow's agent and works on the branch `tendworks/chat-<chat id>`; a directory is writable. Scope the workspace's token so that a push to its default branch is refused ([GitHub access](github-agent-access.md)).
+- A chat keeps the write mode it started with; a changed `write` applies to new chats.
+- A chat on a directory workspace holds the directory only while it has a sandbox: while it is idle, a run can use the directory, and a message sent while a run works there is answered with "the workspace is busy"; send it again later.
 
 ### Optional: gVisor
 
@@ -415,7 +437,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
 | Notifications, triggers, agents | `tend notification list`, `tend trigger list` (last check per binding), `tend agent list` (active sessions per profile) |
-| Chats | `tend chat <profile>`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
+| Chats | `tend chat` (the platform assistant), `tend chat <profile>`, `tend chat --workspace <name>`, `tend workspace list`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
 | Live sandboxes | `docker ps --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox` |
 | After a configuration change | `docker compose -f deploy/compose.yaml restart server worker` |
 | After a change to `deploy/.env` | `docker compose -f deploy/compose.yaml up -d --wait` |
@@ -499,7 +521,7 @@ docker compose -f deploy/compose.yaml up -d --wait
 - Both scripts take `--env-file` and `--project-name` and follow `COMPOSE_PROJECT_NAME`, like compose.
 - **Not in a backup:** `deploy/.env`, your configuration (keep it in its own repository) and session volumes (an agent's workspace and conversation). Where they are gone after a restore (after a [reset](#reset), on a new host):
   - a run that was working continues; its working step's agent starts a new session from the step's message, in an empty workspace (checked out again if the step names a repository);
-  - an open chat stays open with its transcript; its next turn (or the turn that was interrupted) starts a new agent session without the earlier conversation, in an empty workspace (checked out again if the chat names a repository).
+  - an open chat stays open with its transcript; its next turn (or the turn that was interrupted) starts a new agent session without the earlier conversation, in an empty workspace (checked out again if the chat is a workspace's assistant).
   - session volumes still on the engine (a restore on the same host without a reset of them) are used as they are.
 - **Archives are sensitive:** they hold chat content, run inputs and transcripts (no tokens from `deploy/.env`). Keep them mode 600 and encrypt copies off the host.
 - Schedule backups yourself, e.g. a nightly cron job with `--output-dir`; nothing prunes old archives.

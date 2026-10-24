@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, enabledAssistant, isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
@@ -242,18 +242,21 @@ export function createControlPlaneApi({
   app.post("/chats", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     const text = textOf(body);
-    const repository = body?.repository;
-    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
+    const { agent, workspace, ...rest } = body ?? {};
+    const valid =
+      text !== undefined &&
+      Object.keys(rest).every((key) => key === "text") &&
+      ((typeof agent === "string" && workspace === undefined) || (typeof workspace === "string" && agent === undefined));
+    if (!valid) {
       return problem(
         400,
         "Invalid request",
-        "the body must be { agent, text, repository? } with the name of an agent profile that allows chats, the first message and a clone URL",
+        "the body must be { agent, text } with the name of an agent profile that allows chats, or { workspace, text } with the name of a workspace whose assistant is enabled, and the first message",
       );
     }
-    const agent = body.agent;
     return throughRuntime(async (runtime) => {
-      // The agent runtime checks the repository: it owns the workspace rules.
-      const chat = await runtime.startChat({ agent, text, ...(repository === undefined ? {} : { repository }) });
+      // The agent runtime decides whether the profile or the workspace's assistant allows the chat.
+      const chat = await runtime.startChat(typeof agent === "string" ? { agent, text } : { workspace: workspace as string, text });
       return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
     });
   });
@@ -340,6 +343,15 @@ export function createControlPlaneApi({
       })
       .sort((a, b) => a.name.localeCompare(b.name));
     return c.json({ items } satisfies Schemas["AgentList"], 200);
+  });
+
+  // Whom a client can chat with besides profiles: the workspaces with an enabled assistant (ADR 0022).
+  app.get("/workspaces", (c) => {
+    const items = configuration.workspaces.map(({ metadata: { name }, spec }): Schemas["WorkspaceSummary"] => {
+      const assistant = enabledAssistant(spec.assistant);
+      return { name, kind: spec.directory ? "directory" : "git", ...(assistant ? { assistant } : {}) };
+    });
+    return c.json({ items } satisfies Schemas["WorkspaceList"], 200);
   });
 
   app.get("/triggers", async (c) => {

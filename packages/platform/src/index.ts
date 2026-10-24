@@ -3,6 +3,7 @@ export { createSecretResolver, SECRET_PREFIXES, type SecretConsumer, type Secret
 export { readServerSentEvents, serverSentEventStream, type ServerSentEvent, type ServerSentEventStreamOptions } from "./server-sent-events.js";
 export { listsPlatformMcpServer, PLATFORM_MCP_SERVER } from "./platform-mcp.js";
 export { DEFAULT_CHAT_IDLE_MINUTES } from "./agent-profile.js";
+export { DEFAULT_WORKSPACE_ASSISTANT_PROFILE, enabledAssistant, type WorkspaceAssistant } from "./workspace-assistant.js";
 export { formatCost, formatOrigin, formatSchedule, totalCost, type Cost, type RunOrigin, type Schedule } from "./format.js";
 export {
   followTranscript,

@@ -3,7 +3,7 @@ import type { A2A, AgentRuntime as Contract } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { AgentRuntime } from "./agent-runtime.js";
 import { AgentNotFoundError } from "./agent-tasks.js";
-import { ChatBusyError, ChatEndedError, ChatNotAllowedError, InvalidRepositoryError, type Chat } from "./chats.js";
+import { AssistantNotEnabledError, ChatBusyError, ChatEndedError, ChatNotAllowedError, UnknownWorkspaceError, type Chat } from "./chats.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 type Schemas = Contract.components["schemas"];
@@ -34,21 +34,23 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
   const noChat = (chatId: string) => problem(404, "Chat not found", `no chat '${chatId}' exists`);
 
   app.post("/chats", async (c) => {
-    const body = (await c.req.raw.clone().json().catch(() => undefined)) as { agent?: unknown; repository?: unknown } | undefined;
+    const body = (await c.req.raw.clone().json().catch(() => undefined)) as Record<string, unknown> | undefined;
     const text = await textOf(c.req.raw);
-    const repository = body?.repository;
-    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
-      return problem(400, "Invalid request", "the body must be { agent, text, repository? } with the name of an agent profile, the first message and a clone URL");
+    const chatWith = chatWithOf(body);
+    if (!chatWith || text === undefined) {
+      return problem(
+        400,
+        "Invalid request",
+        "the body must be { agent, text } with the name of an agent profile, or { workspace, text } with the name of a workspace whose assistant is enabled, and the first message",
+      );
     }
     try {
-      // The repository becomes the workspace of the chat, on its default branch.
-      const message = userMessage(text);
-      const chat = await runtime.startChat(body.agent, message, repository === undefined ? {} : { repository });
+      const chat = await runtime.startChat(chatWith, userMessage(text));
       return c.json(chat satisfies Chat, 201, { location: `/chats/${chat.id}` });
     } catch (error) {
       if (error instanceof AgentNotFoundError) return problem(400, "Unknown agent profile", error.message);
-      if (error instanceof ChatNotAllowedError) return problem(400, "Chat not allowed", error.message);
-      if (error instanceof InvalidRepositoryError) return problem(400, "Invalid repository", error.message);
+      if (error instanceof ChatNotAllowedError || error instanceof AssistantNotEnabledError) return problem(400, "Chat not allowed", error.message);
+      if (error instanceof UnknownWorkspaceError) return problem(400, "Unknown workspace", error.message);
       throw error;
     }
   });
@@ -112,6 +114,18 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
   });
 
   return { fetch: async (request) => app.fetch(request) };
+}
+
+/**
+ * Whom a start-chat body asks to chat with: exactly one of an agent profile (`agent`) and a
+ * workspace's assistant (`workspace`), and nothing else besides the text; undefined otherwise.
+ */
+function chatWithOf(body: Record<string, unknown> | undefined): string | { workspace: string } | undefined {
+  if (!body || Object.keys(body).some((key) => key !== "agent" && key !== "workspace" && key !== "text")) return undefined;
+  const { agent, workspace } = body;
+  if (typeof agent === "string" && workspace === undefined) return agent;
+  if (typeof workspace === "string" && agent === undefined) return { workspace };
+  return undefined;
 }
 
 /**

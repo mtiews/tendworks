@@ -66,9 +66,12 @@ const volumesOf = (taskId: string): VolumeMount[] => [{ volume: workspaceVolume(
 
 const emptyWorkspace = createEmptyWorkspace();
 
-/** What a chat's session is told about the platform, after the profile's role description. */
+/**
+ * What a chat's session is told about the platform, after the profile's role description;
+ * what it may do with its workspace (e.g. read-only) follows from the workspace.
+ */
 const CHAT_INSTRUCTIONS = `You are in a chat with an operator of the Tendworks platform, who reads your answers and replies turn by turn; ask when you need something.
-You work in a sandbox; your workspace is ${WORKSPACE}. Your credentials do not allow you to push, open pull requests or merge, so your work stays in the workspace.
+You work in a sandbox; your workspace is ${WORKSPACE}.
 When the operator does not answer for a while, the sandbox is removed and the session continues later in a new one, with the workspace and this conversation kept; processes you started in the background do not survive that.`;
 
 /** What every unattended session is told about the platform, after the profile's role description. */
@@ -228,7 +231,13 @@ export function createClaudeCodeHarness({
    * secrets from what the harness writes. The session's environment is the profile's
    * secrets plus what the workspace gives the session.
    */
-  async function prepare({ taskId, profile, workspace = emptyWorkspace, branch, readOnlyWorkspace }: HarnessSessionTask): Promise<Prepared | { failure: HarnessResult }> {
+  async function prepare({
+    taskId,
+    profile,
+    workspace = emptyWorkspace,
+    branch,
+    readOnlyWorkspace,
+  }: HarnessSessionTask): Promise<Prepared | { failure: HarnessResult; busy?: { problem: string } }> {
     const valid = validate(profile);
     if ("failure" in valid) return valid;
     const resolved = resolveSecrets(profile);
@@ -237,7 +246,7 @@ export function createClaudeCodeHarness({
     if ("failure" in servers) return servers;
     // Last, so that what the workspace takes (e.g. a directory's claim) is released by whoever ends the session.
     const prepared = await workspace.prepare({ taskId, ...(branch === undefined ? {} : { branch }), ...(readOnlyWorkspace ? { readOnly: true } : {}) });
-    if ("problem" in prepared) return { failure: failed(`workspace: ${prepared.problem}`) };
+    if ("problem" in prepared) return { failure: failed(`workspace: ${prepared.problem}`), ...(prepared.busy ? { busy: { problem: prepared.problem } } : {}) };
     const hidden = [valid.credential.value, ...Object.values(resolved.env), ...prepared.secrets, platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
     return { ...valid, env: { ...resolved.env, ...prepared.sessionEnv }, workspace: prepared, mcpServers: servers.mcpServers, networks: servers.networks, redact };
@@ -395,6 +404,10 @@ export function createClaudeCodeHarness({
         async turn(message, { interrupted = false } = {}) {
           cancelled = false;
           const prepared = await prepare(task);
+          // A workspace another session holds for now (e.g. a directory, while the chat was idle) leaves the chat open.
+          if ("busy" in prepared && prepared.busy) {
+            return { state: "TASK_STATE_INPUT_REQUIRED", message: `the workspace is busy: ${prepared.busy.problem}. Send your message again once it is free.` };
+          }
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
           // The workspace stays the session's between turns, until it ends.
           release = prepared.workspace.release;
@@ -423,7 +436,11 @@ export function createClaudeCodeHarness({
           const suspended = current;
           const sandboxId = suspended?.sandboxId ?? kept?.sandboxId;
           current = undefined;
-          if (sandboxId === undefined) return;
+          if (sandboxId === undefined) {
+            release?.();
+            release = undefined;
+            return;
+          }
           // A sandbox that cannot be removed stays kept, so the next turn removes it.
           try {
             await sandboxes.destroy(sandboxId);
@@ -434,6 +451,9 @@ export function createClaudeCodeHarness({
             const { sandboxId: _gone, ...rest } = kept;
             await keep(rest);
           }
+          // Without a sandbox nobody works in the workspace, so others may meanwhile (e.g. a run in the same directory).
+          release?.();
+          release = undefined;
         },
         async end() {
           // Destroying the sandbox first also ends a running turn and its background commands.

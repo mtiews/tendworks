@@ -13,6 +13,7 @@ import {
   loadSkills,
   loadWorkspaces,
   migrateAgentRuntimeStore,
+  workspaceAssistants,
   WorkspaceError,
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
@@ -164,6 +165,8 @@ const agents = createAgentRuntime({
   store: tasks,
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
   workspaces,
+  // Chats by a workspace's name with its assistant (ADR 0022); the server refuses an assistant profile that allows no chats.
+  assistants: workspaceAssistants(workspaceDefinitions),
 });
 // Sandboxes and session volumes of this installation that belong to no live task or open
 // chat go, on start and every 5 minutes; each removal is logged, failed ones are logged,

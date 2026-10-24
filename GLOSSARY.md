@@ -18,6 +18,13 @@ _Avoid_: conversation, harness session
 An agent session a human starts and leads directly, without a run, workflow or trigger. Any client can attach to it, leave and come back until the human ends it.
 _Avoid_: conversation, interactive run, chat run
 
+**Platform assistant**:
+The chat profile `assistant`: answers questions about the platform through the platform MCP server, in an empty workspace. `tend chat` without arguments talks to it.
+
+**Workspace assistant**:
+A workspace's own chat partner about its contents (`assistant: { enabled, profile, write }`, default profile `workspace-assistant`), started by the workspace's name. Read-only unless the workspace sets `write: true`, then it works on the branch `tendworks/chat-<id>`.
+_Avoid_: repository chat, project assistant
+
 **Transcript**:
 What happened in one agent session (messages, tool calls and results, turns, resumes), as product-neutral entries numbered by their position. Kept outside the sandbox and readable through the API while the session runs.
 _Avoid_: log (except in `tend run logs`), session file, history
@@ -31,7 +38,7 @@ The declarative recipe a sandbox is created from: image, isolation class, resour
 _Avoid_: sandbox profile, sandbox config
 
 **Workspace**:
-What an agent session works on, declared once by name: a git repository on any host with its own credential, cloned into the sandbox at `/workspace`. Workflows and trigger bindings refer to it by name; agent profiles carry no repository credentials.
+What an agent session works on, declared once by name: a git repository on any host with its own credential, cloned into the sandbox at `/workspace`, or a host directory bound there. Workflows, trigger bindings and chats refer to it by name; agent profiles carry no repository credentials.
 _Avoid_: repository (one kind of workspace), project, checkout (what the agent runtime makes of a git workspace)
 
 **Trigger binding**:

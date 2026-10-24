@@ -304,7 +304,7 @@ Tendworks has two first-party clients, both built only on the public control pla
 - `tend status` — platform health, active runs, pending approvals
 - `tend run list|get|logs|cancel|resume` — runs and steps; `--follow` streams live events
 - `tend trigger list|fire` — triggers including the next scheduled execution; fire one manually
-- `tend agent list` and `tend chat <profile> [--repo …]` — start an agent session in the terminal; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
+- `tend agent list`, `tend workspace list`, and `tend chat [profile]` or `tend chat --workspace <name>` — start an agent session in the terminal with the platform assistant, another chat profile or a workspace's assistant; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
 - `tend approval list|get|answer` — show approval requests with their answers and decide them from the terminal
 - `tend config validate|diff|apply` — check configuration against the JSON Schemas; apply directly in local mode, otherwise open a pull request
 - `tend context use <name>` — switch between laptop, server and cluster
@@ -448,9 +448,9 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 
 **Interactive path (chat, milestone 1b)**
 
-`tend chat <profile>` opens a chat with a profile that allows chats (`spec.chat`), optionally with a public repository checked out as its workspace. As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Messages and tool calls are visible live, questions are answered directly in the chat, and any client can leave the chat and attach to it again later (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
+`tend chat` opens a chat with the platform assistant, `tend chat <profile>` with another profile that allows chats (`spec.chat`), and `tend chat --workspace <name>` with a workspace's assistant, about that workspace's contents (milestone 3, ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Messages and tool calls are visible live, questions are answered directly in the chat, and any client can leave the chat and attach to it again later (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
 
-- **Permissions in the walking skeleton:** work in the sandbox workspace only; no push, no pull request, no merge. Enforced by credentials, not by the prompt: the chat profile (`assistant`) holds no repository token.
+- **Permissions:** the platform assistant works in an empty workspace and holds no repository token; a workspace assistant is read-only unless its workspace sets `assistant.write: true` (git: the credential only for the checkout; directory: mounted read-only). Enforced by credentials and mounts, not by the prompt.
 - **Platform context via MCP:** the chat agent gets a read-only MCP server on the control plane API (first stage of the meta-agent) with a read-only token; agents in workflows get neither (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)). Tools: `list_runs` (active and recent runs with status), `get_run` (details, steps, errors), `list_triggers` (including next scheduled execution), `list_agents` (profiles and their active agent sessions, run steps and chats).
 - **Example questions that must work:** "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?"
 

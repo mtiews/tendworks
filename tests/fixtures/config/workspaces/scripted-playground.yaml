@@ -9,3 +9,7 @@ spec:
   git:
     url: file:///srv/git/playground.git
     defaultBranch: main
+  # A read-only workspace assistant on the scripted agent (end-to-end tests): it cannot push.
+  assistant:
+    enabled: true
+    profile: scripted-assistant

@@ -1,14 +1,13 @@
-import { spawnSync } from "node:child_process";
 import type * as acp from "@agentclientprotocol/sdk";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { readFileSync } from "node:fs";
+import { createSecretResolver } from "@tendworks/platform";
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it, vi } from "vitest";
 import { parse } from "yaml";
 import { dyingWorker, refusingRemovals, scriptedSandboxes, scriptedTemplate, type AgentScript } from "./claude-code/scripted-acp-agent.stub.js";
 import {
+  AssistantNotEnabledError,
   ChatBusyError,
   ChatEndedError,
   ChatNotAllowedError,
@@ -16,12 +15,13 @@ import {
   createClaudeCodeHarness,
   createInMemoryTaskStore,
   createInMemoryTranscriptStore,
-  InvalidRepositoryError,
   type AgentRuntime,
   type Chat,
   type Sandboxes,
   type TranscriptStore,
+  UnknownWorkspaceError,
 } from "./index.js";
+import { createGitWorkspace, type Workspace } from "./workspace.js";
 
 const assistant: AgentProfile.AgentProfile = {
   apiVersion: "tendworks.dev/v1",
@@ -35,7 +35,7 @@ const say = (text: string): A2A.Message => ({ messageId: crypto.randomUUID(), ro
 
 const contract = (file: string) => parse(readFileSync(new URL(`../../../contracts/${file}`, import.meta.url), "utf8")) as { $id: string };
 const ajv = new Ajv2020({ strict: false, validateFormats: false }).addSchema(
-  ["schemas/a2a.schema.yaml", "schemas/run.schema.yaml", "schemas/transcript-entry.schema.yaml", "schemas/chat.schema.yaml", "events/cloudevent.schema.yaml", "events/chat-events.schema.yaml"].map(contract),
+  ["schemas/a2a.schema.yaml", "schemas/run.schema.yaml", "schemas/transcript-entry.schema.yaml", "schemas/workspace.schema.yaml", "schemas/chat.schema.yaml", "events/cloudevent.schema.yaml", "events/chat-events.schema.yaml"].map(contract),
 );
 const isChat = ajv.getSchema("https://tendworks.dev/schemas/v1/schemas/chat.schema.yaml#/$defs/chat")!;
 const isTranscriptEntry = ajv.getSchema("https://tendworks.dev/schemas/v1/schemas/transcript-entry.schema.yaml")!;
@@ -69,6 +69,8 @@ function setup(
     api?: Sandboxes;
     cancelGraceMs?: number;
     profiles?: AgentProfile.AgentProfile[];
+    workspaces?: (name: string) => Workspace | undefined;
+    assistants?: (workspace: string) => { profile: string; write: boolean } | undefined;
   } = {},
 ) {
   const { store = createInMemoryTaskStore(), transcripts = createInMemoryTranscriptStore(), sandboxes = scriptedSandboxes(script, platform.exec), api = sandboxes.api } = platform;
@@ -79,7 +81,15 @@ function setup(
     templates: (name) => (name === scriptedTemplate.metadata.name ? scriptedTemplate : undefined),
     credential: { kind: "api-key", value: "test-key" },
   });
-  const runtime = createAgentRuntime({ profiles: platform.profiles ?? [assistant, developer], harnesses: { "claude-code": harness }, store, transcripts, idle: idle.sleep });
+  const runtime = createAgentRuntime({
+    profiles: platform.profiles ?? [assistant, developer],
+    harnesses: { "claude-code": harness },
+    store,
+    transcripts,
+    idle: idle.sleep,
+    ...(platform.workspaces ? { workspaces: platform.workspaces } : {}),
+    ...(platform.assistants ? { assistants: platform.assistants } : {}),
+  });
   return { runtime, sandboxes, store, transcripts, idle };
 }
 
@@ -528,97 +538,84 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
   });
 });
 
-/** A local bare repository with one commit on `main`, standing in for a public remote. */
-function localRepository(): string {
-  const root = mkdtempSync(join(tmpdir(), "tend-chat-repository-"));
-  const origin = join(root, "origin.git");
-  const seed = join(root, "seed");
-  mkdirSync(seed);
-  const git = (cwd: string, ...args: string[]) => {
-    const result = spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...identity } });
-    if (result.status !== 0) throw new Error(`git ${args.join(" ")}: ${result.stderr}`);
-  };
-  git(root, "init", "--quiet", "--bare", "--initial-branch=main", origin);
-  git(seed, "init", "--quiet", "--initial-branch=main");
-  writeFileSync(join(seed, "README.md"), "hello\n");
-  git(seed, "add", ".");
-  git(seed, "commit", "--quiet", "-m", "initial");
-  git(seed, "push", "--quiet", origin, "main");
-  return origin;
-}
-
-const identity = { GIT_AUTHOR_NAME: "Test", GIT_AUTHOR_EMAIL: "test@example.test", GIT_COMMITTER_NAME: "Test", GIT_COMMITTER_EMAIL: "test@example.test" };
-
-/**
- * Runs the checkout command on the test host with `remote` standing in for the public URL,
- * then copies the checked-out files into the sandbox's workspace, where the agent sees them.
- */
-function checkoutFrom(url: string, remote: string): Parameters<typeof scriptedSandboxes>[1] {
-  return (request, sandbox) => {
-    const workspace = mkdtempSync(join(tmpdir(), "tend-chat-workspace-"));
-    const [command, ...args] = request.command.map((arg) => (arg === url ? remote : arg));
-    const result = spawnSync(command!, args, { cwd: workspace, encoding: "utf8", env: { ...process.env, ...request.env } });
-    for (const entry of readdirSync(workspace, { recursive: true, withFileTypes: true })) {
-      const path = relative(workspace, join(entry.parentPath, entry.name)).replaceAll("\\", "/");
-      if (entry.isFile() && !path.startsWith(".git/")) sandbox.write(`${request.workingDirectory}/${path}`, readFileSync(join(workspace, path)));
-    }
-    return { exitCode: result.status ?? 1, stdout: result.stdout, stderr: result.stderr };
-  };
-}
-
-
-// The checkout runs git synchronously; on Windows, inside the parallel unit suite, that can take a while.
-describe("chats with a repository as workspace", { timeout: 20_000 }, () => {
+describe("chats with a workspace's assistant", () => {
+  const token = "workspace-token-value"; // betterleaks:allow dummy token of the test
+  const secrets = createSecretResolver("agent", { TENDWORKS_AGENT_APP_TOKEN: token });
+  const helperEnv = { TENDWORKS_GIT_USERNAME: "x-access-token", TENDWORKS_GIT_PASSWORD: token };
   const url = "https://git.example/acme/app.git";
-
-  it("finds the public repository checked out in its workspace when the first turn starts, without any credential", async () => {
-    const { runtime, sandboxes } = setup({ reply: ["Read it."] }, { exec: checkoutFrom(url, localRepository()) });
-
-    const started = await runtime.startChat("assistant", say("What is in the README?"), { repository: url });
-    const chat = await waiting(runtime, started.id, 15_000);
-
-    expect(chat).toMatchObject({ status: "input-required", repository: url });
-    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
-    expect(sandboxes.attached[0]?.files.get("/workspace/README.md")?.trim()).toBe("hello");
-    expect(sandboxes.execs).toHaveLength(1);
-    expect(sandboxes.execs[0]?.request).toMatchObject({ workingDirectory: "/workspace", env: {} });
+  const workspaceAssistant: AgentProfile.AgentProfile = { ...assistant, metadata: { name: "workspace-assistant" } };
+  const app = createGitWorkspace({ name: "app", url, defaultBranch: "main", credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" }, env: "GH_TOKEN" } }, secrets);
+  /** Workspaces `app` (assistant `write` as given), `docs` (assistant disabled). */
+  const configured = (write: boolean) => ({
+    profiles: [assistant, workspaceAssistant],
+    workspaces: (name: string) => (name === "app" || name === "docs" ? app : undefined),
+    assistants: (name: string) => (name === "app" ? { profile: "workspace-assistant", write } : undefined),
   });
 
-  it("has an empty workspace without a repository", async () => {
-    const { runtime, sandboxes } = setup({ reply: ["Hi"] });
+  it("starts a read-only chat by the workspace's name: the checkout gets the credential, the session never", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Read it."] }, configured(false));
 
-    const started = await runtime.startChat("assistant", say("Hello"));
+    const started = await runtime.startChat({ workspace: "app" }, say("What is in the README?"));
     const chat = await waiting(runtime, started.id);
 
-    expect(chat.repository).toBeUndefined();
-    expect(sandboxes.execs).toEqual([]);
-    expect([...sandboxes.attached[0]!.files.keys()].filter((path) => path.startsWith("/workspace/"))).toEqual([]);
+    expect(started).toMatchObject({ agent: "workspace-assistant", workspace: "app", write: false });
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect(chat).toMatchObject({ status: "input-required", workspace: "app", write: false });
+    expect(sandboxes.execs[0]?.request).toMatchObject({ workingDirectory: "/workspace", env: helperEnv });
+    expect(sandboxes.execs[0]?.request.command).not.toContain(`tendworks/chat-${started.id}`);
+    expect(Object.values(sandboxes.attached[0]?.request.env ?? {})).not.toContain(token);
   });
 
-  it.each([
-    ["not a URL", "acme/app"],
-    ["an option", "--upload-pack=touch /tmp/x"],
-    ["another scheme", "ssh://git.example/acme/app.git"],
-    ["a local path", "file:///etc"],
-    ["credentials in the URL", "https://user:token@git.example/acme/app.git"],
-  ])("refuses %s as repository with the reason, before anything starts", async (_, repository) => {
-    const { runtime, sandboxes } = setup();
+  it("lets a writing assistant use the credential on the chat's own branch", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Done."] }, configured(true));
 
-    await expect(runtime.startChat("assistant", say("Hello"), { repository })).rejects.toThrow(InvalidRepositoryError);
-    await expect(runtime.startChat("assistant", say("Hello"), { repository })).rejects.toThrow(/repository .*https/);
+    const started = await runtime.startChat({ workspace: "app" }, say("Fix the typo"));
+    await waiting(runtime, started.id);
+
+    expect(started).toMatchObject({ workspace: "app", write: true });
+    expect(sandboxes.execs[0]?.request.command.at(-1)).toBe(`tendworks/chat-${started.id}`);
+    expect(sandboxes.attached[0]?.request.env).toMatchObject({ ...helperEnv, GH_TOKEN: token });
+  });
+
+  it("stays read-only in the next process, e.g. after a restart", async () => {
+    const first = setup({ reply: ["Hi"] }, configured(false));
+    const { id } = await first.runtime.startChat({ workspace: "app" }, say("Hello"));
+    await waiting(first.runtime, id);
+
+    const second = setup({ reply: ["Again"] }, { ...configured(false), store: first.store, transcripts: first.transcripts });
+    await second.runtime.sendChatMessage(id, say("Hello again"));
+    await waiting(second.runtime, id);
+
+    expect(second.sandboxes.execs[0]?.request.env).toEqual(helperEnv);
+    expect(Object.values(second.sandboxes.attached[0]?.request.env ?? {})).not.toContain(token);
+  });
+
+  it("refuses a workspace without an enabled assistant, and one that is not configured, before anything starts", async () => {
+    const { runtime, sandboxes } = setup({}, configured(false));
+
+    await expect(runtime.startChat({ workspace: "docs" }, say("Hello"))).rejects.toThrow(AssistantNotEnabledError);
+    await expect(runtime.startChat({ workspace: "docs" }, say("Hello"))).rejects.toThrow("workspace docs has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it");
+    await expect(runtime.startChat({ workspace: "ghost" }, say("Hello"))).rejects.toThrow(UnknownWorkspaceError);
     expect(sandboxes.created).toEqual([]);
     expect(await runtime.listChats()).toEqual([]);
   });
 
-  it("fails the chat with git's reason when the repository cannot be checked out", async () => {
-    const { runtime, sandboxes } = setup({ reply: ["Hi"] }, { exec: checkoutFrom(url, join(tmpdir(), "tend-no-such-repository.git")) });
+  it("refuses a workspace whose assistant profile does not allow chats", async () => {
+    const { runtime } = setup({}, { ...configured(false), profiles: [assistant, { ...developer, metadata: { name: "workspace-assistant" } }] });
 
-    const started = await runtime.startChat("assistant", say("Hello"), { repository: url });
-    const chat = await waiting(runtime, started.id, 15_000);
+    await expect(runtime.startChat({ workspace: "app" }, say("Hello"))).rejects.toThrow(ChatNotAllowedError);
+  });
 
-    expect(chat).toMatchObject({ status: "failed", message: expect.stringMatching(/cannot check out https:\/\/git\.example\/acme\/app\.git/) });
-    expect(sandboxes.attached).toEqual([]);
-    expect(sandboxes.volumes.size).toBe(0);
+  it("holds a chat with a profile in an empty workspace", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Hi"] }, configured(false));
+
+    const started = await runtime.startChat("assistant", say("Hello"));
+    const chat = await waiting(runtime, started.id);
+
+    expect(chat.workspace).toBeUndefined();
+    expect(chat.write).toBeUndefined();
+    expect(sandboxes.execs).toEqual([]);
+    expect([...sandboxes.attached[0]!.files.keys()].filter((path) => path.startsWith("/workspace/"))).toEqual([]);
   });
 });
 

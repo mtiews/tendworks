@@ -14,3 +14,8 @@ spec:
   credentials:
     secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN }
     env: GH_TOKEN
+  # Its workspace assistant (agent profile workspace-assistant): `tend chat --workspace
+  # playground`. Read-only: the credential is used only for the checkout, so the chat cannot
+  # push. `write: true` would let it push to its own branch tendworks/chat-<id>.
+  assistant:
+    enabled: true

@@ -20,6 +20,7 @@ type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
+type WorkspaceList = ControlPlane.components["schemas"]["WorkspaceList"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
 type ApprovalRequest = ControlPlane.components["schemas"]["approvalRequest"];
@@ -193,6 +194,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatTriggerList));
     });
 
+  program
+    .command("workspace")
+    .description("inspect workspaces")
+    .command("list")
+    .description("list the configured workspaces with their kind and assistant (tend chat --workspace <name>)")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/workspaces").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatWorkspaceList));
+    });
+
   const notification = program.command("notification").description("inspect notifications");
 
   notification
@@ -262,13 +278,17 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
   const chat = program
     .command("chat")
     .description(
-      "chat with an agent profile that allows chats; Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
+      "chat with the platform assistant, another agent profile that allows chats, or a workspace's assistant (--workspace); Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
     )
-    .argument("<profile>", "agent profile")
-    .option("--repo <url>", "public Git repository (https clone URL) checked out as the chat's workspace")
-    .action(async (agent: string, options: { repo?: string }, command: Command) => {
+    .argument("[profile]", `agent profile that allows chats (default: ${PLATFORM_ASSISTANT}, the platform assistant)`)
+    .option("--workspace <name>", "chat with the assistant of this workspace about its contents (tend workspace list shows those with one; read-only unless the workspace allows writing)")
+    .action(async (profile: string | undefined, options: { workspace?: string }, command: Command) => {
+      if (profile !== undefined && options.workspace !== undefined) {
+        throw new Error("give either a profile or --workspace: a workspace's assistant is held with the profile its workspace names");
+      }
       const { baseUrl, client } = controlPlane(command);
-      await startChat({ agent, ...(options.repo === undefined ? {} : { repository: options.repo }), client, baseUrl, io });
+      const chatWith = options.workspace === undefined ? { agent: profile ?? PLATFORM_ASSISTANT } : { workspace: options.workspace };
+      await startChat({ chatWith, client, baseUrl, io });
     });
 
   /** A chat by id, or a clear error when there is none. */
@@ -313,7 +333,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       const found = await getChat(client, baseUrl, chatId);
       const terminal = chatTerminal(io);
       try {
-        io.stdout(`chat ${chatId} with ${found.agent} (${found.status}); type /end to end it\n`);
+        io.stdout(`chat ${chatId} with ${found.agent}${onWorkspace(found)} (${found.status}); type /end to end it\n`);
         await converse({ chatId, client, baseUrl, io, terminal, sent: [] });
       } finally {
         await terminal.close();
@@ -405,16 +425,27 @@ function formatAgentList(list: AgentList): string {
 
 function formatChatList(list: ChatList): string {
   const rows = [
-    ["ID", "AGENT", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
-    ...list.items.map((chat) => [chat.id, chat.agent, chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
+    ["ID", "AGENT", "WORKSPACE", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
+    ...list.items.map((chat) => [chat.id, chat.agent, chat.workspace ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
   ];
   return table(rows);
+}
+
+function formatWorkspaceList(list: WorkspaceList): string {
+  const assistantOf = ({ assistant }: WorkspaceList["items"][number]) => (assistant ? `${assistant.profile} (${assistant.write ? "may write" : "read-only"})` : "-");
+  return table([["NAME", "KIND", "ASSISTANT"], ...list.items.map((workspace) => [workspace.name, workspace.kind, assistantOf(workspace)])]);
+}
+
+/** ` on workspace <name> (read-only)` for a chat with a workspace's assistant; empty otherwise. */
+function onWorkspace(chat: Chat): string {
+  return chat.workspace === undefined ? "" : ` on workspace ${chat.workspace} (${chat.write ? "may write" : "read-only"})`;
 }
 
 function formatChat(chat: Chat): string {
   const fields = [
     ["CHAT", chat.id],
     ["AGENT", chat.agent],
+    ...(chat.workspace ? [["WORKSPACE", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`]] : []),
     ["STATUS", chat.status],
     ["STARTED", chat.startedAt],
     ["LAST ACTIVITY", chat.lastActivityAt],
@@ -669,19 +700,21 @@ function queue<T>() {
   };
 }
 
+/** The chat profile `tend chat` without arguments talks to. */
+const PLATFORM_ASSISTANT = "assistant";
+
 /**
- * `tend chat <profile>`: an interactive chat (ADR 0015). The first line starts the chat,
- * which then goes on as in {@link converse}.
+ * `tend chat [profile]` and `tend chat --workspace <name>`: an interactive chat (ADR 0015)
+ * with an agent profile or a workspace's assistant (ADR 0022). The first line starts the
+ * chat, which then goes on as in {@link converse}.
  */
 async function startChat({
-  agent,
-  repository,
+  chatWith,
   client,
   baseUrl,
   io,
 }: {
-  agent: string;
-  repository?: string;
+  chatWith: { agent: string } | { workspace: string };
   client: ControlPlaneClient;
   baseUrl: string;
   io: TendIo;
@@ -700,15 +733,14 @@ async function startChat({
       }
       if (event.text.trim() !== "") first = event.text.trim();
     }
-    const started = await client.POST("/chats", { body: { agent, text: first, ...(repository === undefined ? {} : { repository }) } }).catch((cause: unknown) => {
+    const started = await client.POST("/chats", { body: { ...chatWith, text: first } }).catch((cause: unknown) => {
       throw new UnreachableError(baseUrl, cause);
     });
     if (!started.data) {
       if (started.response.status === 400 && started.error?.detail) throw new Error(started.error.detail);
       throw new AnswerError(started.response, started.error);
     }
-    const checkout = started.data.repository === undefined ? "" : ` in a checkout of ${started.data.repository}`;
-    io.stdout(`chat ${started.data.id} with ${agent}${checkout}; type /end to end it\n`);
+    io.stdout(`chat ${started.data.id} with ${started.data.agent}${onWorkspace(started.data)}; type /end to end it\n`);
     await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first] });
   } finally {
     await terminal.close();

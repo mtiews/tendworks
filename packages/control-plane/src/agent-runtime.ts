@@ -12,7 +12,7 @@ export interface TranscriptStreamOptions {
   after?: number;
 }
 
-/** The agent runtime refused to start a chat (unknown profile, or one without `spec.chat`); the client's mistake. */
+/** The agent runtime refused to start a chat (unknown profile or workspace, a profile without `spec.chat`, a workspace without an enabled assistant); the client's mistake. */
 export class ChatRefusedError extends Error {
   constructor(
     readonly title: string,
@@ -139,6 +139,11 @@ type FakeEntry = TranscriptEntry extends infer E ? (E extends unknown ? Omit<E, 
 export interface InMemoryAgentRuntimeOptions {
   /** Agent profiles that allow chats; a chat with any other is refused. */
   chatAgents?: string[];
+  /**
+   * Configured workspaces by name with their enabled assistant, or undefined for one without;
+   * a chat with a workspace not listed is refused as unknown.
+   */
+  workspaces?: Record<string, { profile: string; write: boolean } | undefined>;
 }
 
 /**
@@ -147,7 +152,7 @@ export interface InMemoryAgentRuntimeOptions {
  * `end`; `drop` cuts open streams like a lost connection. A chat works on its turn until
  * the test ends it with `finishTurn`; its transcript follows what a real chat records.
  */
-export function createInMemoryAgentRuntime({ chatAgents = [] }: InMemoryAgentRuntimeOptions = {}) {
+export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }: InMemoryAgentRuntimeOptions = {}) {
   const transcripts = new Map<string, TranscriptEntry[]>();
   const running = new Set<string>();
   const wakers = new Set<() => void>();
@@ -197,15 +202,22 @@ export function createInMemoryAgentRuntime({ chatAgents = [] }: InMemoryAgentRun
       record(chatId, { type: "input-required", message: reply, ...(total ? { cost: total } : {}) });
       update(chatId, { status: "input-required", message: reply, ...(total ? { cost: total } : {}) });
     },
-    async startChat({ agent, text, repository }: StartChatRequest) {
-      if (!chatAgents.includes(agent)) throw new ChatRefusedError("Chat not allowed", `agent profile ${agent} does not allow chats: its agent profile has no spec.chat`);
-      // Simpler than the agent runtime's rule, enough to tell refused from accepted.
-      if (repository !== undefined && !/^https?:\/\/[^\s/@]+(\/\S*)?$/.test(repository)) {
-        throw new ChatRefusedError("Invalid repository", `repository ${JSON.stringify(repository)} is no https or http clone URL without credentials`);
+    async startChat({ agent: profile, workspace, text }: StartChatRequest) {
+      let agent = profile ?? "";
+      let inWorkspace: Pick<Chat, "workspace" | "write"> = {};
+      if (workspace !== undefined) {
+        if (!(workspace in workspaces)) throw new ChatRefusedError("Unknown workspace", `no workspace '${workspace}' is configured`);
+        const assistant = workspaces[workspace];
+        if (!assistant) {
+          throw new ChatRefusedError("Chat not allowed", `workspace ${workspace} has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it`);
+        }
+        agent = assistant.profile;
+        inWorkspace = { workspace, write: assistant.write };
       }
+      if (!chatAgents.includes(agent)) throw new ChatRefusedError("Chat not allowed", `agent profile ${agent} does not allow chats: its agent profile has no spec.chat`);
       const id = crypto.randomUUID();
       const startedAt = now();
-      chats.set(id, { id, agent, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...(repository === undefined ? {} : { repository }) });
+      chats.set(id, { id, agent, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...inWorkspace });
       running.add(id);
       record(id, { type: "task-started", agent, message: message(text) });
       return structuredClone(chats.get(id)!);

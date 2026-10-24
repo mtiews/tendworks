@@ -13,11 +13,34 @@ const profile = (name: string, spec: Partial<AgentProfile["spec"]> = {}): AgentP
   spec: { harness: "fake", ...spec },
 });
 
-/** A platform with two chat-enabled profiles (`assistant`, `reviewer`) and one without chats (`developer`). */
+type Workspace = Configuration["workspaces"][number];
+
+const workspace = (name: string, assistant?: Workspace["spec"]["assistant"]): Workspace => ({
+  apiVersion: "tendworks.dev/v1",
+  kind: "Workspace",
+  metadata: { name },
+  spec: { git: { url: `https://example.test/acme/${name}.git`, defaultBranch: "main" }, ...(assistant ? { assistant } : {}) },
+});
+
+/**
+ * A platform with two chat-enabled profiles (`assistant`, `reviewer`), one without chats
+ * (`developer`), and the workspace assistants' profile; workspaces `app` (read-only
+ * assistant), `notes` (writing assistant, which the agent runtime has not taken up yet,
+ * so it refuses it) and `site` (no assistant).
+ */
 function platform() {
-  const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant", "reviewer"] });
+  const agentRuntime = createInMemoryAgentRuntime({
+    chatAgents: ["assistant", "reviewer", "workspace-assistant"],
+    workspaces: { app: { profile: "workspace-assistant", write: false }, notes: undefined, site: undefined },
+  });
   const configuration = emptyConfiguration({
-    agentProfiles: [profile("assistant", { chat: { idleMinutes: 5 }, mcp: ["tendworks"] }), profile("developer"), profile("reviewer", { chat: {} })],
+    agentProfiles: [
+      profile("assistant", { chat: { idleMinutes: 5 }, mcp: ["tendworks"] }),
+      profile("developer"),
+      profile("reviewer", { chat: {} }),
+      profile("workspace-assistant", { chat: {} }),
+    ],
+    workspaces: [workspace("app", { enabled: true }), workspace("notes", { enabled: true, write: true }), workspace("site")],
   });
   return { agentRuntime, configuration };
 }
@@ -33,12 +56,12 @@ afterEach(() => {
 });
 
 describe("chats page", () => {
-  it("lists open and ended chats with profile, status, start, last activity and cost, like `tend chat list`", async () => {
+  it("lists open and ended chats with profile, workspace, status, start, last activity and cost, like `tend chat list`", async () => {
     const { agentRuntime, configuration } = platform();
     const ended = await agentRuntime.startChat({ agent: "reviewer", text: "Review it" });
     agentRuntime.finishTurn(ended.id, "Looks good", USD(0.05));
     await agentRuntime.endChat(ended.id);
-    const open = await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
+    const open = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
     agentRuntime.finishTurn(open.id, "Hi", USD(0.01));
     const chat = (id: string) => agentRuntime.chats.get(id)!;
     signedIn();
@@ -46,9 +69,9 @@ describe("chats page", () => {
 
     const table = await screen.findByRole("table", { name: "Chats" });
     expect(rows(table)).toEqual([
-      ["Chat", "Agent", "Status", "Started", "Last activity", "Cost"],
-      [open.id, "assistant", "input-required", open.startedAt, chat(open.id).lastActivityAt, "0.01 USD"],
-      [ended.id, "reviewer", "ended", ended.startedAt, chat(ended.id).lastActivityAt, "0.05 USD"],
+      ["Chat", "Agent", "Workspace", "Status", "Started", "Last activity", "Cost"],
+      [open.id, "workspace-assistant", "app", "input-required", open.startedAt, chat(open.id).lastActivityAt, "0.01 USD"],
+      [ended.id, "reviewer", "", "ended", ended.startedAt, chat(ended.id).lastActivityAt, "0.05 USD"],
     ]);
     expect(within(table).getByRole("link", { name: open.id }).getAttribute("href")).toBe(`/ui/chats/${open.id}`);
     expect(screen.getByRole("link", { name: "New chat" }).getAttribute("href")).toBe("/ui/chats/new");
@@ -82,27 +105,33 @@ describe("chats page", () => {
 const posts = (requests: Request[], path: string) => requests.filter((request) => request.method === "POST" && new URL(request.url).pathname === path);
 
 describe("new chat", () => {
-  it("offers only the profiles that allow chats and starts a chat with the first message and a public repository", async () => {
+  it("offers the profiles that allow chats and every workspace with an assistant, and starts a chat with the one chosen", async () => {
     const { agentRuntime, configuration } = platform();
     signedIn();
     const { user, platform: running } = renderApp({ path: "/ui/chats", agentRuntime, configuration });
 
     await user.click(await screen.findByRole("link", { name: "New chat" }));
-    const profiles = await screen.findByRole("combobox", { name: "Agent profile" });
-    expect(within(profiles).getAllByRole("option").map((option) => option.textContent)).toEqual(["assistant", "reviewer"]);
+    const chatWith = await screen.findByRole("combobox", { name: "Chat with" });
+    expect(within(chatWith).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "assistant",
+      "reviewer",
+      "workspace-assistant",
+      "Workspace app (read-only)",
+      "Workspace notes (may write)",
+    ]);
 
-    await user.selectOptions(profiles, "reviewer");
-    await user.type(screen.getByRole("textbox", { name: "Message" }), "Review the README");
-    await user.type(screen.getByRole("textbox", { name: "Public repository (optional)" }), "https://example.test/acme/playground.git");
+    await user.selectOptions(chatWith, "Workspace app (read-only)");
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "What does the README say?");
     await user.click(screen.getByRole("button", { name: "Start chat" }));
 
     const [chat] = [...agentRuntime.chats.values()];
     expect(await screen.findByRole("heading", { name: `Chat ${chat!.id}` })).toBeTruthy();
     expect(window.location.pathname).toBe(`/ui/chats/${chat!.id}`);
-    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "reviewer", text: "Review the README", repository: "https://example.test/acme/playground.git" });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "app", text: "What does the README say?" });
+    expect(chat).toMatchObject({ agent: "workspace-assistant", workspace: "app", write: false });
   });
 
-  it("starts a chat with an empty workspace when no repository is given", async () => {
+  it("starts a chat with the platform assistant unless another is chosen", async () => {
     const { agentRuntime, configuration } = platform();
     signedIn();
     const { user, platform: running } = renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
@@ -114,17 +143,17 @@ describe("new chat", () => {
     expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "Hello" });
   });
 
-  it("shows why the platform refused a repository and keeps what was entered", async () => {
+  it("shows why the platform refused a chat and keeps what was entered", async () => {
     const { agentRuntime, configuration } = platform();
     signedIn();
     const { user } = renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
 
-    await user.type(await screen.findByRole("textbox", { name: "Message" }), "Hello");
-    await user.type(screen.getByRole("textbox", { name: "Public repository (optional)" }), "https://user@example.test/acme/private.git");
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace notes (may write)");
+    await user.type(screen.getByRole("textbox", { name: "Message" }), "Hello");
     await user.click(screen.getByRole("button", { name: "Start chat" }));
 
     expect((await screen.findByRole("alert")).textContent).toBe(
-      'Invalid repository: repository "https://user@example.test/acme/private.git" is no https or http clone URL without credentials',
+      "Chat not allowed: workspace notes has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it",
     );
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" }).value).toBe("Hello");
     expect(agentRuntime.chats.size).toBe(0);
@@ -133,9 +162,11 @@ describe("new chat", () => {
   it("says so when no profile allows chats", async () => {
     const { agentRuntime, configuration } = platform();
     signedIn();
-    renderApp({ path: "/ui/chats/new", agentRuntime, configuration: { ...configuration, agentProfiles: [profile("developer")] } });
+    renderApp({ path: "/ui/chats/new", agentRuntime, configuration: { ...configuration, agentProfiles: [profile("developer")], workspaces: [workspace("site")] } });
 
-    expect(await screen.findByText("No agent profile allows chats. Give a profile spec.chat to chat with it.")).toBeTruthy();
+    expect(
+      await screen.findByText("No agent profile allows chats and no workspace has an assistant. Give a profile spec.chat or a workspace spec.assistant to chat."),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Start chat" })).toBeNull();
   });
 });
@@ -441,14 +472,14 @@ describe("chat window", () => {
 
   it("shows an ended chat's history without input", async () => {
     const { agentRuntime, configuration } = platform();
-    const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello", repository: "https://example.test/acme/playground.git" });
+    const chat = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
     agentRuntime.finishTurn(chat.id, "Hi", USD(0.01));
     await agentRuntime.endChat(chat.id);
     signedIn();
     renderApp({ path: `/ui/chats/${chat.id}`, agentRuntime, configuration });
 
     expect(await within(await screen.findByRole("region", { name: "Conversation" })).findByText("Hi")).toBeTruthy();
-    expect(field("Repository")).toBe("https://example.test/acme/playground.git");
+    expect(field("Workspace")).toBe("app (read-only)");
     expect(field("Ended")).toBe(agentRuntime.chats.get(chat.id)!.endedAt);
     expect(within(conversation()).getByText("This chat has ended.")).toBeTruthy();
     expect(within(conversation()).queryByRole("textbox")).toBeNull();

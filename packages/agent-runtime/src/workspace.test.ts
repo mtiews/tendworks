@@ -154,6 +154,25 @@ describe("git workspace: checkout", { timeout: 20_000 }, () => {
     expect(result.status).not.toBe(0);
   });
 
+  it("switches pushing off in a read-only checkout, also to a remote that needs no credential, and keeps it on otherwise", async () => {
+    const { origin, workspace } = remote();
+    const readOnly = (await createGitWorkspace({ name: "app", url: origin, defaultBranch: "main" }, noSecrets).prepare({ taskId: "task-1", readOnly: true })) as PreparedWorkspace;
+    const writable = remote();
+
+    const cloned = run(readOnly.checkout!.command, workspace, readOnly.checkout!.env);
+    writeFileSync(join(workspace, "change.txt"), "change\n");
+    git(workspace, "add", ".");
+    git(workspace, "commit", "--quiet", "-m", "change");
+    const pushed = run(["git", "push", "origin", "HEAD:refs/heads/tendworks/try"], workspace);
+    await checkout(writable.workspace, writable.origin, "tendworks/run-1");
+    const allowed = run(["git", "push", "--quiet", "origin", "HEAD"], writable.workspace);
+
+    expect(cloned.status, cloned.stderr).toBe(0);
+    expect(pushed.status).not.toBe(0);
+    expect(git(origin, "branch", "--list", "tendworks/try")).toBe("");
+    expect(allowed.status, allowed.stderr).toBe(0);
+  });
+
   it("lets git use the credential helper for the repository's host only, kept with the checkout", async () => {
     const { origin, workspace } = remote();
     const { checkout: https } = await prepared("https://git.example:8443/acme/app.git");
@@ -190,6 +209,17 @@ describe("git workspace: credentials", () => {
     expect(result.checkout?.env).not.toHaveProperty("GH_TOKEN");
   });
 
+  it("hands the credential only to the checkout of a read-only session, and tells the agent it cannot push", async () => {
+    const result = (await git({ credentials: { ...credentials, env: "GH_TOKEN" } }).prepare({ taskId: "task-1", readOnly: true })) as PreparedWorkspace;
+
+    expect(result.checkout?.env).toEqual({ TENDWORKS_GIT_USERNAME: "x-access-token", TENDWORKS_GIT_PASSWORD: "app-token-value" }); // betterleaks:allow dummy token of the test
+    expect(result.sessionEnv).toEqual({});
+    expect(result.secrets).toEqual(["app-token-value"]);
+    expect(result.instructions).toBe(
+      "Your workspace is a checkout of https://git.example/acme/app.git. It is read-only for you: you have no credential for the repository, so you cannot push; changes you make stay in the workspace.",
+    );
+  });
+
   it("names a missing secret, and one not meant for agents, but no value", async () => {
     expect(await git({ credentials: { secretRef: { name: "TENDWORKS_AGENT_NOT_SET" } } }).prepare({ taskId: "task-1" })).toEqual({
       problem: "secret TENDWORKS_AGENT_NOT_SET is not set",
@@ -200,7 +230,7 @@ describe("git workspace: credentials", () => {
   });
 
   it("works without a credential, e.g. on a public repository", async () => {
-    const result = (await createGitWorkspace({ url: "https://git.example/acme/app.git" }).prepare({ taskId: "task-1" })) as PreparedWorkspace;
+    const result = (await createGitWorkspace({ name: "app", url: "https://git.example/acme/app.git" }).prepare({ taskId: "task-1" })) as PreparedWorkspace;
 
     expect(result.checkout?.env).toEqual({});
     expect(result.sessionEnv).toEqual({});

@@ -19,7 +19,7 @@ test("a chat followed in two tabs is written from both, cancelled and ended", as
 
   await page.goto("/ui/chats/new");
   await signIn(page, API_TOKEN);
-  await page.getByRole("combobox", { name: "Agent profile" }).selectOption("scripted-assistant");
+  await page.getByRole("combobox", { name: "Chat with" }).selectOption("scripted-assistant");
   await page.getByRole("textbox", { name: "Message" }).fill("chat: My name is Ada.");
   await page.getByRole("button", { name: "Start chat" }).click();
   await expect(page).toHaveURL(/\/ui\/chats\/[^/]+$/);

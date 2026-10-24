@@ -323,10 +323,13 @@ paths:
         - apiToken: []
       summary: Start a chat with an agent profile
       description: >-
-        Starts a chat (ADR 0015): an agent session with the agent profile `agent`, without
-        a run, that the human leads turn by turn. Answers at once with the chat in
-        `working` while the agent works on the first message; follow its transcript to see
-        the answer. Only profiles with `spec.chat` allow chats.
+        Starts a chat (ADR 0015): an agent session without a run that the human leads turn
+        by turn, either with the agent profile `agent` in an empty workspace (e.g. the
+        platform assistant `assistant`), or with the assistant of the workspace named
+        `workspace` (ADR 0022), whose profile and write mode the workspace's `assistant`
+        settings decide. Answers at once with the chat in `working` while the agent works
+        on the first message; follow its transcript to see the answer. Only profiles with
+        `spec.chat` allow chats, and only workspaces with `assistant.enabled`.
       requestBody:
         required: true
         content:
@@ -347,8 +350,8 @@ paths:
                 $ref: "../schemas/chat.schema.yaml#/$defs/chat"
         "400":
           description: >-
-            The body is invalid, no such agent profile is configured, the profile does not
-            allow chats, or the repository is no clone URL reachable without credentials.
+            The body is invalid, no such agent profile or workspace is configured, the
+            profile does not allow chats, or the workspace has no enabled assistant.
           content:
             application/json:
               schema:
@@ -718,6 +721,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The platform stopped, e.g. after a failed schema migration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /workspaces:
+    get:
+      operationId: listWorkspaces
+      summary: List the configured workspaces, ordered by name
+      description: >-
+        The workspaces of the configuration (ADR 0022) with their kind and, when enabled,
+        their assistant, e.g. for a client's choice of whom to chat with: the platform
+        assistant or a workspace's assistant (`POST /chats` with `workspace`).
+      responses:
+        "200":
+          description: Workspaces.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceList"
         "401":
           description: The request carries neither the API token nor the read-only token.
           headers:
@@ -1183,6 +1218,41 @@ components:
             none works. Missing when the agent runtime cannot be reached, so it is unknown.
           items:
             $ref: "../schemas/agent-session.schema.yaml#/$defs/agentSession"
+    WorkspaceList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceSummary"
+    WorkspaceSummary:
+      type: object
+      description: A workspace of the configuration, without its location or credential.
+      required: [name, kind]
+      additionalProperties: false
+      properties:
+        name:
+          $ref: "../schemas/workspace.schema.yaml#/$defs/workspaceName"
+        kind:
+          type: string
+          enum: [git, directory]
+          description: Whether it is a git repository or a directory on the sandbox host.
+        assistant:
+          type: object
+          description: >-
+            The workspace's assistant, defaults filled in; missing when it has none enabled,
+            so `POST /chats` refuses the workspace.
+          required: [profile, write]
+          additionalProperties: false
+          properties:
+            profile:
+              type: string
+              description: The agent profile its chats are held with.
+            write:
+              type: boolean
+              description: Whether it may change the workspace.
     StartRunRequest:
       type: object
       required: [workflow]

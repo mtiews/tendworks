@@ -36,6 +36,8 @@ properties:
         $ref: '#/$defs/directoryWorkspace'
       credentials:
         $ref: '#/$defs/workspaceCredentials'
+      assistant:
+        $ref: '#/$defs/workspaceAssistant'
     oneOf:
       - title: DirectoryWorkspaceSpec
         required: [directory]
@@ -97,6 +99,38 @@ $defs:
         minLength: 2
         maxLength: 4096
         description: Absolute path of the directory on the sandbox host, strictly under a workspace root.
+  workspaceAssistant:
+    title: WorkspaceAssistant
+    description: >-
+      The workspace assistant (ADR 0022): a chat about the workspace's contents, started by
+      the workspace's name (`POST /chats` with `workspace`, `tend chat --workspace <name>`).
+      Read-only by default: a git credential is used only for the checkout and never reaches
+      the agent session, so it cannot push, and a directory is bound read-only. With
+      `write: true` the session gets the credential and works on the branch
+      `tendworks/chat-<chat id>`, and a directory is writable.
+    type: object
+    additionalProperties: false
+    examples:
+      - enabled: true
+      - enabled: true
+        profile: app-assistant
+        write: true
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        description: Whether chats with the workspace's assistant may start; without it the workspace has none.
+      profile:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        default: workspace-assistant
+        description: >-
+          The agent profile the assistant is held with; it must allow chats (`spec.chat`). It
+          gets the platform MCP server only when it lists it (`mcp: [tendworks]`).
+      write:
+        type: boolean
+        default: false
+        description: Whether the assistant may change the workspace (push to its chat branch, write to the directory).
   workspaceCredentials:
     title: WorkspaceCredentials
     description: >-

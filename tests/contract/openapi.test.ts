@@ -1,4 +1,4 @@
-import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
+import { createAgentRuntime, createAgentRuntimeApi, createWorkspaces, workspaceAssistants } from "@tendworks/agent-runtime";
 import {
   createAgentRuntimeClient,
   createControlPlaneApi,
@@ -18,7 +18,7 @@ import {
   type Policy,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
-import { readServerSentEvents } from "@tendworks/platform";
+import { createSecretResolver, readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
@@ -66,7 +66,12 @@ const unreachable = async (): Promise<Response> => {
 
 /** The worker's internal APIs: orchestration and the agent runtime it hands tasks to. */
 function worker(engine?: (real: RunEngine) => RunEngine, sleep: (ms: number) => Promise<void> = async () => {}) {
-  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep });
+  const agents = createAgentRuntime({
+    profiles: configuration.agentProfiles,
+    sleep,
+    workspaces: createWorkspaces(configuration.workspaces, { secrets: createSecretResolver("agent", {}) }),
+    assistants: workspaceAssistants(configuration.workspaces),
+  });
   const store = createInMemoryRunStore();
   const real = createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() }));
   const orchestration = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
@@ -150,6 +155,7 @@ describe("control plane: a stopped platform", () => {
     ["GET", "/chats/c-1/transcript", read],
     ["GET", "/chats/c-1/transcript/stream", read],
     ["GET", "/agents", read],
+    ["GET", "/workspaces", read],
     ["GET", "/triggers", read],
     ["GET", "/notifications", read],
     ["GET", "/approval-requests", read],
@@ -411,16 +417,30 @@ describe("control plane: chats, through the agent runtime", () => {
     ]);
   });
 
-  it("starts a chat with a repository as its workspace, and refuses a repository with credentials in its URL", async () => {
+  it("starts a chat with a workspace's assistant by the workspace's name, and refuses a workspace without one or not configured", async () => {
     const { client } = chatting();
 
-    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://git.example/acme/app.git" } });
-    const refused = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://user:token@git.example/acme/app.git" } });
+    const started = await client.POST("/chats", { body: { workspace: "fake-playground", text: "Hello" } });
+    const withoutAssistant = await client.POST("/chats", { body: { workspace: "playground-without-assistant", text: "Hello" } });
+    const unknown = await client.POST("/chats", { body: { workspace: "ghost", text: "Hello" } });
 
     expect(started.response.status).toBe(201);
-    expect(started.data).toMatchObject({ repository: "https://git.example/acme/app.git" });
-    expect(refused.response.status).toBe(400);
-    expect(refused.error).toMatchObject({ title: "Invalid repository" });
+    expect(started.data).toMatchObject({ agent: "fake-assistant", workspace: "fake-playground", write: false });
+    expect(withoutAssistant.response.status).toBe(400);
+    expect(withoutAssistant.error).toMatchObject({ title: "Chat not allowed" });
+    expect(unknown.error).toMatchObject({ title: "Unknown workspace" });
+  });
+
+  it("lists the workspaces with their assistants", async () => {
+    const { data, response } = await controlPlane({}, { token: READ_TOKEN }).GET("/workspaces");
+
+    expect(response.status).toBe(200);
+    expect(data?.items.map(({ name, assistant }) => [name, assistant?.profile])).toEqual([
+      ["fake-playground", "fake-assistant"],
+      ["playground", "workspace-assistant"],
+      ["playground-without-assistant", undefined],
+      ["scripted-playground", "scripted-assistant"],
+    ]);
   });
 
   it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
@@ -576,6 +596,7 @@ describe("control plane: the API token", () => {
       client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/agents"),
+      client.GET("/workspaces"),
       client.GET("/triggers"),
       client.GET("/notifications"),
       client.GET("/approval-requests"),
@@ -588,7 +609,7 @@ describe("control plane: the API token", () => {
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {

@@ -5,7 +5,7 @@ import type { Cost } from "./harness.js";
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
 
-/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent, repository? }`. */
+/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent, workspace?, write? }`. */
 export const CHAT = "dev.tendworks/chat";
 
 export interface ChatFacts {
@@ -19,8 +19,10 @@ export interface ChatFacts {
   startedAt: string;
   /** The trace the chat started; its events belong to it. */
   traceparent: string;
-  /** The public repository checked out as the chat's workspace, on its default branch; absent for an empty workspace. */
-  repository?: string;
+  /** The configured workspace whose assistant the chat is, by name; absent for an empty workspace. */
+  workspace?: string;
+  /** Whether the workspace's assistant may change the workspace, as its settings said when the chat started. */
+  write?: boolean;
 }
 
 /** The chat a task is, or undefined for a task of a run. */
@@ -43,7 +45,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
   const message = task.status.message?.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
   const cost = task.metadata?.[COST] as Cost | undefined;
   const transcript = task.metadata?.[TRANSCRIPT];
-  const { repository } = facts;
+  const { workspace, write } = facts;
   return {
     id: task.id,
     agent: facts.agent,
@@ -54,7 +56,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
     ...(message ? { message } : {}),
     ...(cost ? { cost: { amount: cost.amount, currency: cost.currency } } : {}),
     ...(typeof transcript === "string" ? { transcript } : {}),
-    ...(repository === undefined ? {} : { repository }),
+    ...(workspace === undefined ? {} : { workspace, write: write ?? false }),
   };
 }
 
@@ -66,30 +68,24 @@ export function addCost(total: Cost | undefined, turn: Cost | undefined): Cost |
   return { amount: Math.round((total.amount + turn.amount) * 1e6) / 1e6, currency: total.currency };
 }
 
-/**
- * Why a chat cannot start with `repository` as its workspace, if it cannot: a chat holds
- * no repository credential, so only a repository reachable without one, by an `https` or
- * `http` URL that carries no credential itself, can be its workspace.
- */
-export function repositoryProblem(repository: string): string | undefined {
-  const rule = "it must be an https or http clone URL without user name or password, e.g. https://git.example/acme/playground.git";
-  let url: URL;
-  try {
-    url = new URL(repository);
-  } catch {
-    return `repository ${JSON.stringify(repository)} is no URL: ${rule}`;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:") return `repository ${JSON.stringify(repository)} is no https or http URL: ${rule}`;
-  if (url.username !== "" || url.password !== "") return `repository ${url.host}${url.pathname} carries credentials in its URL: ${rule}`;
-  if (repository.length > 2048) return `repository is longer than 2048 characters: ${rule}`;
-  return undefined;
+/** The branch a writing workspace assistant works on in a git workspace. */
+export function chatBranch(chatId: string): string {
+  return `tendworks/chat-${chatId}`;
 }
 
-/** A chat was asked to start with a repository it cannot check out. */
-export class InvalidRepositoryError extends Error {
-  constructor(problem: string) {
-    super(problem);
-    this.name = "InvalidRepositoryError";
+/** A chat was asked for by the name of a workspace that is not configured. */
+export class UnknownWorkspaceError extends Error {
+  constructor(workspace: string) {
+    super(`no workspace '${workspace}' is configured`);
+    this.name = "UnknownWorkspaceError";
+  }
+}
+
+/** A chat was asked for with a workspace whose assistant is not enabled. */
+export class AssistantNotEnabledError extends Error {
+  constructor(workspace: string) {
+    super(`workspace ${workspace} has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it`);
+    this.name = "AssistantNotEnabledError";
   }
 }
 

@@ -123,7 +123,7 @@ describe("chats", () => {
     const got = tendClient("chat", "get", chatId, "-o", "yaml");
 
     expect(await listed.exited, listed.stderr()).toBe(0);
-    expect(listed.stdout()).toMatch(new RegExp(`^${chatId}\\s+fake-assistant\\s+input-required`, "m"));
+    expect(listed.stdout()).toMatch(new RegExp(`^${chatId}\\s+fake-assistant\\s+-\\s+input-required`, "m"));
     expect(await got.exited, got.stderr()).toBe(0);
     expect(got.stdout()).toContain(`id: ${chatId}`);
     await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
@@ -181,6 +181,35 @@ describe("chats", () => {
       expect(listed.items.map((agent) => agent.name)).toContain("scripted-mcp-assistant");
     },
   );
+
+  // The read-only workspace assistant of scripted-playground (tests/fixtures/config/workspaces),
+  // on the bare repository the scripted image carries.
+  it.skipIf(!credentialSelected())(
+    "holds a read-only chat with a workspace's assistant by the workspace's name: it reads the checkout but cannot push",
+    { timeout: 180_000 },
+    async () => {
+      const { data: started, response } = await client.POST("/chats", { body: { workspace: "scripted-playground", text: "workspace: what is checked out?" } });
+      expect(response.status).toBe(201);
+      const chatId = started!.id;
+      const read = await waiting(chatId, 120_000);
+      await client.POST("/chats/{chatId}/messages", { params: { path: { chatId } }, body: { text: "push: tendworks/e2e-read-only" } });
+      const pushed = await waiting(chatId);
+      await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
+
+      expect(started).toMatchObject({ agent: "scripted-assistant", workspace: "scripted-playground", write: false });
+      expect(read).toMatchObject({ status: "input-required", message: "branch main\nscripted playground" });
+      expect(pushed.status).toBe("input-required");
+      expect(pushed.message).toMatch(/^cannot push tendworks\/e2e-read-only: /);
+      expect(pushed.message).toMatch(/\ngit credential: none$/);
+    },
+  );
+
+  it("refuses a chat by the name of a workspace without an assistant", async () => {
+    const { response, error } = await client.POST("/chats", { body: { workspace: "playground-without-assistant", text: "Hello" } });
+
+    expect(response.status).toBe(400);
+    expect(error?.detail).toContain("has no enabled assistant");
+  });
 
   it.skipIf(!credentialSelected())("cancels a long turn in the sandbox; the chat stays open in the same session", { timeout: 180_000 }, async () => {
     // A prompt without "chat:" makes the scripted agent work for a long time.

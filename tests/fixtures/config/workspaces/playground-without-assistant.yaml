@@ -1,0 +1,9 @@
+# A workspace without an assistant: chats by its name are refused (contract tests).
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata:
+  name: playground-without-assistant
+spec:
+  git:
+    url: https://git.example/example/playground.git
+    defaultBranch: main

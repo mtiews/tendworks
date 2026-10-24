@@ -1,5 +1,5 @@
 import { isAbsolute, relative, sep } from "node:path";
-import type { SecretResolver } from "@tendworks/platform";
+import { enabledAssistant, type SecretResolver, type WorkspaceAssistant } from "@tendworks/platform";
 import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 import type { A2A, Workspace as Kind } from "@tendworks/shared";
 import type { TranscriptRecord } from "./transcripts/transcript-store.js";
@@ -16,7 +16,10 @@ export interface WorkspaceSession {
   taskId: string;
   /** The branch to work on; without it the workspace stays on its default branch. */
   branch?: string;
-  /** Whether the session may only read the workspace (e.g. a read-only assistant); a directory is then bound read-only. */
+  /**
+   * Whether the session may only read the workspace (e.g. a read-only assistant): a
+   * directory is then bound read-only, and a git credential reaches only the checkout.
+   */
   readOnly?: boolean;
 }
 
@@ -51,6 +54,12 @@ export interface PreparedWorkspace {
   release?: () => void;
 }
 
+/** Why a workspace cannot be prepared; `busy` when another session holds it for now. */
+export interface WorkspaceProblem {
+  problem: string;
+  busy?: true;
+}
+
 /**
  * The workspace port (ADR 0022): how a workspace gets into an agent session's sandbox,
  * e.g. a git repository cloned with the workspace's own credential, or a host directory bound into it.
@@ -58,8 +67,12 @@ export interface PreparedWorkspace {
  * @port
  */
 export interface Workspace {
-  /** Prepares the workspace for one session; a problem (e.g. a secret not set) fails the session, naming it but no value. */
-  prepare(session: WorkspaceSession): Promise<PreparedWorkspace | { problem: string }>;
+  /**
+   * Prepares the workspace for one session; a problem (e.g. a secret not set) fails the
+   * session, naming it but no value. A `busy` problem passes once another session lets
+   * go of the workspace (e.g. a directory in use).
+   */
+  prepare(session: WorkspaceSession): Promise<PreparedWorkspace | WorkspaceProblem>;
 }
 
 /** The workspace of a session that names none: an empty volume. */
@@ -69,10 +82,9 @@ export function createEmptyWorkspace(): Workspace {
   };
 }
 
-/** A git repository as a workspace: the `git` settings and credentials of a `Workspace`, or a public repository by URL alone. */
+/** A git repository as a workspace: the name, `git` settings and credentials of a `Workspace`. */
 export interface GitWorkspaceSettings {
-  /** The configured workspace's name; absent for a repository given by URL alone. */
-  name?: string;
+  name: string;
   url: string;
   /** The branch new branches start from and the one checked out without a branch; the remote's default branch when absent. */
   defaultBranch?: string;
@@ -94,7 +106,7 @@ const DEFAULT_USERNAME = "x-access-token";
  */
 export function createGitWorkspace({ name, url, defaultBranch, credentials }: GitWorkspaceSettings, secrets: SecretResolver = NO_SECRETS): Workspace {
   return {
-    async prepare({ taskId, branch }) {
+    async prepare({ taskId, branch, readOnly = false }) {
       let credential: Record<string, string> = {};
       let exposed: Record<string, string> = {};
       if (credentials) {
@@ -105,16 +117,20 @@ export function createGitWorkspace({ name, url, defaultBranch, credentials }: Gi
         exposed = credentials.env === undefined ? {} : { [credentials.env]: value };
       }
       const on = branch === undefined ? "" : ` on branch ${branch}`;
+      // Read-only: the credential stays with the checkout, so the session's git finds none and cannot push.
+      const readOnlyNote = readOnly
+        ? " It is read-only for you: you have no credential for the repository, so you cannot push; changes you make stay in the workspace."
+        : "";
       return {
         mount: { volume: workspaceVolume(taskId) },
         checkout: {
-          command: ["sh", "-c", CHECKOUT, "checkout", url, credentialScope(url), defaultBranch ?? "", ...(branch === undefined ? [] : [branch])],
+          command: ["sh", "-c", CHECKOUT, "checkout", url, credentialScope(url), defaultBranch ?? "", readOnly ? "no-push" : "push", ...(branch === undefined ? [] : [branch])],
           env: credential,
-          describes: { url, ...(name === undefined ? {} : { name }), ...(branch === undefined ? {} : { branch }) },
+          describes: { url, name, ...(branch === undefined ? {} : { branch }) },
         },
-        sessionEnv: { ...credential, ...exposed },
+        sessionEnv: readOnly ? {} : { ...credential, ...exposed },
         secrets: credential.TENDWORKS_GIT_PASSWORD === undefined ? [] : [credential.TENDWORKS_GIT_PASSWORD],
-        instructions: `Your workspace is a checkout of ${url}${on}.`,
+        instructions: `Your workspace is a checkout of ${url}${on}.${readOnlyNote}`,
       };
     },
   };
@@ -175,7 +191,7 @@ export function createDirectoryWorkspace(
       const { directory } = resolved;
       const holder = claims.claim(directory, taskId);
       if (holder !== undefined) {
-        return { problem: `directory ${path} is in use by another agent session (task ${holder}); only one session at a time works in a directory` };
+        return { problem: `directory ${path} is in use by another agent session (task ${holder}); only one session at a time works in a directory`, busy: true };
       }
       return {
         mount: { hostPath: directory, readOnly },
@@ -204,6 +220,17 @@ export function createWorkspaces(
   return (name) => byName.get(name);
 }
 
+/** The enabled assistants of the configured workspaces by workspace name, defaults filled in; undefined for a workspace without one. */
+export function workspaceAssistants(definitions: readonly Kind.Workspace[]): (workspace: string) => WorkspaceAssistant | undefined {
+  const byName = new Map(
+    definitions.flatMap(({ metadata: { name }, spec }): [string, WorkspaceAssistant][] => {
+      const assistant = enabledAssistant(spec.assistant);
+      return assistant ? [[name, assistant]] : [];
+    }),
+  );
+  return (workspace) => byName.get(workspace);
+}
+
 /** The volume a session's own workspace lives on, named after its task; removed with the session. */
 export function workspaceVolume(taskId: string): string {
   return `${taskId}-workspace`;
@@ -220,18 +247,22 @@ function credentialScope(url: string): string {
 }
 
 // $1 URL, $2 credential scope (empty: none), $3 default branch (empty: the remote's),
-// $4 branch (optional). A workspace that is already a checkout (e.g. kept on a volume)
-// stays as it is; otherwise the branch is continued if the remote has it, or started from
-// the default branch. Without a branch the checkout stays on the default branch.
+// $4 `push` or `no-push`, $5 branch (optional). A workspace that is already a checkout
+// (e.g. kept on a volume) stays as it is; otherwise the branch is continued if the remote
+// has it, or started from the default branch. Without a branch the checkout stays on the
+// default branch. `no-push` (a read-only session) points the remote's push URL nowhere, so
+// a push fails even where the remote needs no credential; the boundary for a remote that
+// needs one is that the session never gets it, since the agent can change its own .git/config.
 const CHECKOUT = `set -e
-url=$1 scope=$2 base=$3
-if [ $# -ge 4 ]; then branch=$4; else branch=; fi
+url=$1 scope=$2 base=$3 push=$4
+if [ $# -ge 5 ]; then branch=$5; else branch=; fi
 if [ ! -e .git ]; then
   set -- clone --quiet
   if [ -n "$scope" ]; then set -- "$@" -c "credential.$scope.helper=tendworks"; fi
   if [ -n "$base" ]; then set -- "$@" --branch "$base"; fi
   git "$@" -- "$url" .
 fi
+if [ "$push" = no-push ]; then git config remote.origin.pushurl no-push://read-only-workspace; fi
 if [ -z "$branch" ] || [ "$(git branch --show-current)" = "$branch" ]; then exit 0; fi
 if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
   git checkout --quiet -B "$branch" "origin/$branch"

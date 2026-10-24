@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
+import { enabledAssistant } from "@tendworks/platform";
 import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 
 // The control plane reads the configuration folder and validates every document
@@ -177,6 +178,19 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     }
     for (const [reference, name] of workspaceReferences(definition.do, "")) {
       if (!workspaces.has(name)) issues.push(`${file}: ${reference} works in workspace '${name}', but no workspace '${name}' is configured`);
+    }
+  }
+
+  // A workspace assistant's chats would be refused at once; say so when the configuration loads.
+  for (const { file, workspace } of workspaces.values()) {
+    const assistant = enabledAssistant(workspace.spec.assistant);
+    if (!assistant) continue;
+    const name = workspace.metadata.name;
+    const profile = profiles.get(assistant.profile)?.profile;
+    if (!profile) {
+      issues.push(`${file}: workspace '${name}' has its assistant held with agent profile '${assistant.profile}', but no agent profile '${assistant.profile}' is configured`);
+    } else if (!profile.spec.chat) {
+      issues.push(`${file}: workspace '${name}' has its assistant held with agent profile '${assistant.profile}', which allows no chats (spec.chat)`);
     }
   }
 

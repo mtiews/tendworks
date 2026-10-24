@@ -5,21 +5,45 @@ import { Pending } from "./pending.js";
 import { useLocation } from "./router.js";
 import { usePolling } from "./use-polling.js";
 
+/** The profile chosen unless the operator picks another: the platform assistant. */
+const PLATFORM_ASSISTANT = "assistant";
+
+/** Whom a new chat is with: a profile (`agent`) or a workspace's assistant (`workspace`), as `POST /chats` takes it. */
+type ChatWith = { agent: string } | { workspace: string };
+
+interface Choice {
+  value: string;
+  label: string;
+  chatWith: ChatWith;
+}
+
 /**
- * Starts a chat (ADR 0015, `tend chat start`): one of the profiles that allow chats (those
- * with `chat` in `GET /agents`), the first message and, optionally, a public repository to
- * check out as the workspace. The platform checks the repository; its reason shows here.
+ * Starts a chat (ADR 0015, `tend chat`): with one of the profiles that allow chats (those
+ * with `chat` in `GET /agents`), e.g. the platform assistant, or with the assistant of a
+ * workspace that has one (`GET /workspaces`, ADR 0022), and the first message. A profile
+ * chosen directly works in an empty workspace, also one that serves as a workspace's
+ * assistant. The platform decides; its reason for a refusal shows here.
  */
 export function NewChat() {
   const { client, canChange } = useApi();
   const { navigate } = useLocation();
-  const { data: agents, error } = usePolling(useCallback(() => answer(client.GET("/agents")), [client]));
-  const [agent, setAgent] = useState("");
+  const { data: choices, error } = usePolling(
+    useCallback(async () => {
+      const [agents, workspaces] = await Promise.all([answer(client.GET("/agents")), answer(client.GET("/workspaces"))]);
+      const profiles = agents.items
+        .filter((profile) => profile.chat !== undefined)
+        .map(({ name }): Choice => ({ value: `agent:${name}`, label: name, chatWith: { agent: name } }));
+      const assistants = workspaces.items.flatMap(({ name, assistant }): Choice[] =>
+        assistant ? [{ value: `workspace:${name}`, label: `Workspace ${name} (${assistant.write ? "may write" : "read-only"})`, chatWith: { workspace: name } }] : [],
+      );
+      return [...profiles, ...assistants];
+    }, [client]),
+  );
+  const [picked, setPicked] = useState("");
   const [text, setText] = useState("");
-  const [repository, setRepository] = useState("");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
-  const ids = { agent: useId(), text: useId(), repository: useId() };
+  const ids = { chatWith: useId(), text: useId() };
 
   if (!canChange) {
     return (
@@ -29,25 +53,25 @@ export function NewChat() {
       </>
     );
   }
-  if (!agents) {
+  if (!choices) {
     return (
       <>
         <h1>New chat</h1>
-        <Pending error={error} what="agent profiles" />
+        <Pending error={error} what="agent profiles and workspaces" />
       </>
     );
   }
 
-  const chatProfiles = agents.items.filter((profile) => profile.chat !== undefined).map((profile) => profile.name);
-  const chosen = chatProfiles.includes(agent) ? agent : (chatProfiles[0] ?? "");
+  const chosen =
+    choices.find((choice) => choice.value === picked) ?? choices.find((choice) => choice.value === `agent:${PLATFORM_ASSISTANT}`) ?? choices[0];
 
   const start = async (event: FormEvent) => {
     event.preventDefault();
+    if (!chosen) return;
     setStarting(true);
     setRefusal(undefined);
-    const url = repository.trim();
     try {
-      const chat = await answer(client.POST("/chats", { body: { agent: chosen, text, ...(url === "" ? {} : { repository: url }) } }));
+      const chat = await answer(client.POST("/chats", { body: { ...chosen.chatWith, text } }));
       navigate(`/chats/${encodeURIComponent(chat.id)}`);
     } catch (failure: unknown) {
       setRefusal(failure instanceof AnswerError ? failure.reason : failure instanceof Error ? failure.message : String(failure));
@@ -58,35 +82,24 @@ export function NewChat() {
   return (
     <>
       <h1>New chat</h1>
-      {chatProfiles.length === 0 ? (
-        <p className="muted">No agent profile allows chats. Give a profile spec.chat to chat with it.</p>
+      {!chosen ? (
+        <p className="muted">No agent profile allows chats and no workspace has an assistant. Give a profile spec.chat or a workspace spec.assistant to chat.</p>
       ) : (
         <form className="panel form" onSubmit={(event) => void start(event)}>
           <div className="field">
-            <label htmlFor={ids.agent}>Agent profile</label>
-            <select id={ids.agent} value={chosen} onChange={(event) => setAgent(event.target.value)}>
-              {chatProfiles.map((name) => (
-                <option key={name} value={name}>
-                  {name}
+            <label htmlFor={ids.chatWith}>Chat with</label>
+            <select id={ids.chatWith} value={chosen.value} onChange={(event) => setPicked(event.target.value)}>
+              {choices.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
                 </option>
               ))}
             </select>
+            <p className="hint muted">A workspace&apos;s assistant talks about that workspace&apos;s contents; read-only unless the workspace allows writing.</p>
           </div>
           <div className="field">
             <label htmlFor={ids.text}>Message</label>
             <textarea id={ids.text} rows={4} required value={text} onChange={(event) => setText(event.target.value)} />
-          </div>
-          <div className="field">
-            <label htmlFor={ids.repository}>Public repository (optional)</label>
-            <input
-              id={ids.repository}
-              type="text"
-              inputMode="url"
-              placeholder="https://github.com/owner/name.git"
-              value={repository}
-              onChange={(event) => setRepository(event.target.value)}
-            />
-            <p className="hint muted">Checked out as the chat&apos;s workspace. The agent can change files there but cannot push.</p>
           </div>
           {refusal !== undefined && (
             <p className="message message-error" role="alert">
