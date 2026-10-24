@@ -835,16 +835,124 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+    post:
+      operationId: askApproval
+      security:
+        - apiToken: []
+      summary: Ask the human on behalf of a running run's human step
+      description: >-
+        What a workflow's human step (`call: approval`) calls. Human interaction decides by
+        the policies of the run's workflow (from the platform's record of the run, never
+        from the caller) for the step's action: with `allow` the step proceeds and no
+        request is created; with `ask` (also when no policy applies) it records an
+        approval request, emits `approval.requested` and the run waits for
+        `approval.decided`. Asking again for the same run and step returns that step's
+        request, pending or decided, without a second event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AskApprovalRequest"
+      responses:
+        "200":
+          description: The decision, and with `ask` the step's approval request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalOutcome"
+        "400":
+          description: The body is not a valid question (e.g. no answers, duplicate answer labels).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The run is not running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Approval requests or runs cannot be read or written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /approval-requests/{approvalRequestId}:
+    get:
+      operationId: getApprovalRequest
+      summary: One approval request with its question, links, answers and, once decided, the chosen answer
+      parameters:
+        - name: approvalRequestId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The approval request.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No approval request with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Approval requests cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /approval-requests/{approvalRequestId}/decision:
     post:
       operationId: decideApprovalRequest
       security:
         - apiToken: []
-      summary: Approve or reject an approval request
+      summary: Decide an approval request with one of its answers
       description: >-
-        Records the decision and emits `approval.decided`, which the waiting run
-        receives. Deciding a request again the same way changes nothing; a decided
-        request cannot be decided the other way.
+        Records the chosen answer and emits `approval.decided`, which the waiting run
+        receives; the answer's outcome continues or stops it. Deciding a request again
+        with the same answer changes nothing; a decided request cannot be decided with
+        another answer.
       parameters:
         - name: approvalRequestId
           in: path
@@ -865,7 +973,7 @@ paths:
               schema:
                 $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
         "400":
-          description: The decision is neither `approve` nor `reject`.
+          description: The answer is not one of the request's answers.
           content:
             application/json:
               schema:
@@ -894,7 +1002,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
         "409":
-          description: The approval request was already decided the other way.
+          description: The approval request was already decided with another answer.
           content:
             application/json:
               schema:
@@ -966,11 +1074,52 @@ components:
             $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
     ApprovalDecisionRequest:
       type: object
+      required: [answer]
+      additionalProperties: false
+      properties:
+        answer:
+          type: string
+          description: Label of one of the request's answers.
+    AskApprovalRequest:
+      type: object
+      required: [run, step, action, question, answers]
+      additionalProperties: false
+      properties:
+        run:
+          type: string
+          description: Id of the running run whose human step asks.
+        step:
+          type: string
+          minLength: 1
+          description: Reference of the human step in the run's workflow, e.g. `/do/1/confirmMerge`.
+        action:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/gatedAction"
+        question:
+          type: string
+          minLength: 1
+        links:
+          type: array
+          items:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalLink"
+        answers:
+          type: array
+          minItems: 1
+          items:
+            $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalAnswer"
+          description: The answers to choose from; labels must be unique.
+    ApprovalOutcome:
+      type: object
       required: [decision]
       additionalProperties: false
       properties:
         decision:
-          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalDecision"
+          $ref: "../schemas/policy.schema.yaml#/$defs/decision"
+        policy:
+          type: string
+          description: Name of the policy that decided; absent when no policy applies (the platform asks).
+        approvalRequest:
+          $ref: "../schemas/approval-request.schema.yaml#/$defs/approvalRequest"
+          description: The step's approval request; present exactly when the decision is `ask`.
     NotificationList:
       type: object
       required: [items]

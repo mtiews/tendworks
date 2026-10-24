@@ -1,6 +1,7 @@
 import type { RunEvents } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { approvalRequested } from "./approvals/approval-events.js";
+import type { ApprovalRequest } from "./approvals/approval-store.js";
 import { createInMemoryNotificationChannel, type Notification } from "./notification-channel.js";
 import { createInMemoryNotificationStore } from "./notification-store.js";
 import { createNotifier } from "./notifier.js";
@@ -84,14 +85,20 @@ describe("notifier", () => {
 
   it("tells the human that an approval request waits for a decision", async () => {
     const { store, channel, notifier } = setup();
-    const request = {
+    const request: ApprovalRequest = {
       id: "approval-1",
       runId: "run-1",
       workflow: "release-app",
+      step: "/do/1/confirm",
       action: "deploy",
       policy: "careful",
       question: "Deploy release 1.4 for run run-1 of release-app?",
-      status: "pending" as const,
+      links: [],
+      answers: [
+        { label: "Deploy", outcome: "continue" },
+        { label: "Cancel", outcome: "stop" },
+      ],
+      status: "pending",
       createdAt: "2026-10-18T10:00:02.000Z",
     };
 
@@ -102,7 +109,7 @@ describe("notifier", () => {
         kind: "approval.requested",
         runId: "run-1",
         title: "Approval needed: Deploy release 1.4 for run run-1 of release-app?",
-        detail: "Answer with: tend approval approve approval-1 (or reject approval-1)",
+        detail: 'Answers: "Deploy", "Cancel". Answer with: tend approval answer approval-1 "<answer>"',
         delivery: expect.objectContaining({ status: "delivered" }),
       }),
     ]);

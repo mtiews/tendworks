@@ -10,12 +10,12 @@ import {
 } from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import {
-  approvalRequested,
   createApprovals,
   createInMemoryApprovalStore,
   createInMemoryNotificationChannel,
   createInMemoryNotificationStore,
   createNotifier,
+  type Policy,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
 import { readServerSentEvents } from "@tendworks/platform";
@@ -152,7 +152,9 @@ describe("control plane: a stopped platform", () => {
     ["GET", "/triggers", read],
     ["GET", "/notifications", read],
     ["GET", "/approval-requests", read],
-    ["POST", "/approval-requests/a-1/decision", json({ decision: "approve" })],
+    ["GET", "/approval-requests/a-1", read],
+    ["POST", "/approval-requests", json({ run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] })],
+    ["POST", "/approval-requests/a-1/decision", json({ answer: "Deploy" })],
   ];
 
   it("still reports its status, naming the failed component", async () => {
@@ -533,26 +535,32 @@ describe("control plane: the API token", () => {
     const client = controlPlane({}, { token: "wrong-token" });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { answer: "Deploy" } });
+    const asked = await client.POST("/approval-requests", {
+      body: { run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] },
+    });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
     const client = controlPlane({}, { token: READ_TOKEN });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { answer: "Deploy" } });
+    const asked = await client.POST("/approval-requests", {
+      body: { run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] },
+    });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {
@@ -567,6 +575,7 @@ describe("control plane: the API token", () => {
       client.GET("/triggers"),
       client.GET("/notifications"),
       client.GET("/approval-requests"),
+      client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "a-1" } } }),
       client.GET("/chats"),
       client.GET("/chats/{chatId}", { params: { path: { chatId: "c-1" } } }),
       client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: "c-1" } } }),
@@ -575,7 +584,7 @@ describe("control plane: the API token", () => {
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {
@@ -673,55 +682,102 @@ describe("control plane: notifications", () => {
 });
 
 describe("control plane: approval requests", () => {
-  async function withPendingRequest() {
-    const store = createInMemoryApprovalStore();
-    const request = {
-      id: "a-1",
-      runId: "r-1",
-      workflow: "release-app",
-      action: "deploy",
-      policy: "careful",
-      question: "Deploy release 1.4 for run r-1 of release-app?",
-      status: "pending" as const,
-      createdAt: "2026-10-19T10:00:00.000Z",
-    };
-    await store.open(request, (opened) => approvalRequested(opened, opened.createdAt));
-    return controlPlane({ approvals: createApprovals({ store }) });
+  const TRACEPARENT = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+  const question = {
+    run: "r-1",
+    step: "/do/1/confirm",
+    action: "deploy",
+    question: "Deploy release 1.4 for run r-1 of release-app?",
+    links: [{ title: "Release notes", url: "https://git.example/acme/app/releases/1.4" }],
+    answers: [
+      { label: "Deploy", outcome: "continue" as const },
+      { label: "Cancel", outcome: "stop" as const },
+    ],
+  };
+  const runs = [
+    { id: "r-1", workflow: "release-app", status: "running" as const, traceparent: TRACEPARENT },
+    { id: "r-done", workflow: "release-app", status: "completed" as const },
+  ];
+  function platform(policies: Policy[] = []) {
+    return controlPlane({ approvals: createApprovals({ store: createInMemoryApprovalStore(), policies, runs: async (id) => runs.find((run) => run.id === id) }) });
   }
-  const decide = (client: ReturnType<typeof controlPlane>, id: string, decision: "approve" | "reject") =>
-    client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { decision } });
+  async function withPendingRequest() {
+    const client = platform();
+    const { data } = await client.POST("/approval-requests", { body: question });
+    return { client, id: data!.approvalRequest!.id };
+  }
+  const decide = (client: ReturnType<typeof controlPlane>, id: string, answer: string) =>
+    client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { answer } });
 
-  it("lists the pending approval request and decides it", async () => {
-    const client = await withPendingRequest();
+  it("asks on behalf of a human step: records the request with its question, links and answers", async () => {
+    const client = platform();
+
+    const { data, response } = await client.POST("/approval-requests", { body: question });
+
+    expect(response.status).toBe(200);
+    expect(data).toMatchObject({
+      decision: "ask",
+      approvalRequest: { runId: "r-1", workflow: "release-app", step: "/do/1/confirm", action: "deploy", links: question.links, answers: question.answers, status: "pending" },
+    });
+    const shown = await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: data!.approvalRequest!.id } } });
+    expect(shown.data).toEqual(data!.approvalRequest);
+  });
+
+  it("lets a human step proceed without a request when a policy allows its action", async () => {
+    const client = platform([{ apiVersion: "tendworks.dev/v1", kind: "Policy", metadata: { name: "trusted" }, spec: { actions: { deploy: "allow" } } }]);
+
+    const { data } = await client.POST("/approval-requests", { body: question });
+
+    expect(data).toEqual({ decision: "allow", policy: "trusted" });
+    expect((await client.GET("/approval-requests")).data?.items).toEqual([]);
+  });
+
+  it("refuses to ask for an unknown run, a run that is not running, and an invalid question", async () => {
+    const client = platform();
+
+    const unknown = await client.POST("/approval-requests", { body: { ...question, run: "nope" } });
+    const finished = await client.POST("/approval-requests", { body: { ...question, run: "r-done" } });
+    const invalid = await client.POST("/approval-requests", { body: { ...question, answers: [] } });
+    const twice = await client.POST("/approval-requests", { body: { ...question, answers: [{ label: "Deploy", outcome: "continue" }, { label: "Deploy", outcome: "stop" }] } });
+
+    expect([unknown, finished, invalid, twice].map(({ response }) => response.status)).toEqual([404, 409, 400, 400]);
+  });
+
+  it("lists the pending approval request and decides it with one of its answers", async () => {
+    const { client, id } = await withPendingRequest();
 
     const pending = await client.GET("/approval-requests", { params: { query: { status: "pending" } } });
-    const approved = await decide(client, "a-1", "approve");
+    const decided = await decide(client, id, "Cancel");
 
-    expect(pending.data?.items.map((item) => item.id)).toEqual(["a-1"]);
-    expect(approved.data?.status).toBe("approved");
+    expect(pending.data?.items.map((item) => item.id)).toEqual([id]);
+    expect(decided.data).toMatchObject({ status: "decided", answer: "Cancel" });
   });
 
-  it("refuses a decision the other way once the approval request is decided", async () => {
-    const client = await withPendingRequest();
-    await decide(client, "a-1", "reject");
+  it("refuses another answer once the approval request is decided", async () => {
+    const { client, id } = await withPendingRequest();
+    await decide(client, id, "Cancel");
 
-    expect((await decide(client, "a-1", "approve")).response.status).toBe(409);
+    expect((await decide(client, id, "Deploy")).response.status).toBe(409);
   });
 
-  it("refuses an invalid decision and an unknown approval request", async () => {
-    const client = await withPendingRequest();
+  it("refuses an answer the request does not offer, no answer and an unknown approval request", async () => {
+    const { client, id } = await withPendingRequest();
 
+    const notOffered = await decide(client, id, "Maybe");
     const invalid = await client.POST("/approval-requests/{approvalRequestId}/decision", {
-      params: { path: { approvalRequestId: "a-1" } },
-      body: { decision: "maybe" as "approve" },
+      params: { path: { approvalRequestId: id } },
+      body: { decision: "approve" } as unknown as { answer: string },
     });
 
+    expect(notOffered.response.status).toBe(400);
     expect(invalid.response.status).toBe(400);
-    expect((await decide(client, "missing", "approve")).response.status).toBe(404);
+    expect((await decide(client, "missing", "Cancel")).response.status).toBe(404);
+    expect((await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "missing" } } })).response.status).toBe(404);
   });
 
   it("refuses a status filter that is not an approval status", async () => {
-    const { response } = await (await withPendingRequest()).GET("/approval-requests", { params: { query: { status: "maybe" as "pending" } } });
+    const { client } = await withPendingRequest();
+    const { response } = await client.GET("/approval-requests", { params: { query: { status: "approved" as "pending" } } });
 
     expect(response.status).toBe(400);
   });
@@ -730,7 +786,9 @@ describe("control plane: approval requests", () => {
     const client = controlPlane();
 
     expect((await client.GET("/approval-requests")).response.status).toBe(503);
-    expect((await decide(client, "a-1", "approve")).response.status).toBe(503);
+    expect((await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "a-1" } } })).response.status).toBe(503);
+    expect((await client.POST("/approval-requests", { body: question })).response.status).toBe(503);
+    expect((await decide(client, "a-1", "Cancel")).response.status).toBe(503);
   });
 });
 

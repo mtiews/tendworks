@@ -12,7 +12,16 @@ export {
   type TranscriptEntry,
 } from "./agent-runtime.js";
 export { apiTokenProblems, createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
-export { createInMemoryApprovals, type ApprovalDecision, type ApprovalRequest, type ApprovalsPort, type ApprovalStatus } from "./approvals.js";
+export {
+  createInMemoryApprovals,
+  type ApprovalOutcome,
+  type ApprovalRequest,
+  type ApprovalsPort,
+  type ApprovalStatus,
+  type AskApproval,
+  type AskRefusal,
+  type DecisionOutcome,
+} from "./approvals.js";
 export { ConfigurationError, emptyConfiguration, loadConfiguration, type Configuration } from "./configuration.js";
 export type { Notification, NotificationsPort } from "./notifications.js";
 export {

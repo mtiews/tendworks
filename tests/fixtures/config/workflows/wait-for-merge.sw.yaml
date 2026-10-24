@@ -1,0 +1,51 @@
+# A workflow that continues after something the human does outside the platform: the fake
+# agent reports a pull request, the human step asks the human to merge it in the forge and
+# waits (also across restarts), and with "Merged – continue" a follow-up step runs; "Cancel"
+# ends the run there. The policy ask-before-merge-fakes asks for its merge-pull-request action.
+# Start it with: POST /runs {"workflow": "wait-for-merge", "input": {"issue": {"number": 1, "title": "Say hello"}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: wait-for-merge
+  version: '0.1.0'
+  summary: A fake agent opens a pull request; the run waits until the human merged it.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-pr-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+      output:
+        as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'
+  - confirmMerge:
+      call: approval
+      with:
+        action: merge-pull-request
+        question: '${ "Merge \(.pullRequest) in the forge, then continue?" }'
+        links:
+          - title: Pull request
+            url: '${ .pullRequest }'
+        answers:
+          - { label: Merged – continue, outcome: continue }
+          - { label: Cancel, outcome: stop }
+      output:
+        as: '${ $input + { answer: .answer } }'
+  - followUp:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Follow up on the merged pull request \(.pullRequest)" }'
+      output:
+        as: '${ $input + { followedUp: true } }'

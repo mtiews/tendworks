@@ -9,7 +9,8 @@ export {
   type ApprovalStore,
   type DecideOutcome,
 } from "./approvals/approval-store.js";
-export { createApprovals, type ApprovalDecision, type Approvals, type ApprovalsOptions } from "./approvals/approvals.js";
+export { createApprovals, type Approvals, type ApprovalsOptions, type AskApproval, type AskedRun, type AskOutcome } from "./approvals/approvals.js";
+export { decideFor, type Policy, type PolicyDecision } from "./policy.js";
 export {
   createPostgresNotificationStore,
   migrateHumanInteractionStore,

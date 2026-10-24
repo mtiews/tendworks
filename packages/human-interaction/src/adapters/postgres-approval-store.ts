@@ -10,10 +10,14 @@ interface ApprovalRow {
   id: string;
   run_id: string;
   workflow: string;
+  step: string;
   action: ApprovalRequest["action"];
-  policy: string;
+  policy: string | null;
   question: string;
+  links: ApprovalRequest["links"];
+  answers: ApprovalRequest["answers"];
   status: ApprovalRequest["status"];
+  answer: string | null;
   traceparent: string | null;
   created_at: Date;
   decided_at: Date | null;
@@ -53,27 +57,28 @@ export function createPostgresApprovalStore({ pool, publisher }: PostgresApprova
     async open(request, event) {
       return transaction(async (tx) => {
         const inserted = await tx.query(
-          `insert into human_interaction.approval_requests (id, run_id, workflow, action, policy, question, status, traceparent, created_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (run_id, action) do nothing`,
+          `insert into human_interaction.approval_requests
+             (id, run_id, workflow, step, action, policy, question, links, answers, status, traceparent, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) on conflict (run_id, step) do nothing`,
           [
-            request.id, request.runId, request.workflow, request.action, request.policy, request.question, request.status,
-            request.traceparent ?? null, request.createdAt,
+            request.id, request.runId, request.workflow, request.step, request.action, request.policy ?? null, request.question,
+            JSON.stringify(request.links), JSON.stringify(request.answers), request.status, request.traceparent ?? null, request.createdAt,
           ],
         );
         if (inserted.rowCount === 1) {
           await publisher.publish(tx, event(request));
           return structuredClone(request);
         }
-        return (await one(tx, "run_id = $1 and action = $2", [request.runId, request.action]))!;
+        return (await one(tx, "run_id = $1 and step = $2", [request.runId, request.step]))!;
       });
     },
-    async decide(id, status, decidedAt, event) {
+    async decide(id, answer, decidedAt, event) {
       return transaction(async (tx) => {
         const request = await one(tx, "id = $1", [id], " for update");
         if (!request) return undefined;
-        if (request.status !== "pending") return request.status === status ? { decided: request } : { conflict: request };
-        await tx.query("update human_interaction.approval_requests set status = $2, decided_at = $3 where id = $1", [id, status, decidedAt]);
-        const decided = { ...request, status, decidedAt: new Date(decidedAt).toISOString() };
+        if (request.status !== "pending") return request.answer === answer ? { decided: request } : { conflict: request };
+        await tx.query("update human_interaction.approval_requests set status = 'decided', answer = $2, decided_at = $3 where id = $1", [id, answer, decidedAt]);
+        const decided: ApprovalRequest = { ...request, status: "decided", answer, decidedAt: new Date(decidedAt).toISOString() };
         await publisher.publish(tx, event(decided));
         return { decided };
       });
@@ -94,10 +99,14 @@ function toRequest(row: ApprovalRow): ApprovalRequest {
     id: row.id,
     runId: row.run_id,
     workflow: row.workflow,
+    step: row.step,
     action: row.action,
-    policy: row.policy,
+    ...(row.policy === null ? {} : { policy: row.policy }),
     question: row.question,
+    links: row.links,
+    answers: row.answers,
     status: row.status,
+    ...(row.answer === null ? {} : { answer: row.answer }),
     ...(row.traceparent === null ? {} : { traceparent: row.traceparent }),
     createdAt: row.created_at.toISOString(),
     ...(row.decided_at === null ? {} : { decidedAt: row.decided_at.toISOString() }),

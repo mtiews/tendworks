@@ -1,0 +1,11 @@
+# The human step of wait-for-merge asks before it continues. Asking is also what happens
+# without any policy; this one names itself in the approval request. Switch the action to
+# `allow` and the step proceeds without a request.
+apiVersion: tendworks.dev/v1
+kind: Policy
+metadata:
+  name: ask-before-merge-fakes
+spec:
+  workflows: [wait-for-merge]
+  actions:
+    merge-pull-request: ask

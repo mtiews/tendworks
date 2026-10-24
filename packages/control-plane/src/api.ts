@@ -3,7 +3,7 @@ import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
-import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
+import type { ApprovalsPort, ApprovalStatus, AskApproval } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
@@ -361,7 +361,7 @@ export function createControlPlaneApi({
     }
   });
 
-  const STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected"];
+  const STATUSES: ApprovalStatus[] = ["pending", "decided"];
 
   app.get("/approval-requests", async (c) => {
     const status = c.req.query("status");
@@ -377,22 +377,60 @@ export function createControlPlaneApi({
     }
   });
 
+  app.get("/approval-requests/:approvalRequestId", async (c) => {
+    if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
+    const id = c.req.param("approvalRequestId");
+    let request;
+    try {
+      request = await approvals.get(id);
+    } catch (error) {
+      return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!request) return problem(404, "Approval request not found", `no approval request '${id}' exists`);
+    return c.json(request satisfies Schemas["approvalRequest"], 200);
+  });
+
+  // A workflow's human step asks; human interaction decides by the run's own record.
+  app.post("/approval-requests", authenticated, async (c) => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const invalid = askProblem(body);
+    if (invalid) return problem(400, "Invalid request", invalid);
+    if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
+    let outcome;
+    try {
+      outcome = await approvals.ask(body as AskApproval);
+    } catch (error) {
+      return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if ("refused" in outcome) {
+      const { reason, detail } = outcome.refused;
+      if (reason === "unknown-run") return problem(404, "Run not found", detail);
+      if (reason === "not-running") return problem(409, "Run is not running", detail);
+      return problem(400, "Invalid request", detail);
+    }
+    return c.json(outcome satisfies Schemas["ApprovalOutcome"], 200);
+  });
+
   app.post("/approval-requests/:approvalRequestId/decision", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["ApprovalDecisionRequest"]> | undefined;
-    if (body?.decision !== "approve" && body?.decision !== "reject") {
-      return problem(400, "Invalid request", "`decision` must be approve or reject");
+    if (typeof body?.answer !== "string" || body.answer === "" || Object.keys(body).length !== 1) {
+      return problem(400, "Invalid request", "the body must be { answer } with the label of one of the request's answers");
     }
     if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
     const id = c.req.param("approvalRequestId");
     let outcome;
     try {
-      outcome = await approvals.decide(id, body.decision);
+      outcome = await approvals.decide(id, body.answer);
     } catch (error) {
       return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
     }
     if (!outcome) return problem(404, "Approval request not found", `no approval request '${id}' exists`);
+    if ("unknownAnswer" in outcome) {
+      const offered = outcome.unknownAnswer.answers.map(({ label }) => `'${label}'`).join(", ");
+      return problem(400, "Unknown answer", `approval request ${id} offers no answer '${body.answer}' (answers: ${offered})`);
+    }
     if ("conflict" in outcome) {
-      return problem(409, "Approval request already decided", `approval request ${id} was already ${outcome.conflict.status}`);
+      return problem(409, "Approval request already decided", `approval request ${id} was already decided with '${outcome.conflict.answer ?? ""}'`);
     }
     return c.json(outcome.decided satisfies Schemas["approvalRequest"], 200);
   });
@@ -403,4 +441,31 @@ export function createControlPlaneApi({
   });
 
   return { fetch: async (request) => app.fetch(request) };
+}
+
+const NAME = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+
+/** Why `body` is not a question a human step can ask (`AskApprovalRequest`); `undefined` when it is. */
+function askProblem(body: unknown): string | undefined {
+  const text = (value: unknown) => typeof value === "string" && value !== "";
+  const only = (value: object, keys: string[]) => Object.keys(value).every((key) => keys.includes(key));
+  if (!isRecord(body) || !only(body, ["run", "step", "action", "question", "links", "answers"])) {
+    return "the body must be { run, step, action, question, links?, answers }";
+  }
+  if (!text(body.run) || !text(body.step)) return "`run` and `step` must name the running run and its human step";
+  if (typeof body.action !== "string" || !NAME.test(body.action)) return "`action` must be a name of letters, digits and dashes";
+  if (!text(body.question)) return "`question` must not be empty";
+  const links = body.links ?? [];
+  const link = (value: unknown) =>
+    isRecord(value) && only(value, ["title", "url"]) && text(value.title) && typeof value.url === "string" && /^https?:\/\/./.test(value.url);
+  if (!Array.isArray(links) || !links.every(link)) return "`links` must be a list of { title, url } with http(s) URLs";
+  const answer = (value: unknown) => isRecord(value) && only(value, ["label", "outcome"]) && text(value.label) && (value.outcome === "continue" || value.outcome === "stop");
+  if (!Array.isArray(body.answers) || body.answers.length === 0 || !body.answers.every(answer)) {
+    return "`answers` must be a non-empty list of { label, outcome } with outcome continue or stop";
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

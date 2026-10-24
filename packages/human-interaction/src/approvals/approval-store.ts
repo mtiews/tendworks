@@ -24,18 +24,19 @@ export type DecideOutcome = { decided: ApprovalRequest } | { conflict: ApprovalR
 export interface ApprovalStore {
   /**
    * Records a pending approval request and publishes `event(request)` with it. When the
-   * run already has a request for the same action, returns that one and publishes
-   * nothing.
+   * run already has a request from the same step, returns that one (pending or decided)
+   * and publishes nothing.
    */
   open(request: ApprovalRequest, event: (request: ApprovalRequest) => ApprovalEvent): Promise<ApprovalRequest>;
   /**
-   * Decides a pending request and publishes `event(decided)` with it. Deciding it again
-   * the same way returns it unchanged without an event; the other way is a `conflict`.
-   * Resolves `undefined` for an unknown id.
+   * Decides a pending request with the answer labelled `answer` (the caller checks that it
+   * is one of the request's) and publishes `event(decided)` with it. Deciding it again
+   * with the same answer returns it unchanged without an event; another answer is a
+   * `conflict`. Resolves `undefined` for an unknown id.
    */
   decide(
     id: string,
-    status: Exclude<ApprovalStatus, "pending">,
+    answer: string,
     decidedAt: string,
     event: (request: ApprovalRequest) => ApprovalEvent,
   ): Promise<DecideOutcome | undefined>;
@@ -53,21 +54,21 @@ export function createInMemoryApprovalStore(): ApprovalStore & { published: Appr
   return {
     published,
     async open(request, event) {
-      const existing = requests.find((known) => known.runId === request.runId && known.action === request.action);
+      const existing = requests.find((known) => known.runId === request.runId && known.step === request.step);
       if (existing) return clone(existing);
       requests.push(clone(request));
       published.push(clone(event(request)));
       return clone(request);
     },
-    async decide(id, status, decidedAt, event) {
+    async decide(id, answer, decidedAt, event) {
       const request = requests.find((known) => known.id === id);
       if (!request) return undefined;
       if (request.status === "pending") {
-        Object.assign(request, { status, decidedAt });
+        Object.assign(request, { status: "decided", answer, decidedAt });
         published.push(clone(event(request)));
         return { decided: clone(request) };
       }
-      return request.status === status ? { decided: clone(request) } : { conflict: clone(request) };
+      return request.answer === answer ?{ decided: clone(request) } : { conflict: clone(request) };
     },
     async get(id) {
       const request = requests.find((known) => known.id === id);

@@ -8,6 +8,7 @@ export type * as ChatEvents from "./generated/chat-events.js";
 export type * as ControlPlane from "./generated/control-plane.js";
 export type * as Health from "./generated/health.js";
 export type * as Orchestration from "./generated/orchestration.js";
+export type * as Policy from "./generated/policy.js";
 export type * as RunEvents from "./generated/run-events.js";
 export type * as Sandbox from "./generated/sandbox.js";
 export type * as TranscriptEntry from "./generated/transcript-entry.js";
