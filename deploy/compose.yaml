@@ -109,6 +109,10 @@ services:
       # Platform token: trigger bindings reference it (secretRef) to read GitHub issues.
       # Read access only; never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
+      # Platform secrets of Pushover notification channels (ADR 0025): the application's
+      # token and the user key. Never in a sandbox.
+      TENDWORKS_PLATFORM_PUSHOVER_TOKEN: ${TENDWORKS_PLATFORM_PUSHOVER_TOKEN:-}
+      TENDWORKS_PLATFORM_PUSHOVER_USER: ${TENDWORKS_PLATFORM_PUSHOVER_USER:-}
       # API token: every operation but GET /status needs a token, operations that change
       # state need this one (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
       # The read-only token is accepted for reading only (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).

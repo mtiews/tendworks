@@ -184,6 +184,7 @@ Rules the loader enforces:
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>`; a human step `call: approval` (`action`, `question`, `links`, `answers` with `outcome: continue \| stop`) where a workflow waits for you | server |
 | `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows` (all workflows without it); the strictest applicable policy wins, and without one the step asks | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
+| `NotificationChannel` | `notifications/*.yaml` | `spec.events` (out of `approval.requested`, `run.failed`, `run.completed`); `spec.integration: pushover` with `spec.pushover.token` and `user` as references to `TENDWORKS_PLATFORM_PUSHOVER_TOKEN` and `TENDWORKS_PLATFORM_PUSHOVER_USER` in `deploy/.env`, optional `priority` (-2 to 1); several channels, e.g. failures with `priority: 1`. A run's first artifact (its pull request) is the message's link | server |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
@@ -325,7 +326,7 @@ docker compose -f deploy/compose.yaml stop temporal-ui
 | `gvisor` isolation class | not verified yet (issue #17); [optional step](#optional-gvisor) |
 | Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes (issue #23) |
 | Retention | nothing ages out: store, transcripts and the volumes of chats nobody ends grow forever (follow-up of issue #48). Watch the disk (`docker system df -v`) |
-| Notifications | delivered to the server log only |
+| Notifications | delivered only to the configured notification channels (Pushover, or `fake` to the server log); without one they are only recorded. `tend notification list` shows the delivery status per channel |
 
 A chat profile without the platform MCP server, e.g. `agents/helper.md` in your configuration:
 

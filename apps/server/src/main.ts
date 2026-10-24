@@ -16,11 +16,11 @@ import {
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import {
   createApprovals,
-  createLoggingNotificationChannel,
   createPostgresApprovalStore,
   createPostgresNotificationStore,
   createNotifier,
   migrateHumanInteractionStore,
+  notifierChannelsFor,
 } from "@tendworks/human-interaction";
 import {
   createControlPlaneRunStarter,
@@ -53,7 +53,7 @@ try {
 console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
 console.log(`configuration: trigger bindings ${configuration.triggerBindings.map((binding) => binding.metadata.name).join(", ") || "none"}`);
 
-// Secret references of the platform's integrations (trigger bindings): only
+// Secret references of the platform's integrations (trigger bindings, notification channels): only
 // TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
@@ -102,9 +102,13 @@ await migrateOrStop(
 );
 
 // Human interaction: run outcomes and approval requests from the event bus become
-// notifications, recorded before the notification channel (a log for now) delivers them.
+// notifications, recorded before each configured notification channel that selects them
+// delivers them (ADR 0025). Channels resolve their platform secrets at each delivery.
 const notifications = createPostgresNotificationStore(pool);
-const notifier = createNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
+const notifier = createNotifier({ store: notifications, channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }) });
+console.log(
+  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration}: ${spec.events.join(", ")})`).join("; ") || "none"}`,
+);
 const bus = createPostgresEventBus({ pool });
 bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
 

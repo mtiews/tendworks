@@ -1,0 +1,8 @@
+apiVersion: tendworks.dev/v1
+kind: NotificationChannel
+metadata:
+  name: fake-log
+spec:
+  # Writes every notification to the server's log.
+  integration: fake
+  events: [approval.requested, run.failed, run.completed]

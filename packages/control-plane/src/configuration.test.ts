@@ -95,7 +95,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, SandboxTemplate, TriggerBinding)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, NotificationChannel, Policy, SandboxTemplate, TriggerBinding)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -215,6 +215,68 @@ describe("loadConfiguration", () => {
       "policies/b.yaml: policy 'trusted' is already defined in policies/a.yaml",
       "policies/c.yaml: /spec/actions/deploy: must be equal to one of the allowed values (allow, ask)",
       "policies/d.yaml: /spec/actions: must NOT have fewer than 1 properties",
+    ]);
+  });
+
+  it("loads notification channels with the events they select, ordered by name", () => {
+    const dir = folder({
+      "notifications/phone.yaml": `apiVersion: tendworks.dev/v1
+kind: NotificationChannel
+metadata: { name: phone }
+spec:
+  integration: pushover
+  events: [run.failed, approval.requested]
+  pushover:
+    token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
+    user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
+    priority: 1
+`,
+      "notifications/log.yaml": "apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: log }\nspec: { integration: fake, events: [run.completed] }\n",
+    });
+
+    expect(loadConfiguration(dir).notificationChannels.map(({ metadata, spec }) => [metadata.name, spec])).toEqual([
+      ["log", { integration: "fake", events: ["run.completed"] }],
+      [
+        "phone",
+        {
+          integration: "pushover",
+          events: ["run.failed", "approval.requested"],
+          pushover: {
+            token: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_TOKEN" } },
+            user: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_USER" } },
+            priority: 1,
+          },
+        },
+      ],
+    ]);
+  });
+
+  it("rejects a notification channel without its settings, with plain or agent secrets, unknown events and duplicates", () => {
+    const channel = (name: string, spec: string) => `apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: ${name} }\nspec: ${spec}\n`;
+    const dir = folder({
+      "notifications/a.yaml": channel("log", "{ integration: fake, events: [run.completed] }"),
+      "notifications/b.yaml": channel("log", "{ integration: fake, events: [run.failed] }"),
+      "notifications/c.yaml": channel("bare", "{ integration: pushover, events: [run.failed] }"),
+      "notifications/d.yaml": channel(
+        "leaky",
+        "{ integration: pushover, events: [run.failed], pushover: { token: plaintext, user: { secretRef: { name: TENDWORKS_AGENT_PUSHOVER_USER } } } }",
+      ),
+      "notifications/e.yaml": channel("noisy", "{ integration: fake, events: [step.started] }"),
+      "notifications/f.yaml": channel("silent", "{ integration: fake, events: [] }"),
+      "notifications/g.yaml": channel(
+        "emergency",
+        "{ integration: pushover, events: [run.failed], pushover: { token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }, user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }, priority: 2 } }",
+      ),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "notifications/b.yaml: notification channel 'log' is already defined in notifications/a.yaml",
+      "notifications/c.yaml: /spec: must have required property 'pushover'",
+      "notifications/d.yaml: /spec/pushover/token: must be object",
+      `notifications/d.yaml: /spec/pushover/user/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
+      "notifications/e.yaml: /spec/events/0: must be equal to one of the allowed values (approval.requested, run.failed, run.completed)",
+      "notifications/f.yaml: /spec/events: must NOT have fewer than 1 items",
+      "notifications/g.yaml: /spec/pushover/priority: must be <= 1",
     ]);
   });
 

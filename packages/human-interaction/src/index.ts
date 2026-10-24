@@ -15,11 +15,17 @@ export {
   createPostgresNotificationStore,
   migrateHumanInteractionStore,
 } from "./adapters/postgres-notification-store.js";
+export { notifierChannelsFor, type NotifierChannelsOptions } from "./notification-channels.js";
 export {
-  createInMemoryNotificationChannel,
-  createLoggingNotificationChannel,
+  createFakeNotificationDelivery,
+  type FakeNotificationDeliveryOptions,
   type Notification,
-  type NotificationChannel,
-} from "./notification-channel.js";
+  type NotificationDelivery,
+} from "./notification-delivery.js";
 export { createInMemoryNotificationStore, type Delivery, type NotificationStore } from "./notification-store.js";
-export { createNotifier, type NotifierOptions } from "./notifier.js";
+export { createNotifier, type NotificationKind, type NotifierChannel, type NotifierOptions } from "./notifier.js";
+export {
+  createPushoverNotificationDelivery,
+  type PushoverCredentials,
+  type PushoverNotificationDeliveryOptions,
+} from "./pushover/pushover-notification-delivery.js";

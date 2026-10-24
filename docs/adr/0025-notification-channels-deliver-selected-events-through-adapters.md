@@ -21,3 +21,5 @@ Each notification goes to every channel that selects its event, and its delivery
 - The Pushover app token and user key are platform secrets on the server; they never reach a sandbox.
 - More channels (Web Push, email, ntfy) are further adapters behind the same port, and channel kinds in the same schema.
 - The product name appears only in the channel's integration selector.
+- The events `run.completed` and `run.failed` carry the artifacts the run's steps reported, so human interaction takes them from the event and never reads orchestration's record of the run.
+- Emergency priority (2) needs acknowledgement and retries; channels support -2 to 1 until a use case needs it.

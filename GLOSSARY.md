@@ -37,8 +37,12 @@ _Avoid_: security level, sandbox type, runtime
 ### Human interaction
 
 **Notification**:
-A message to the human that needs no decision, e.g. that a run finished. It is recorded before it is delivered, so it is never lost when delivery fails.
+A message to the human that needs no decision, e.g. that a run finished. It is recorded before it is delivered, so it is never lost when delivery fails. A finished run's notification carries the run's artifacts.
 _Avoid_: alert, task, message (that is an agent's output)
+
+**Notification channel**:
+A declared way notifications reach the operator (`kind: NotificationChannel`, ADR 0025): the events it selects and the adapter that delivers them, e.g. Pushover. Each notification goes to every channel that selects it, with a delivery status per channel.
+_Avoid_: notifier (that is human interaction's consumer of events), notification delivery (that is the port behind a channel)
 
 **Policy**:
 A declarative rule (`kind: Policy`) that decides per action name and workflow whether a workflow's human step proceeds right away (`allow`) or only after an approval request (`ask`) (ADR 0024). A run never picks its policy.

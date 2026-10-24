@@ -31,6 +31,7 @@ export const PRODUCTS: readonly string[] = [
   "opensandbox",
   "postgres",
   "postgresql",
+  "pushover",
   "redis",
   "sops",
   "temporal",
@@ -69,6 +70,18 @@ export const ADAPTER_SELECTORS: readonly AdapterSelector[] = [
     under: "/$defs/githubIssueTracker",
     product: "github",
     reason: "settings of the `github` issue tracker adapter",
+  },
+  {
+    file: "schemas/notification-channel.schema.yaml",
+    under: "/properties/spec",
+    product: "pushover",
+    reason: "`integration: pushover` selects the notification delivery adapter, configured under `pushover`",
+  },
+  {
+    file: "schemas/notification-channel.schema.yaml",
+    under: "/$defs/pushoverNotificationChannel",
+    product: "pushover",
+    reason: "settings of the `pushover` notification delivery adapter",
   },
   {
     file: "schemas/sandbox-template.schema.json",

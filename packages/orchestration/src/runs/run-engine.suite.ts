@@ -61,10 +61,17 @@ do:
         workflow = definition,
         http = new InMemoryHttpExecutor(),
         runtime,
+        store = createInMemoryRunStore(),
         ...options
-      }: { workflow?: Workflow.Workflow; http?: InMemoryHttpExecutor; runtime?: RuntimeDescriptor; runId?: string; whileRunning?: (engine: RunEngine, run: () => Promise<Run | undefined>) => Promise<void> } = {},
+      }: {
+        workflow?: Workflow.Workflow;
+        http?: InMemoryHttpExecutor;
+        runtime?: RuntimeDescriptor;
+        runId?: string;
+        store?: ReturnType<typeof createInMemoryRunStore>;
+        whileRunning?: (engine: RunEngine, run: () => Promise<Run | undefined>) => Promise<void>;
+      } = {},
     ): Promise<Run> {
-      const store = createInMemoryRunStore();
       const { engine, stop } = await setup(createRunActivities({ store, agents, http }));
       if (stop) stops.push(stop);
       const runId = options.runId ?? crypto.randomUUID();
@@ -101,12 +108,36 @@ do:
       expect(agents.parts).toEqual([[{ text: "ship" }], [{ text: "build" }]]);
     });
 
+    it("announces a finished run with the artifacts its steps reported, in step order", async () => {
+      const reporting = (name: string, url: string) => () => ({
+        id: `task-${name}`,
+        status: { state: "TASK_STATE_COMPLETED" as const },
+        artifacts: [{ artifactId: `task-${name}/${name}`, name, parts: [{ url }] }],
+      });
+      const agents = new InMemoryAgentTaskExecutor()
+        .agent("planner", reporting("plan", "https://git.example/acme/app/issues/7"))
+        .agent("developer", reporting("pull-request", "https://git.example/acme/app/pull/8"));
+      const store = createInMemoryRunStore();
+
+      await execute(agents, { store });
+
+      const finished = store.publisher.published.find((event) => event.type === "dev.tendworks.run.completed");
+      expect(finished?.data).toEqual({
+        workflow: "two-steps",
+        artifacts: [
+          { name: "plan", url: "https://git.example/acme/app/issues/7" },
+          { name: "pull-request", url: "https://git.example/acme/app/pull/8" },
+        ],
+      });
+    });
+
     it("fails the run when an agent task cannot be delivered", async () => {
       const agents = new InMemoryAgentTaskExecutor().agent("developer", () => {
         throw new Error("no such agent profile: developer");
       });
+      const store = createInMemoryRunStore();
 
-      const run = await execute(agents);
+      const run = await execute(agents, { store });
 
       expect(run).toMatchObject({
         status: "failed",
@@ -114,6 +145,7 @@ do:
         steps: [{ name: "plan", status: "completed" }, { name: "build", status: "failed" }],
       });
       expect(run.error?.detail).toContain("no such agent profile: developer");
+      expect(store.publisher.published.find((event) => event.type === "dev.tendworks.run.failed")?.data).toMatchObject({ artifacts: [] });
     });
 
     it("names the task and transcript of an agent step while the agent still works on it", async () => {

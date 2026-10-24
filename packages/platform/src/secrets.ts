@@ -1,7 +1,7 @@
 /**
  * Who resolves a secret reference: `agent` for what agent profiles pass into sandboxes,
- * `platform` for the platform's own integrations (trigger bindings, merging pull
- * requests). Each may only reach the secrets meant for it.
+ * `platform` for the platform's own integrations (trigger bindings, notification
+ * channels). Each may only reach the secrets meant for it.
  */
 export type SecretConsumer = "agent" | "platform";
 

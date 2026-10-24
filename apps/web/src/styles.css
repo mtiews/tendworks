@@ -344,3 +344,10 @@ th {
   background: var(--color-read-only-bg);
   color: var(--color-warn);
 }
+
+/* Notifications: one line per channel delivery. */
+.deliveries {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

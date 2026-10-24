@@ -1,6 +1,7 @@
-import type { Notification } from "./notification-channel.js";
+import type { Notification } from "./notification-delivery.js";
 
-export type Delivery = Notification["delivery"];
+/** The outcome of delivering a notification through one channel. */
+export type Delivery = Notification["deliveries"][number];
 
 /**
  * Human interaction's record of notifications.
@@ -13,7 +14,10 @@ export interface NotificationStore {
    * event was already recorded, keeps the existing notification and returns it.
    */
   record(cause: string, notification: Notification): Promise<Notification>;
-  /** Stores the outcome of a delivery attempt. */
+  /**
+   * Stores the outcome of a delivery attempt through `delivery.channel`, replacing that
+   * channel's entry. Throws for an unknown notification or a channel it was not recorded for.
+   */
   updateDelivery(id: string, delivery: Delivery): Promise<void>;
   /** Notifications, newest first. */
   list(options?: { limit?: number }): Promise<Notification[]>;
@@ -32,7 +36,9 @@ export function createInMemoryNotificationStore(): NotificationStore {
     async updateDelivery(id, delivery) {
       const notification = [...byCause.values()].find((known) => known.id === id);
       if (!notification) throw new Error(`unknown notification ${id}`);
-      notification.delivery = clone(delivery);
+      const index = notification.deliveries.findIndex(({ channel }) => channel === delivery.channel);
+      if (index < 0) throw new Error(`notification ${id} has no delivery through channel ${delivery.channel}`);
+      notification.deliveries[index] = clone(delivery);
     },
     async list({ limit = 100 } = {}) {
       return [...byCause.values()].reverse().slice(0, limit).map(clone);

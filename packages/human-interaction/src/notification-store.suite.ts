@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { Notification } from "./notification-channel.js";
+import type { Notification } from "./notification-delivery.js";
 import type { NotificationStore } from "./notification-store.js";
 
 /**
@@ -20,8 +20,12 @@ export function describeNotificationStore(name: string, setup: () => Promise<Not
       runId: crypto.randomUUID(),
       title: "Run of hello-agent failed",
       detail: "/do/0/implement: Agent task failed",
+      artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "The change" }],
       createdAt: "2026-10-18T10:00:00.000Z",
-      delivery: { status: "pending" },
+      deliveries: [
+        { channel: "phone", status: "pending" },
+        { channel: "log", status: "pending" },
+      ],
       ...overrides,
     });
     const cause = () => `/tendworks/test ${crypto.randomUUID()}`;
@@ -44,15 +48,33 @@ export function describeNotificationStore(name: string, setup: () => Promise<Not
       expect((await store.list()).filter((known) => known.runId === first.runId || known.title === "again")).toEqual([first]);
     });
 
-    it("stores the outcome of a delivery attempt", async () => {
-      const { detail: _detail, ...withoutDetail } = notification({ kind: "run.completed" });
-      const recorded = await store.record(cause(), withoutDetail);
+    it("stores the outcome of a delivery attempt per channel, keeping the channels' order", async () => {
+      const { detail: _detail, artifacts: _artifacts, ...bare } = notification({ kind: "approval.requested" });
+      const recorded = await store.record(cause(), bare);
 
-      await store.updateDelivery(recorded.id, { status: "failed", attemptedAt: "2026-10-18T10:00:01.000Z", error: "channel down" });
+      await store.updateDelivery(recorded.id, { channel: "log", status: "failed", attemptedAt: "2026-10-18T10:00:01.000Z", error: "channel down" });
+      await store.updateDelivery(recorded.id, { channel: "phone", status: "delivered", attemptedAt: "2026-10-18T10:00:02.000Z" });
 
       const stored = (await store.list()).find((known) => known.id === recorded.id);
-      expect(stored?.delivery).toEqual({ status: "failed", attemptedAt: "2026-10-18T10:00:01.000Z", error: "channel down" });
+      expect(stored?.deliveries).toEqual([
+        { channel: "phone", status: "delivered", attemptedAt: "2026-10-18T10:00:02.000Z" },
+        { channel: "log", status: "failed", attemptedAt: "2026-10-18T10:00:01.000Z", error: "channel down" },
+      ]);
       expect(stored).not.toHaveProperty("detail");
+      expect(stored).not.toHaveProperty("artifacts");
+    });
+
+    it("keeps a notification no channel selects, with no deliveries", async () => {
+      const recorded = await store.record(cause(), notification({ deliveries: [] }));
+
+      expect((await store.list()).find((known) => known.id === recorded.id)?.deliveries).toEqual([]);
+    });
+
+    it("refuses an outcome for an unknown notification or a channel it was not recorded for", async () => {
+      const recorded = await store.record(cause(), notification());
+
+      await expect(store.updateDelivery(crypto.randomUUID(), { channel: "phone", status: "delivered" })).rejects.toThrow(/unknown notification/);
+      await expect(store.updateDelivery(recorded.id, { channel: "pager", status: "delivered" })).rejects.toThrow(/channel pager/);
     });
 
     it("lists notifications newest first, up to a limit", async () => {

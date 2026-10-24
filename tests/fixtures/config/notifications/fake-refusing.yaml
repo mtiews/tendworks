@@ -1,0 +1,10 @@
+apiVersion: tendworks.dev/v1
+kind: NotificationChannel
+metadata:
+  name: fake-refusing
+spec:
+  # Refuses every notification, so the end-to-end tests see a failed delivery next to a delivered one.
+  integration: fake
+  events: [run.completed]
+  fake:
+    refuse: true

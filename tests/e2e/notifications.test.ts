@@ -15,7 +15,7 @@ async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, tim
 }
 
 describe("notifications on the compose stack", () => {
-  it("records and delivers a notification when a run completes", { timeout: 60_000 }, async () => {
+  it("records a notification when a run completes and delivers it to every channel that selects it, with the status per channel", { timeout: 60_000 }, async () => {
     const { data: started } = await client.POST("/runs", {
       body: { workflow: "hello-agent", input: { issue: { number: 9, title: "Notify me" } } },
     });
@@ -23,14 +23,19 @@ describe("notifications on the compose stack", () => {
 
     const notification = await waitFor<Notification>("notification for the run", async () => {
       const { data } = await client.GET("/notifications");
-      return data?.items.find((item) => item.runId === started!.id && item.delivery.status !== "pending");
+      return data?.items.find((item) => item.runId === started!.id && item.deliveries.every(({ status }) => status !== "pending"));
     });
 
     expect(notification).toMatchObject({
       kind: "run.completed",
       runId: started!.id,
       title: `Run ${started!.id} of hello-agent completed`,
-      delivery: { status: "delivered" },
+      artifacts: [],
+      // The fixture channels (tests/fixtures/config/notifications): one delivers, one refuses.
+      deliveries: [
+        { channel: "fake-log", status: "delivered", attemptedAt: expect.any(String) },
+        { channel: "fake-refusing", status: "failed", attemptedAt: expect.any(String), error: "the fake channel refuses every notification" },
+      ],
     });
     const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
     expect(run?.status).toBe("completed");

@@ -32,6 +32,15 @@ it("never gives the platform's issue tracker token to the worker, which starts t
   expect(environment("worker")).not.toContain("TENDWORKS_PLATFORM_GITHUB_TOKEN");
 });
 
+it("gives platform secrets, such as the Pushover token and user key, to the server only", () => {
+  const platformSecrets = (service: string) => environment(service).filter((name) => name.startsWith("TENDWORKS_PLATFORM_"));
+
+  expect(platformSecrets("server")).toEqual(expect.arrayContaining(["TENDWORKS_PLATFORM_PUSHOVER_TOKEN", "TENDWORKS_PLATFORM_PUSHOVER_USER"]));
+  for (const service of Object.keys(compose.services).filter((name) => name !== "server")) expect(platformSecrets(service), service).toEqual([]);
+  // deploy/.env.example offers them, as platform secrets an agent profile cannot reference.
+  expect(Object.keys(operatorVariables)).toEqual(expect.arrayContaining(["TENDWORKS_PLATFORM_PUSHOVER_TOKEN", "TENDWORKS_PLATFORM_PUSHOVER_USER"]));
+});
+
 it("hands deploy/.env as a whole only to the agent secrets exporter, which reaches no network", () => {
   // Every TENDWORKS_AGENT_* line in deploy/.env reaches the worker without a compose edit,
   // through a file the exporter writes with agent secrets only (ADR 0008).
