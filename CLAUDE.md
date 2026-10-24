@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0021) is implemented; its acceptance on the operator's Ubuntu host (issue #66) is pending, then `v0.2.0` is tagged (release notes: `docs/releases/v0.2.0.md`).
+**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0021) is done and accepted (#66; release `v0.2.0`, notes: `docs/releases/v0.2.0.md`). Milestone 3 (generic platform: workspaces, triggers, notifications; spec: issue #71, ADR 0022–0025) is designed; its tickets follow.
 
 ## Commands
 
@@ -24,6 +24,7 @@ Types in `packages/shared` are generated from `contracts/` and never committed o
 | [docs/platform-implementation.md](docs/platform-implementation.md) | tech stack, repo structure, walking skeleton components, open items |
 | [docs/software-factory.md](docs/software-factory.md) | first application on Tendworks: value stream, roles, quality gates, autonomy levels |
 | [docs/operator-guide.md](docs/operator-guide.md) | running Tendworks on your own Linux host: install, configuration, secrets, access, known gaps, operations |
+| [docs/sandbox-images.md](docs/sandbox-images.md) | building sandbox images with your own tooling on top of the Tendworks images (example: Flutter/Dart) |
 
 Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision changes, update the docs in the same change.
 
@@ -80,6 +81,8 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 3. **Milestone 1c – web UI:** React + Vite SPA under `/ui/` of the server, signed in with an API token until OIDC (ADR 0018): status, runs with live transcripts, approvals, notifications, chats; localhost only.
 
 After the skeleton, **milestone 2 – clean single-host deployment on Linux** (Ubuntu 24.04, Docker Engine): tagged releases, no default tokens, restart policies, versioned schema migrations per domain, backup and restore scripts, sandboxes named per installation with orphan clean-up, the platform MCP server through an MCP-only gateway (ADR 0019), remote access only through a TLS layer in front of localhost (ADR 0020). The operator guide (`docs/operator-guide.md`) covers its whole lifecycle; each release gets notes in `docs/releases/<tag>.md` naming migrations and configuration changes.
+
+Then **milestone 3 – generic platform**: workspaces declared once by name (`git` on any host with their own credential, or `directory` under operator-allowed roots; ADR 0022), trigger bindings that start a workflow per workspace from pluggable trigger sources (`schedule`, `github-issues`; ADR 0023), no pull request integration in the platform — agents report pull requests as artifacts, a generic human step waits where needed (ADR 0024) — and notification channels with Pushover (ADR 0025); a platform assistant plus optional read-only workspace assistants. Nothing is in production: no migrations, docs describe the target state only.
 
 Build order (slices S0–S5) and skeleton rules: [docs/platform-implementation.md](docs/platform-implementation.md#walking-skeleton-build-order-milestone-1).
 

@@ -1,6 +1,6 @@
 # The platform merges pull requests through a gate on the control plane API
 
-Status: accepted; the request shape (`{ pullRequest, policy }`) and the rule that workflows name their policy are superseded by ADR 0012 (the-merge-gate-decides-by-the-run-and-waits-for-approval-requests): the request names the run, and the gate takes the policy from the configuration.
+Status: superseded by ADR 0024 (the-platform-has-no-pull-request-integration).
 
 The merge after the agent step is a workflow step the platform performs, never the agent and never inside a sandbox. The platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`) lives only in the server bundle (ADR 0008 (secret-references-resolve-against-the-platform-environment), `tests/architecture/secrets.test.ts`), but workflows run in the worker. So the step calls the public control plane API, `POST /pull-requests/merge { pullRequest, policy }` (`contracts/openapi/control-plane.yaml`), with the DSL's built-in `call: http`:
 

@@ -482,13 +482,31 @@ The former roadmap steps 2–6 move back by one.
 - restores from a backup;
 - leaves no orphaned sandboxes or volumes.
 
+**Milestone 3 – generic platform: workspaces, triggers, notifications (design review of 24 Oct 2026, spec #71)**
+
+The platform serves many repositories and use cases with three generic building blocks:
+
+- **Workspaces** are declared once, by name: `git` on any host with the workspace's own credential, or a `directory` under roots the operator allows (ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). A workspace may enable a workspace assistant, read-only by default; the platform assistant answers questions about the platform.
+- **Trigger bindings** start a workflow per workspace when their trigger fires (`schedule`, `github-issues`), with trigger sources as pluggable implementations behind a port (ADR 0023 (trigger-bindings-start-a-workflow-per-workspace-from-pluggable-sources)).
+- **Notifications** reach the operator through notification channels, Pushover first, carrying the run's artifacts (ADR 0025 (notification-channels-deliver-selected-events-through-adapters)).
+
+The platform has no pull request integration. Agents open pull requests themselves and report them as artifacts; a generic human step waits for decisions where a workflow continues after a human action (ADR 0024 (the-platform-has-no-pull-request-integration)).
+
+**Success criterion (milestone 3):**
+
+- A real repository declared as a workspace gets an issue worked by `develop-issue` through the issue trigger.
+- The Pushover message on the operator's phone opens the pull request.
+- A scheduled workflow runs over the workspace.
+- A workspace assistant with `write: false` answers about the repository and cannot push.
+
 1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
 2. **Clean single-host deployment on Linux (milestone 2).** As refined below: tagged releases, secure defaults, schema migrations, backup and restore, sandbox clean-up, the platform MCP server on Linux, access from the operator's devices through a TLS layer.
-3. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
-4. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
-5. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
-6. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
-7. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
+3. **Generic platform: workspaces, triggers, notifications (milestone 3).** As refined below: named workspaces (git, directory) with their own credentials, trigger bindings over workspaces with pluggable sources, no pull request integration, a generic human step, notification channels with Pushover, workspace assistants.
+4. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
+5. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
+6. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
+7. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
+8. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
 
 **Fitness functions (run in CI, protect openness)**
 
