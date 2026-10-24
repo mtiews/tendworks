@@ -49,7 +49,6 @@ export async function migrate(database: MigrationDatabase, { schema, migrations 
   const connection = await database.connect();
   // Serialises concurrent starts (several workers, or two bundles sharing a domain such as
   // the event bus): the first migrates, the others find the store at the latest version.
-  // The key is the one the stores locked before versioned migrations.
   const lock = `${schema}.migrate`;
   try {
     await connection.query("select pg_advisory_lock(hashtext($1))", [lock]);

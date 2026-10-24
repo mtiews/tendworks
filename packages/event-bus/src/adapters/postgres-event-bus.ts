@@ -12,16 +12,14 @@ export interface SqlTransaction {
 // their open transaction to `publish`, which is why they must share the database.
 /**
  * The bus's schema, one migration per change (docs/platform-implementation.md,
- * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
- * migrations; its `if not exists` statements adopt such a store with its data.
+ * "Schema migrations").
  */
 export const eventBusMigrations: readonly Migration[] = [
   {
     version: 1,
     name: "initial",
     sql: `
-create schema if not exists event_bus;
-create table if not exists event_bus.events (
+create table event_bus.events (
   position   bigserial primary key,
   source     text not null,
   id         text not null,
@@ -30,8 +28,8 @@ create table if not exists event_bus.events (
   created_at timestamptz not null default now(),
   unique (source, id)
 );
-create index if not exists events_type_position on event_bus.events (type, position);
-create table if not exists event_bus.subscriptions (
+create index events_type_position on event_bus.events (type, position);
+create table event_bus.subscriptions (
   name     text primary key,
   position bigint not null default 0
 );

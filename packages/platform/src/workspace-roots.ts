@@ -56,7 +56,35 @@ export function resolveWorkspaceDirectory(path: string, roots: readonly string[]
   return realRoots.some((root) => isStrictlyUnder(directory, root)) ? { directory } : outside;
 }
 
-function isStrictlyUnder(path: string, root: string): boolean {
-  const rest = relative(root, path);
-  return rest !== "" && rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+/**
+ * Why a workspace's spec (ADR 0022) cannot be used beyond what its schema checks, or
+ * undefined when it can: a directory must resolve strictly under one of `roots`
+ * ({@link resolveWorkspaceDirectory}), and git credentials are only sent over `https://`
+ * (without credentials, `http://` and `file:///` are fine). Both configuration loaders
+ * call it, so server and worker refuse the same workspaces at startup.
+ */
+export function workspaceProblem(
+  spec: { git?: { url: string } | undefined; directory?: { path: string } | undefined; credentials?: unknown },
+  roots: readonly string[],
+): string | undefined {
+  if (spec.git && spec.credentials !== undefined && !spec.git.url.startsWith("https://")) {
+    return `credentials need an https:// URL, but git.url is ${spec.git.url}; the credential would leave the sandbox unencrypted or go nowhere`;
+  }
+  const resolved = spec.directory ? resolveWorkspaceDirectory(spec.directory.path, roots) : undefined;
+  return resolved && "problem" in resolved ? resolved.problem : undefined;
+}
+
+/** The path functions {@link isStrictlyUnder} compares with: Node's for this host (default), or `posix` for paths of a Linux host. */
+export type PathFlavor = Pick<typeof posix, "relative" | "isAbsolute" | "sep">;
+
+const NATIVE: PathFlavor = { relative, isAbsolute, sep };
+
+/**
+ * Whether `path` lies strictly under `root`, lexically: inside it and not the root itself,
+ * after resolving `..`. Shared by the workspace roots check, the directory claims of the
+ * agent runtime and the sandbox adapter's bind check (with `posix`, for host paths).
+ */
+export function isStrictlyUnder(path: string, root: string, flavor: PathFlavor = NATIVE): boolean {
+  const rest = flavor.relative(root, path);
+  return rest !== "" && rest !== ".." && !rest.startsWith(`..${flavor.sep}`) && !flavor.isAbsolute(rest);
 }

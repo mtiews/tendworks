@@ -4,7 +4,7 @@ import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflo
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 import { enabledAssistant } from "@tendworks/platform";
-import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
+import { workspaceProblem } from "@tendworks/platform/workspace-roots";
 
 // The control plane reads the configuration folder and validates every document
 // against the JSON Schema of its kind (contracts/schemas), so mistakes surface at
@@ -140,10 +140,9 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     if (!check(file, schemaFile, document)) continue;
     if (kind === "Workspace") {
       const workspace = document as unknown as Workspace.Workspace;
-      const { directory } = workspace.spec;
-      const resolved = directory ? resolveWorkspaceDirectory(directory.path, workspaceRoots) : undefined;
-      if (resolved && "problem" in resolved) {
-        issues.push(`${file}: workspace '${workspace.metadata.name}': ${resolved.problem}`);
+      const problem = workspaceProblem(workspace.spec, workspaceRoots);
+      if (problem) {
+        issues.push(`${file}: workspace '${workspace.metadata.name}': ${problem}`);
         continue;
       }
       const existing = workspaces.get(workspace.metadata.name);

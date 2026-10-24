@@ -1,5 +1,5 @@
 import type * as acp from "@agentclientprotocol/sdk";
-import { listsPlatformMcpServer, PLATFORM_MCP_SERVER, type SecretResolver } from "@tendworks/platform";
+import { createSecretResolver, listsPlatformMcpServer, PLATFORM_MCP_SERVER, type SecretResolver } from "@tendworks/platform";
 import type { A2A } from "@tendworks/shared";
 import { openAcpSession, runAcpTurn, type AcpSession, type AcpSessionOptions, type AcpTurn } from "../acp/acp-turn.js";
 import type { LoadedAgentProfile } from "../agent-profiles.js";
@@ -93,7 +93,7 @@ export function createClaudeCodeHarness({
   credential,
   baseUrl,
   skills = new Map(),
-  secrets = { resolve: () => undefined, problem: (name) => `secret ${name} is not set` },
+  secrets = createSecretResolver("agent", {}),
   keepAliveMs = 60_000,
   timeoutMs = 60 * 60_000,
   platformMcp,
@@ -131,9 +131,9 @@ export function createClaudeCodeHarness({
     const env: Record<string, string> = {};
     const unresolved: string[] = [];
     for (const [variable, { secretRef }] of Object.entries(profile.spec.env ?? {})) {
-      const value = secrets.resolve(secretRef.name);
-      if (value) env[variable] = value;
-      else unresolved.push(secrets.problem(secretRef.name) ?? `secret ${secretRef.name} is not set`);
+      const problem = secrets.problem(secretRef.name);
+      if (problem === undefined) env[variable] = secrets.require(secretRef.name);
+      else unresolved.push(problem);
     }
     if (unresolved.length > 0) return { failure: failed(`agent profile ${profile.metadata.name}: ${unresolved.join("; ")}`) };
     return { env };

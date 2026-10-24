@@ -125,6 +125,22 @@ describe("notifier", () => {
     expect(notification).not.toHaveProperty("artifacts");
   });
 
+  it("links an approval request's links in its notification, so a channel's tap opens the first", async () => {
+    const { store, notifier } = setup();
+    const links = [
+      { title: "Pull request", url: "https://git.example/acme/app/pull/7" },
+      { title: "Release notes", url: "https://git.example/acme/app/releases/1.4" },
+    ];
+
+    await notifier.handle(approvalRequested({ ...request, links }, request.createdAt));
+
+    const [notification] = await store.list();
+    expect(notification?.artifacts).toEqual([
+      { name: "Pull request", url: "https://git.example/acme/app/pull/7" },
+      { name: "Release notes", url: "https://git.example/acme/app/releases/1.4" },
+    ]);
+  });
+
   it("delivers to every channel that selects the notification's kind, and only to those", async () => {
     const phone = quiet();
     const pager = quiet();

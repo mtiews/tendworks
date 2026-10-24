@@ -3,7 +3,7 @@ import { promisify } from "node:util";
 import pg from "pg";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { describeEventBus } from "../event-bus.suite.js";
-import { createPostgresEventBus, eventBusMigrations, migrateEventBus, type SqlTransaction } from "./postgres-event-bus.js";
+import { createPostgresEventBus, migrateEventBus, type SqlTransaction } from "./postgres-event-bus.js";
 
 /* Runs the shared event bus suite against a throwaway Postgres container. */
 
@@ -101,29 +101,4 @@ it("delivers each event once when two instances share a subscription", async () 
 
   await vi.waitFor(() => expect(received).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
   await Promise.all([first.close(), second.close()]);
-});
-
-it("adopts a store created before versioned migrations, with its events", async () => {
-  await pool.query("create database adopted");
-  const adopted = new pg.Pool({ connectionString: `postgres://postgres:test@${address}/adopted` });
-  try {
-    // Before versioned migrations, the store ran today's schema (migration 1) on every start.
-    await adopted.query(eventBusMigrations[0]!.sql);
-    const type = `dev.tendworks.test.${crypto.randomUUID()}`;
-    const event = { id: `${type}:1`, source: "/tendworks/test", type, data: { n: 1 } };
-    const before = createPostgresEventBus({ pool: adopted, pollIntervalMs: 60_000, retryDelayMs: 10 });
-    await adopted.query("begin");
-    await before.publish(adopted, event);
-    await adopted.query("commit");
-    await before.close();
-
-    expect(await migrateEventBus(adopted)).toEqual({ from: 0, to: eventBusMigrations.length });
-    const after = createPostgresEventBus({ pool: adopted, pollIntervalMs: 60_000, retryDelayMs: 10 });
-    const received: unknown[] = [];
-    after.subscribe<typeof event>(`sub-${crypto.randomUUID()}`, async (e) => void received.push(e.data), { types: [type] });
-    await vi.waitFor(() => expect(received).toEqual([{ n: 1 }]));
-    await after.close();
-  } finally {
-    await adopted.end();
-  }
 });

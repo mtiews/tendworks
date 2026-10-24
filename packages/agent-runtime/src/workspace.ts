@@ -1,13 +1,12 @@
-import { isAbsolute, relative, sep } from "node:path";
-import { enabledAssistant, type SecretResolver, type WorkspaceAssistant } from "@tendworks/platform";
-import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
+import { createSecretResolver, enabledAssistant, type SecretResolver, type WorkspaceAssistant } from "@tendworks/platform";
+import { isStrictlyUnder, resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 import type { A2A, Workspace as Kind } from "@tendworks/shared";
 import type { TranscriptRecord } from "./transcripts/transcript-store.js";
 
 /** Message metadata key of the workspace a task asks for (contracts/schemas/a2a.schema.yaml#/$defs/workspace). */
 export const WORKSPACE = "dev.tendworks/workspace";
 
-/** What the message that starts a task asks for: a configured workspace by name, and the branch to work on. */
+/** What the message that starts a task asks for: a configured workspace by name, the branch to work on, and whether the task may write. */
 export type WorkspaceRequest = A2A.Workspace;
 
 /** What one agent session asks of its workspace. */
@@ -92,7 +91,7 @@ export interface GitWorkspaceSettings {
 }
 
 /** For a repository without a credential: resolves nothing. */
-const NO_SECRETS: SecretResolver = { resolve: () => undefined, problem: (name) => `secret ${name} is not set` };
+const NO_SECRETS: SecretResolver = createSecretResolver("agent", {});
 
 /** The user name git sends with a token unless the workspace names one. */
 const DEFAULT_USERNAME = "x-access-token";
@@ -111,8 +110,9 @@ export function createGitWorkspace({ name, url, defaultBranch, credentials }: Gi
       let exposed: Record<string, string> = {};
       if (credentials) {
         const secret = credentials.secretRef.name;
-        const value = secrets.resolve(secret);
-        if (!value) return { problem: secrets.problem(secret) ?? `secret ${secret} is not set` };
+        const problem = secrets.problem(secret);
+        if (problem !== undefined) return { problem };
+        const value = secrets.require(secret);
         credential = { TENDWORKS_GIT_USERNAME: credentials.username ?? DEFAULT_USERNAME, TENDWORKS_GIT_PASSWORD: value };
         exposed = credentials.env === undefined ? {} : { [credentials.env]: value };
       }
@@ -149,7 +149,7 @@ export interface DirectoryClaims {
 
 export function createDirectoryClaims(): DirectoryClaims {
   const claims = new Map<string, string>();
-  const overlap = (a: string, b: string) => a === b || isInside(a, b) || isInside(b, a);
+  const overlap = (a: string, b: string) => a === b || isStrictlyUnder(a, b) || isStrictlyUnder(b, a);
   return {
     claim(directory, holder) {
       for (const [claimed, by] of claims) if (by !== holder && overlap(claimed, directory)) return by;
@@ -160,11 +160,6 @@ export function createDirectoryClaims(): DirectoryClaims {
       if (claims.get(directory) === holder) claims.delete(directory);
     },
   };
-}
-
-function isInside(path: string, directory: string): boolean {
-  const rest = relative(directory, path);
-  return rest !== "" && rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
 }
 
 export interface DirectoryWorkspaceSettings {
@@ -276,12 +271,18 @@ fi`;
 export function workspaceRequestOf(message: A2A.Message): { request?: WorkspaceRequest } | { problem: string } {
   const value = message.metadata?.[WORKSPACE];
   if (value === undefined) return {};
-  const { name, branch, ...rest } = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
-  const valid = typeof name === "string" && NAME.test(name) && (branch === undefined || (typeof branch === "string" && BRANCH.test(branch)));
+  const { name, branch, write, ...rest } = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  const valid =
+    typeof name === "string" &&
+    NAME.test(name) &&
+    (branch === undefined || (typeof branch === "string" && BRANCH.test(branch))) &&
+    (write === undefined || typeof write === "boolean");
   if (!valid || Object.keys(rest).length > 0) {
-    return { problem: `message metadata ${WORKSPACE} must be { name, branch? } with the name of a configured workspace and a branch without whitespace or a leading dash` };
+    return {
+      problem: `message metadata ${WORKSPACE} must be { name, branch?, write? } with the name of a configured workspace, a branch without whitespace or a leading dash and write true or false`,
+    };
   }
-  return { request: { name, ...(branch === undefined ? {} : { branch }) } };
+  return { request: { name, ...(branch === undefined ? {} : { branch }), ...(write === undefined ? {} : { write }) } };
 }
 
 // Same rules as the contract: no value can pass as an option.

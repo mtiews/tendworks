@@ -66,8 +66,6 @@ $defs:
         $ref: '#/$defs/schedule'
       github-issues:
         $ref: '#/$defs/githubIssuesTrigger'
-      fake:
-        $ref: '#/$defs/fakeTrigger'
   schedule:
     title: TriggerSchedule
     description: >-
@@ -145,21 +143,6 @@ $defs:
         $ref: '#/$defs/duration'
       token:
         $ref: '#/$defs/secretRef'
-  fakeTrigger:
-    title: FakeTrigger
-    description: >-
-      Serves the listed items to every workspace of the binding at every interval, for
-      tests and demos.
-    type: object
-    required: [every]
-    additionalProperties: false
-    properties:
-      every:
-        $ref: '#/$defs/duration'
-      items:
-        type: array
-        items:
-          $ref: '#/$defs/item'
   item:
     title: TriggerItem
     description: >-

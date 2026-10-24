@@ -24,7 +24,7 @@ import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerG
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
 import { readContract } from "./support/contracts.js";
-import { TRIGGER_SOURCES } from "./support/trigger-sources.js";
+import { TRIGGER_SOURCES, withFakeBindings } from "./support/trigger-sources.js";
 import { openApiContract } from "./support/openapi-contract.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
@@ -657,7 +657,7 @@ describe("control plane: the API token", () => {
 describe("control plane: triggers, through the trigger gateway", () => {
   it("lists the configured trigger bindings", async () => {
     const gateway = createTriggerGateway({
-      bindings: configuration.triggerBindings,
+      bindings: withFakeBindings(configuration.triggerBindings),
       workspaces: configuration.workspaces,
       sources: TRIGGER_SOURCES,
       store: createInMemoryFiringStore(),
@@ -671,7 +671,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-nightly-check", "playground-ready-for-agent", "schedule-over-two-workspaces"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-nightly-check", "playground-ready-for-agent", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 

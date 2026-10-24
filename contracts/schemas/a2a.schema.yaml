@@ -245,3 +245,11 @@ $defs:
         type: string
         pattern: ^[^-\s]\S*$
         description: Branch the agent works on; fixed per run, so a retry updates the same branch.
+      write:
+        type: boolean
+        default: true
+        description: >-
+          `false` makes the workspace read-only for the task, as for a chat with an assistant
+          that may not write: the workspace's credential reaches only the checkout, never the
+          agent session (so the agent cannot push), and a directory workspace is mounted
+          read-only.

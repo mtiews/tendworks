@@ -8,7 +8,7 @@ Delivery is configured with the kind `NotificationChannel`:
 - `pushover`: `token` and `user` as secret references to platform secrets, optional `priority`;
 - `events`: the events this channel receives, out of `approval.requested`, `run.failed` and `run.completed`.
 
-Each notification goes to every channel that selects its event, and its delivery status is recorded per channel. A failed delivery is visible in the notification list. Notifications of finished runs carry the run's reported artifacts; Pushover uses the first artifact link as the message URL, so a tap opens it.
+Each notification goes to every channel that selects its event, and its delivery status is recorded per channel. A failed delivery is visible in the notification list. Notifications of finished runs carry the run's reported artifacts; notifications of approval requests carry the request's links the same way. Pushover uses the first link as the message URL, so a tap opens it.
 
 ## Considered Options
 

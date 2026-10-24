@@ -16,6 +16,9 @@
       "path": "../../packages/health"
     },
     {
+      "path": "../../packages/platform"
+    },
+    {
       "path": "../../packages/shared"
     }
   ]

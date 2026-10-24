@@ -32,9 +32,7 @@ export function createGithubIssuesSource(
       if (!workspace) throw new Error("github-issues is checked per workspace, but this check names none");
       const repository = repositories.get(workspace.metadata.name);
       if (!repository) throw new Error(`workspace '${workspace.metadata.name}' is not one of the binding's workspaces`);
-      const name = settings.token.secretRef.name;
-      const token = secrets.resolve(name);
-      if (!token) throw new Error(secrets.problem(name) ?? `secret ${name} is not set`);
+      const token = secrets.require(settings.token.secretRef.name);
       const issues = await createGithubIssueTracker({ token, ...(fetch ? { fetch } : {}) }).findIssues({
         repository,
         ...(settings.labels ? { labels: settings.labels } : {}),

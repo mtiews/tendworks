@@ -22,6 +22,8 @@ export interface SecretResolver {
   resolve(name: string): string | undefined;
   /** Why `name` does not resolve, naming the secret but never a value; undefined when it does. */
   problem(name: string): string | undefined;
+  /** The secret's value; throws an `Error` with its {@link problem} when it does not resolve. */
+  require(name: string): string;
 }
 
 /** Where secrets are looked up: an environment, or a function asked again at every reference. */
@@ -39,14 +41,21 @@ export function createSecretResolver(consumer: SecretConsumer, environment: Secr
   const prefix = SECRET_PREFIXES[consumer];
   const allowed = (name: string) => name.startsWith(prefix) && name.length > prefix.length;
   const lookup = (name: string) => (typeof environment === "function" ? environment() : environment)[name] || undefined;
+  const resolve = (name: string) => (allowed(name) ? lookup(name) : undefined);
+  const problem = (name: string) => {
+    if (!allowed(name)) {
+      const [kind, consumers] = DESCRIPTIONS[consumer];
+      return `${name} is not ${kind}: ${consumers} may only reference ${prefix}* secrets`;
+    }
+    return lookup(name) ? undefined : `secret ${name} is not set`;
+  };
   return {
-    resolve: (name) => (allowed(name) ? lookup(name) : undefined),
-    problem(name) {
-      if (!allowed(name)) {
-        const [kind, consumers] = DESCRIPTIONS[consumer];
-        return `${name} is not ${kind}: ${consumers} may only reference ${prefix}* secrets`;
-      }
-      return lookup(name) ? undefined : `secret ${name} is not set`;
+    resolve,
+    problem,
+    require(name) {
+      const value = resolve(name);
+      if (value === undefined) throw new Error(problem(name) ?? `secret ${name} is not set`);
+      return value;
     },
   };
 }

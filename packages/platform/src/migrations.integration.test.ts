@@ -39,13 +39,12 @@ afterAll(async () => {
 let schemas = 0;
 const newSchema = () => `migration_test_${++schemas}`;
 
-/** Migration 1 as today's stores create it: idempotent `if not exists` statements. */
+/** Migration 1: the schema. `migrate` creates the schema itself before running it. */
 const initial = (schema: string): Migration => ({
   version: 1,
   name: "initial",
   sql: `
-    create schema if not exists ${schema};
-    create table if not exists ${schema}.notes (id text primary key, body text not null);
+    create table ${schema}.notes (id text primary key, body text not null);
   `,
 });
 const addAuthor = (schema: string): Migration => ({
@@ -82,18 +81,6 @@ it("leaves a store at the latest version as it is", async () => {
   await migrate(pool, { schema, migrations: [initial(schema), addAuthor(schema)] });
 
   expect(await migrate(pool, { schema, migrations: [initial(schema), addAuthor(schema)] })).toEqual({ from: 2, to: 2 });
-});
-
-it("adopts a store created without versions, with its data, through an idempotent migration 1", async () => {
-  const schema = newSchema();
-  // What stores looked like before versioned migrations: tables and data, no version table.
-  await pool.query(initial(schema).sql);
-  await pool.query(`insert into ${schema}.notes (id, body) values ('a', 'from before')`);
-
-  const result = await migrate(pool, { schema, migrations: [initial(schema), addAuthor(schema)] });
-
-  expect(result).toEqual({ from: 0, to: 2 });
-  expect(await notes(schema)).toEqual([{ id: "a", body: "from before", author: "unknown" }]);
 });
 
 it("rolls a failing migration back, keeps the previous version and reports which one failed", async () => {

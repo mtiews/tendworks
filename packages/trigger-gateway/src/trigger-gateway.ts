@@ -3,7 +3,7 @@ import type { TriggerBinding, TriggerGateway as Contract, Workspace } from "@ten
 import type { FiringKey, FiringStore } from "./firings/firing-store.js";
 import type { RunStarter } from "./runs.js";
 import { checkSchedule, latestExecution, nextExecution } from "./schedule.js";
-import type { TriggerItem, TriggerSource, TriggerSources } from "./sources/trigger-source.js";
+import type { TriggerItem, TriggerKind, TriggerSettings, TriggerSource, TriggerSourceContext, TriggerSourceFactory, TriggerSources } from "./sources/trigger-source.js";
 import { triggerFired } from "./trigger-events.js";
 
 export type Trigger = Contract.components["schemas"]["trigger"];
@@ -113,7 +113,7 @@ export function createTriggerGateway({
         continue;
       }
       for (const item of items) {
-        const key: FiringKey = { binding: name, workspace: workspaceName ?? "", item: item.key };
+        const key: FiringKey = { binding: name, ...scope, item: item.key };
         if (!(await store.claim(key))) continue;
         // A firing starts a trace; the run and all its events belong to it.
         const traceparent = newTraceparent();
@@ -205,20 +205,35 @@ function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, s
   const name = binding.metadata.name;
   const [kind, settings] = Object.entries(binding.spec.trigger)[0] ?? [];
   if (kind === undefined) throw new Error(`trigger binding '${name}' has no trigger`);
-  const create = Object.hasOwn(sources, kind) ? sources[kind] : undefined;
-  if (!create) {
+  if (!isDeployed(kind, sources)) {
     const deployed = Object.keys(sources).sort().join(", ") || "none";
     throw new Error(`trigger binding '${name}' has a trigger of kind '${kind}', but no trigger source '${kind}' is deployed (deployed: ${deployed})`);
   }
   const bound = (binding.spec.workspaces ?? []).flatMap((workspace) => workspaces.get(workspace) ?? []);
   let source: TriggerSource;
   try {
-    source = create(settings as never, { secrets, workspaces: bound });
+    source = createSource(kind, settings, sources, { secrets, workspaces: bound });
     checkSchedule(source.schedule);
   } catch (error) {
     throw new Error(`trigger binding '${name}': ${errorMessage(error)}`, { cause: error });
   }
   return { binding, kind, source };
+}
+
+/** Whether a factory is deployed for `kind`. */
+function isDeployed(kind: string, sources: TriggerSources): kind is TriggerKind {
+  return Object.hasOwn(sources, kind) && sources[kind as TriggerKind] !== undefined;
+}
+
+/**
+ * The source the factory of `kind` creates from a binding's settings. The binding schema
+ * has validated the settings for their kind when the configuration loaded; this is where
+ * that check becomes their type.
+ */
+function createSource<K extends TriggerKind>(kind: K, settings: unknown, sources: TriggerSources, context: TriggerSourceContext): TriggerSource {
+  const create: TriggerSourceFactory<TriggerSettings[K]> | undefined = sources[kind];
+  if (!create) throw new Error(`no trigger source '${kind}' is deployed`);
+  return create(settings as TriggerSettings[K], context);
 }
 
 function describeFailure({ workspace, item, error }: CheckResult["failed"][number]): string {

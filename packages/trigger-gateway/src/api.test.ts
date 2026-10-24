@@ -1,20 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createFakeTriggerSource, createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway, createTriggerGatewayApi } from "./index.js";
+import { createFakeTriggerSource, createInMemoryFiringStore, fakeTriggerBinding, createInMemoryRunStarter, createTriggerGateway, createTriggerGatewayApi } from "./index.js";
 
 describe("trigger gateway API", () => {
   it("lists the triggers with their next scheduled execution", async () => {
     const gateway = createTriggerGateway({
-      bindings: [
-        {
-          apiVersion: "tendworks.dev/v1",
-          kind: "TriggerBinding",
-          metadata: { name: "ready-issues" },
-          spec: {
-            workflow: "implement-issue",
-            trigger: { fake: { every: { seconds: 30 } } },
-          },
-        },
-      ],
+      bindings: [fakeTriggerBinding({ name: "ready-issues" }, { workflow: "implement-issue", trigger: { every: { seconds: 30 } } })],
       sources: { fake: createFakeTriggerSource },
       store: createInMemoryFiringStore(),
       runs: createInMemoryRunStarter(),

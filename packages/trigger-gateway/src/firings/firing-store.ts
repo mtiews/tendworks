@@ -7,8 +7,8 @@ export type Evaluation = Contract.components["schemas"]["evaluation"];
 /** One item a binding fired for in one workspace; the unit of deduplication. */
 export interface FiringKey {
   binding: string;
-  /** Name of the workspace, or empty for a binding without workspaces. */
-  workspace: string;
+  /** Name of the workspace; absent for a binding without workspaces. */
+  workspace?: string;
   /** The item's stable key, e.g. `acme/playground#7`. */
   item: string;
 }

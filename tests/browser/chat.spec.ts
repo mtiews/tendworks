@@ -11,7 +11,7 @@ async function send(page: Page, text: string) {
   await conversation(page).getByRole("button", { name: "Send" }).click();
 }
 
-// The scripted ACP agent (images/sandbox-scripted-acp) answers a prompt starting with "chat:"
+// The workspace scripted-playground's assistant, the scripted ACP agent (images/sandbox-scripted-acp), answers a prompt starting with "chat:"
 // at once with every chat prompt so far, and works on any other prompt until cancelled.
 test("a chat followed in two tabs is written from both, cancelled and ended", async ({ page, openTab }) => {
   test.skip(!credentialSelected(), "the scripted ACP agent needs TEND_CLAUDE_CODE_CREDENTIAL");
@@ -19,7 +19,7 @@ test("a chat followed in two tabs is written from both, cancelled and ended", as
 
   await page.goto("/ui/chats/new");
   await signIn(page, API_TOKEN);
-  await page.getByRole("combobox", { name: "Chat with" }).selectOption("scripted-assistant");
+  await page.getByRole("combobox", { name: "Chat with" }).selectOption("Workspace scripted-playground (read-only)");
   await page.getByRole("textbox", { name: "Message" }).fill("chat: My name is Ada.");
   await page.getByRole("button", { name: "Start chat" }).click();
   await expect(page).toHaveURL(/\/ui\/chats\/[^/]+$/);

@@ -24,11 +24,7 @@ function deliveryFor(spec: NotificationChannel.NotificationChannelSpec, { secret
   const settings = spec.pushover!;
   // Resolved at each delivery, so a missing secret fails that delivery (naming the
   // secret, never a value) instead of the start.
-  const resolve = ({ secretRef: { name } }: SecretRef) => {
-    const value = secrets.resolve(name);
-    if (!value) throw new Error(secrets.problem(name) ?? `secret ${name} is not set`);
-    return value;
-  };
+  const resolve = ({ secretRef: { name } }: SecretRef) => secrets.require(name);
   return createPushoverNotificationDelivery({
     credentials: () => ({ token: resolve(settings.token), user: resolve(settings.user) }),
     ...(settings.priority === undefined ? {} : { priority: settings.priority }),

@@ -15,7 +15,7 @@ import { stubGithubApi } from "@tendworks/trigger-source-github-issues/stub";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
-import { TRIGGER_SOURCES } from "./support/trigger-sources.js";
+import { TRIGGER_SOURCES, withFakeBindings } from "./support/trigger-sources.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
@@ -35,7 +35,7 @@ function platform() {
   const store = createInMemoryRunStore();
   const orchestration = createOrchestrationApi({ store, engine: createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() })) });
   const gateway = createTriggerGateway({
-    bindings: configuration.triggerBindings,
+    bindings: withFakeBindings(configuration.triggerBindings),
     workspaces: configuration.workspaces,
     sources: TRIGGER_SOURCES,
     store: createInMemoryFiringStore(),
@@ -139,7 +139,7 @@ describe("the github-issues trigger source with the starter configuration", () =
     };
     const runs = createInMemoryRunStarter();
     const gateway = createTriggerGateway({
-      bindings: bindings ? bindings(configuration) : configuration.triggerBindings,
+      bindings: bindings ? bindings(configuration) : withFakeBindings(configuration.triggerBindings),
       workspaces: configuration.workspaces,
       sources: { ...TRIGGER_SOURCES, "github-issues": (settings, context) => createGithubIssuesSource(settings, context, { fetch }) },
       store: createInMemoryFiringStore(),

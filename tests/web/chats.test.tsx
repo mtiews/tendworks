@@ -105,7 +105,7 @@ describe("chats page", () => {
 const posts = (requests: Request[], path: string) => requests.filter((request) => request.method === "POST" && new URL(request.url).pathname === path);
 
 describe("new chat", () => {
-  it("offers the profiles that allow chats and every workspace with an assistant, and starts a chat with the one chosen", async () => {
+  it("offers the profiles that allow chats except workspace assistants' profiles, and every workspace with an assistant, and starts a chat with the one chosen", async () => {
     const { agentRuntime, configuration } = platform();
     signedIn();
     const { user, platform: running } = renderApp({ path: "/ui/chats", agentRuntime, configuration });
@@ -115,7 +115,6 @@ describe("new chat", () => {
     expect(within(chatWith).getAllByRole("option").map((option) => option.textContent)).toEqual([
       "assistant",
       "reviewer",
-      "workspace-assistant",
       "Workspace app (read-only)",
       "Workspace notes (may write)",
     ]);

@@ -47,6 +47,14 @@ describe("secret references for platform integrations", () => {
     expect(secrets.resolve("TENDWORKS_PLATFORM_GITHUB_TOKEN")).toBe("platform-token");
   });
 
+  it("requires a secret: its value, or an error that names why it does not resolve, never a value", () => {
+    expect(secrets.require("TENDWORKS_PLATFORM_GITHUB_TOKEN")).toBe("platform-token");
+    expect(() => secrets.require("TENDWORKS_PLATFORM_MISSING")).toThrow(new Error("secret TENDWORKS_PLATFORM_MISSING is not set"));
+    expect(() => secrets.require("TENDWORKS_AGENT_GITHUB_TOKEN")).toThrow(
+      new Error("TENDWORKS_AGENT_GITHUB_TOKEN is not a platform secret: platform integrations may only reference TENDWORKS_PLATFORM_* secrets"),
+    );
+  });
+
   it.each(["TENDWORKS_AGENT_GITHUB_TOKEN", "TEND_DATABASE_URL"])("never resolves %s, which is not a platform integration secret", (name) => {
     expect(secrets.resolve(name)).toBeUndefined();
     expect(secrets.problem(name)).toBe(`${name} is not a platform secret: platform integrations may only reference TENDWORKS_PLATFORM_* secrets`);

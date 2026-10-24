@@ -24,7 +24,7 @@ export class InMemoryEventPublisher implements EventPublisher<TriggerFiredEvent[
 export function createInMemoryFiringStore(publisher = new InMemoryEventPublisher()): FiringStore & { publisher: InMemoryEventPublisher } {
   const firings = new Map<string, { runId?: string }>();
   const evaluations = new Map<string, Evaluation>();
-  const id = ({ binding, workspace, item }: FiringKey) => JSON.stringify([binding, workspace, item]);
+  const id = ({ binding, workspace, item }: FiringKey) => JSON.stringify([binding, workspace ?? null, item]);
   return {
     publisher,
     async claim(key) {

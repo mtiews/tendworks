@@ -48,5 +48,23 @@ export interface TriggerSourceContext {
  */
 export type TriggerSourceFactory<Settings> = (settings: Settings, context: TriggerSourceContext) => TriggerSource;
 
-/** The trigger sources deployed with the platform, by trigger kind (`schedule`, …). */
-export type TriggerSources = Readonly<Record<string, TriggerSourceFactory<never>>>;
+/** Settings of the test-only trigger kind `fake` (`createFakeTriggerSource`): the interval and the items it serves. */
+export interface FakeTriggerSettings {
+  every: TriggerBinding.Duration;
+  items?: TriggerItem[];
+}
+
+/**
+ * The settings of each trigger kind, by kind: the kinds of the binding schema
+ * (`TriggerBinding.Trigger`), plus the test-only kind `fake`, which the schema refuses.
+ */
+export type TriggerSettings = { [K in keyof TriggerBinding.Trigger]-?: Exclude<TriggerBinding.Trigger[K], undefined> } & { fake: FakeTriggerSettings };
+
+/** A trigger kind (`schedule`, …). */
+export type TriggerKind = keyof TriggerSettings;
+
+/**
+ * The trigger sources deployed with the platform: for a kind, at most one factory, taking
+ * that kind's settings. A binding of a kind without a factory stops the start.
+ */
+export type TriggerSources = { readonly [K in TriggerKind]?: TriggerSourceFactory<TriggerSettings[K]> };

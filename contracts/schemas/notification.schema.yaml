@@ -31,8 +31,9 @@ $defs:
         type: array
         description: >-
           For a finished run (`run.completed`, `run.failed`): the artifacts its steps
-          reported, in step order, e.g. the pull request the agent opened. Channels that
-          can link one link the first.
+          reported, in step order, e.g. the pull request the agent opened. For
+          `approval.requested`: the request's links (`title` as `name`). Channels that can
+          link one link the first.
         items:
           $ref: './run.schema.yaml#/$defs/stepArtifact'
       createdAt:

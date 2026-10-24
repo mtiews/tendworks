@@ -196,6 +196,29 @@ describe("tend run get", () => {
     expect(stdout).toMatch(/^checks\s+\{"passed":3\}$/m);
   });
 
+  it("shows the artifacts each step's agent reported, e.g. the pull request it opened", async () => {
+    const withArtifacts: Run = {
+      ...completed,
+      id: "run-with-artifacts",
+      steps: [
+        { ...completed.steps[0]!, artifacts: [{ name: "Pull request #7", url: "https://git.example/acme/app/pull/7" }, { name: "Preview", url: "https://preview.example/7" }] },
+        { ...completed.steps[0]!, reference: "/do/1/notify", taskId: "task-2" },
+      ],
+    };
+    const { stdout } = await tend(["run", "get", withArtifacts.id], [withArtifacts]);
+
+    expect(stdout).toMatch(/^STEP\s+ARTIFACT\s+URL$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+Pull request #7\s+https:\/\/git\.example\/acme\/app\/pull\/7$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+Preview\s+https:\/\/preview\.example\/7$/m);
+    expect(stdout).not.toMatch(/^\/do\/1\/notify\s+\S+\s+https?:/m);
+  });
+
+  it("shows no artifacts table for a run without artifacts", async () => {
+    const { stdout } = await tend(["run", "get", completed.id]);
+
+    expect(stdout).not.toMatch(/ARTIFACT/);
+  });
+
   it("shows why a failed run failed", async () => {
     const { exitCode, stdout } = await tend(["run", "get", failed.id]);
 

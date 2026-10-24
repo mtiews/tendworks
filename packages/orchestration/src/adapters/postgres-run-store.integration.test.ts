@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import pg from "pg";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { afterAll, beforeAll } from "vitest";
 import { describeRunStore } from "../runs/run-store.suite.js";
-import { createPostgresOutbox, createPostgresRunStore, migrateOrchestrationStore, orchestrationMigrations } from "./postgres-run-store.js";
+import { createPostgresOutbox, createPostgresRunStore, migrateOrchestrationStore } from "./postgres-run-store.js";
 
 /* Runs the shared run store suite against a throwaway Postgres container. */
 
@@ -43,27 +43,4 @@ afterAll(async () => {
 describeRunStore("Postgres", () => {
   const outbox = createPostgresOutbox(pool);
   return { store: createPostgresRunStore({ pool, publisher: outbox }), events: (runId) => outbox.events(runId) };
-});
-
-it("adopts a store created before versioned migrations, with its runs", async () => {
-  await pool.query("create database adopted");
-  const adopted = new pg.Pool({ connectionString: `postgres://postgres:test@${address}/adopted` });
-  try {
-    // Before versioned migrations, the store ran today's schema (migration 1) on every start.
-    await adopted.query(orchestrationMigrations[0]!.sql);
-    const run = {
-      id: crypto.randomUUID(),
-      workflow: "hello",
-      status: "pending" as const,
-      input: { issue: { number: 7 } },
-      steps: [],
-      createdAt: "2026-10-18T10:00:00.000Z",
-    };
-    await createPostgresRunStore({ pool: adopted, publisher: createPostgresOutbox(adopted) }).create(run);
-
-    expect(await migrateOrchestrationStore(adopted)).toEqual({ from: 0, to: orchestrationMigrations.length });
-    expect(await createPostgresRunStore({ pool: adopted }).get(run.id)).toEqual(run);
-  } finally {
-    await adopted.end();
-  }
 });

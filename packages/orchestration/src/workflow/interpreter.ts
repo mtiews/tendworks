@@ -1,4 +1,4 @@
-import type { A2A, Workflow } from "@tendworks/shared";
+import type { A2A, ControlPlane, Workflow } from "@tendworks/shared";
 import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, WORKSPACE, type AgentTaskExecutor } from "./agent-task-executor.js";
 import { evaluate, evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
 import type { EventInbox } from "./event-inbox.js";
@@ -240,20 +240,10 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
       throw new TaskFailure({ type: `${ERROR_TYPES}runtime`, status: 500, instance: reference, title: "This runtime names no control plane" });
     }
     const question = evaluateTemplate(task.with, input, variables(input)) as Workflow.ApprovalArguments;
-    const content = await send(
-      {
-        method: "POST",
-        endpoint: `${controlPlaneUrl}/approval-requests`,
-        headers: {},
-        body: { run: options.runId, step: reference, ...question, links: question.links ?? [] },
-      },
-      reference,
-    );
-    const answered = isObject(content) ? content : {};
-    const policy = typeof answered.policy === "string" ? { policy: answered.policy } : {};
-    if (answered.decision === "allow") return { decision: "allow", ...policy, outcome: "continue" };
-    const request = isObject(answered.approvalRequest) ? answered.approvalRequest : undefined;
-    if (answered.decision !== "ask" || typeof request?.id !== "string" || !Array.isArray(request.answers)) {
+    const body: AskApprovalRequest = { run: options.runId, step: reference, ...question, links: question.links ?? [] };
+    const content = await send({ method: "POST", endpoint: `${controlPlaneUrl}/approval-requests`, headers: {}, body }, reference);
+    const outcome = approvalOutcomeOf(content);
+    if (!outcome) {
       throw new TaskFailure({
         type: `${ERROR_TYPES}communication`,
         status: 502,
@@ -262,6 +252,9 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
         detail: JSON.stringify(content),
       });
     }
+    const policy = outcome.policy === undefined ? {} : { policy: outcome.policy };
+    if (outcome.decision === "allow") return { decision: "allow", ...policy, outcome: "continue" };
+    const request = outcome.approvalRequest;
     const id = request.id;
     let answer: unknown = request.answer;
     if (request.status !== "decided") {
@@ -273,7 +266,7 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
       );
       answer = (event.data as Record<string, unknown>).answer;
     }
-    const chosen = (request.answers as unknown[]).find((offered) => isObject(offered) && offered.label === answer) as Workflow.ApprovalAnswerArgument | undefined;
+    const chosen = request.answers.find((offered) => offered.label === answer);
     if (!chosen) {
       throw new TaskFailure({
         type: `${ERROR_TYPES}runtime`,
@@ -339,6 +332,28 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
     if (failure instanceof TaskFailure) return { status: "failed", error: failure.error, steps };
     throw failure;
   }
+}
+
+type AskApprovalRequest = ControlPlane.components["schemas"]["AskApprovalRequest"];
+type ApprovalOutcome = ControlPlane.components["schemas"]["ApprovalOutcome"];
+type ApprovalRequest = NonNullable<ApprovalOutcome["approvalRequest"]>;
+
+/**
+ * The control plane's answer to `POST /approval-requests` (`ApprovalOutcome`), checked as
+ * far as the human step relies on it: a decision, and with `ask` the request with its id,
+ * status and answers. Undefined for anything else.
+ */
+function approvalOutcomeOf(
+  content: unknown,
+): { decision: "allow"; policy?: string } | { decision: "ask"; policy?: string; approvalRequest: ApprovalRequest } | undefined {
+  if (!isObject(content)) return undefined;
+  const policy = typeof content.policy === "string" ? { policy: content.policy } : {};
+  if (content.decision === "allow") return { decision: "allow", ...policy };
+  const request = content.approvalRequest;
+  const isAnswer = (answer: unknown) => isObject(answer) && typeof answer.label === "string" && (answer.outcome === "continue" || answer.outcome === "stop");
+  if (content.decision !== "ask" || !isObject(request) || typeof request.id !== "string") return undefined;
+  if ((request.status !== "pending" && request.status !== "decided") || !Array.isArray(request.answers) || !request.answers.every(isAnswer)) return undefined;
+  return { decision: "ask", ...policy, approvalRequest: request as ApprovalRequest };
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

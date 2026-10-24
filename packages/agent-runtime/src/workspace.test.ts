@@ -290,6 +290,7 @@ describe("workspaceRequestOf", () => {
     [{ name: "app", branch: "-x" }],
     [{ name: "app", branch: "a b" }],
     [{ name: "-app" }],
+    [{ name: "app", write: "no" }],
     [{ repository: "https://git.example/acme/app.git" }],
     ["app"],
   ])("names the problem with a malformed workspace %j", (workspace) => {

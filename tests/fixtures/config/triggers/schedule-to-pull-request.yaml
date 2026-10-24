@@ -1,0 +1,15 @@
+# The whole automated chain with fakes, for the end-to-end tests: every 30 seconds the tick
+# starts one fake-develop-issue run in the fake-playground workspace; its fake agent
+# reports a pull request, and the run ends with it. No account needed. (The test-only fake
+# trigger kind, which serves fixed items, is not deployed with the platform; the contract
+# tests cover deduplication per item with it.)
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: schedule-to-pull-request
+spec:
+  workflow: fake-develop-issue
+  workspaces: [fake-playground]
+  trigger:
+    schedule:
+      every: { seconds: 30 }

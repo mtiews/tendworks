@@ -1,4 +1,5 @@
 import { posix } from "node:path";
+import { isStrictlyUnder } from "@tendworks/platform/workspace-roots";
 import type { Sandbox as Contract } from "@tendworks/shared";
 
 type Schemas = Contract.components["schemas"];
@@ -112,7 +113,7 @@ export function assertMounts(volumes: readonly VolumeMount[], binds: readonly Bi
   }
   for (const { hostPath, path } of binds) {
     assertMountPath(path);
-    if (!bindRoots.some((root) => isStrictlyUnder(hostPath, root))) {
+    if (!bindRoots.some((root) => isBindableUnder(hostPath, root))) {
       throw new SandboxError("invalid-request", `host directory ${JSON.stringify(hostPath)} is not under a directory this installation allows binds from`);
     }
   }
@@ -125,11 +126,12 @@ function assertMountPath(path: string): void {
   if (mountPath(path) === "/") throw new SandboxError("invalid-request", "nothing can be mounted on /");
 }
 
-/** Whether `hostPath` is a normalized absolute path strictly under `root` (both host paths, POSIX). */
-function isStrictlyUnder(hostPath: string, root: string): boolean {
+/** Whether `hostPath` is a normalized absolute path strictly under `root`, which is not / (both host paths, POSIX). */
+function isBindableUnder(hostPath: string, root: string): boolean {
   const normalized = mountPath(posix.normalize(hostPath));
   if (!posix.isAbsolute(hostPath) || normalized !== mountPath(hostPath)) return false;
-  return normalized.startsWith(`${mountPath(posix.normalize(root))}/`);
+  const normalizedRoot = mountPath(posix.normalize(root));
+  return posix.isAbsolute(root) && normalizedRoot !== "/" && isStrictlyUnder(normalized, normalizedRoot, posix);
 }
 
 /** A mount path without trailing slashes. */

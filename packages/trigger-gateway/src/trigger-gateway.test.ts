@@ -2,6 +2,8 @@ import type { TriggerBinding, Workspace } from "@tendworks/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createFakeTriggerSource,
+  fakeTriggerBinding,
+  type FakeTriggerSettings,
   createInMemoryFiringStore,
   createInMemoryRunStarter,
   createTriggerGateway,
@@ -30,18 +32,14 @@ const workspace = (name: string): Workspace.Workspace => ({
 });
 const WORKSPACES = [workspace("app"), workspace("web")];
 
-const binding = (items: TriggerItem[], spec: Partial<Binding["spec"]> = {}): Binding => ({
-  apiVersion: "tendworks.dev/v1",
-  kind: "TriggerBinding",
-  metadata: { name: "ready-issues" },
-  spec: { workflow: "implement-issue", trigger: { fake: { every: { minutes: 5 }, items } }, ...spec },
-});
+const binding = (items: TriggerItem[], spec: Partial<Omit<Binding["spec"], "trigger">> = {}): Binding =>
+  fakeTriggerBinding({ name: "ready-issues" }, { workflow: "implement-issue", trigger: { every: { minutes: 5 }, items }, ...spec });
 
 /** A fake source whose items a test changes between checks, and which records what it was asked. */
 function liveSource(items: (check: SourceCheck) => TriggerItem[] | Promise<TriggerItem[]>) {
   const checks: { at: string; workspace?: string }[] = [];
   const sources: TriggerSources = {
-    fake: (settings: TriggerBinding.FakeTrigger) => ({
+    fake: (settings: FakeTriggerSettings) => ({
       schedule: { every: settings.every },
       async items(check) {
         checks.push({ at: check.at.toISOString(), ...(check.workspace ? { workspace: check.workspace.metadata.name } : {}) });
@@ -284,7 +282,7 @@ describe("trigger gateway", () => {
   });
 
   it("lists its bindings by name with their kind, workspaces, schedule and next execution", async () => {
-    const hourly: Binding = { ...binding([]), metadata: { name: "hourly" }, spec: { ...binding([]).spec, trigger: { fake: { every: { hours: 1 } } } } };
+    const hourly = fakeTriggerBinding({ name: "hourly" }, { workflow: "implement-issue", trigger: { every: { hours: 1 } } });
     const { gateway } = setup([binding([], { workspaces: ["app", "web"] }), hourly]);
 
     expect(await gateway.triggers()).toEqual([
@@ -380,7 +378,7 @@ describe("trigger gateway", () => {
     const runs = createInMemoryRunStarter();
     const given: string[][] = [];
     const picky: TriggerSources = {
-      fake: (settings: TriggerBinding.FakeTrigger, { workspaces }) => {
+      fake: (settings: FakeTriggerSettings, { workspaces }) => {
         given.push(workspaces.map((workspace) => workspace.metadata.name));
         if (workspaces.some((workspace) => workspace.metadata.name === "web")) throw new Error("workspace 'web' cannot be read");
         return createFakeTriggerSource(settings);

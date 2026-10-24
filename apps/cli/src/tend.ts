@@ -508,7 +508,9 @@ function formatRun(run: Run): string {
   ];
   const withTranscript = run.steps.filter((step) => step.transcript);
   const transcripts = withTranscript.length > 0 ? `\n${table([["STEP", "TRANSCRIPT"], ...withTranscript.map((step) => [step.reference, step.transcript!])])}` : "";
-  return `${table(fields)}\n${table(steps)}${transcripts}${formatOutput(run.output)}`;
+  const artifacts = run.steps.flatMap((step) => (step.artifacts ?? []).map((artifact) => [step.reference, artifact.name, artifact.url]));
+  const reported = artifacts.length > 0 ? `\n${table([["STEP", "ARTIFACT", "URL"], ...artifacts])}` : "";
+  return `${table(fields)}\n${table(steps)}${transcripts}${reported}${formatOutput(run.output)}`;
 }
 
 /** The run's output, one row per top-level field; single-line strings as they are, anything else as JSON. */

@@ -231,11 +231,12 @@ spec:
     enabled: true
 ```
 
-- **`git.url`**: any git host, `https://` or `http://` without credentials in it; **`git.defaultBranch`**: what the checkout starts from.
+- **`git.url`**: any git host, `https://` or `http://` without credentials in it; with `credentials`, only `https://` (server and worker refuse to start otherwise, so the token never crosses the network unencrypted); **`git.defaultBranch`**: what the checkout starts from.
 - **`credentials.secretRef`**: the workspace's **agent token**, an agent secret (`TENDWORKS_AGENT_*` in `deploy/.env`). Git clones and pushes with it through the sandbox image's credential helper, for the repository's host only. `credentials.username` defaults to `x-access-token`, which GitHub tokens accept; other hosts may want your user name.
 - **`credentials.env`**: the session also sees the token under this name, e.g. `GH_TOKEN`, so the developer can open its pull request with `gh`. Without it, only git has the token.
 - Without `credentials`, the agent can clone a public repository but not push.
-- **The workflow picks the branch**: `develop-issue` works on `tendworks/issue-<n>-<first 8 characters of the run id>`, `check-workspace` on `tendworks/check-<…>`, both created from the default branch; a workflow that names no branch stays on the default branch.
+- **The workflow picks the branch**: `develop-issue` works on `tendworks/issue-<n>-<first 8 characters of the run id>`, created from the default branch; a workflow that names no branch stays on the default branch.
+- **The workflow picks the write mode**: a task may write by default; one that asks for its workspace with `write: false`, like `check-workspace`, gets the credential for the checkout only (not in the session, push URL nowhere) and a directory mounted read-only, as a read-only workspace assistant does.
 - Each task clones into its own session volume; a task in a workspace whose secret is not set fails with `workspace: secret <NAME> is not set`.
 
 **Your own repository:**
@@ -269,7 +270,7 @@ What the platform enforces:
 
 - The path must lie strictly under the root, also after resolving `..` and symbolic links; the root itself is refused. Anything else stops server and worker at startup (`workspace 'app': directory … is not under a workspace root`), and a link changed later fails the session before its sandbox starts.
 - Only one agent session at a time works in a directory, or in a directory inside or around it; a second one fails with `directory … is in use by another agent session (task …)`. The worker keeps these claims in memory, so a restart frees them.
-- Read-write by default; sessions that may only read (a read-only workspace assistant) get it read-only.
+- Read-write by default; sessions that may only read (a read-only workspace assistant, a workflow task with `write: false` such as `check-workspace`) get it read-only.
 - A directory workspace has no credentials and no branches: the agent works on the files as they are.
 - The platform never deletes or cleans the directory: it is as recoverable as you keep it (a git working copy is a good choice).
 
@@ -303,7 +304,7 @@ spec:
 
 - `cron`: five fields, evaluated in UTC; or `every` with `days`, `hours`, `minutes`, `seconds` (aligned to multiples of the interval since the Unix epoch).
 - Each execution is one item (`key` = the execution's time), so it starts one run per workspace.
-- `check-workspace` has the developer build and test the workspace and report (`tend run get <id>` shows the report under OUTPUT). Every run is a paid agent session: remove `suspend: true` only when you want that.
+- `check-workspace` has the developer build and test the workspace's default branch, read-only, and report (`tend run get <id>` shows the report under OUTPUT). Every run is a paid agent session: remove `suspend: true` only when you want that.
 
 #### `github-issues`
 
@@ -336,7 +337,7 @@ spec:
 Human interaction records a notification for every approval request (`approval.requested`) and every completed or failed run (`run.completed`, `run.failed`), then delivers it to each notification channel that selects its event (ADR 0025). Without a channel, notifications are only recorded.
 
 - **Artifacts:** notifications of finished runs carry what the run's steps reported, e.g. `develop-issue`'s pull request; the first artifact is the message's link.
-- **Approval requests** list their answers and the `tend approval answer` command; they carry no link.
+- **Approval requests** list their answers and the `tend approval answer` command, and their links: a tap opens the first, e.g. the pull request to merge.
 - **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Notifications page of the web UI. A failed delivery is not retried.
 - **Several channels**, e.g. a second one for failures only with an alert that bypasses quiet hours:
 
@@ -373,7 +374,7 @@ Human interaction records a notification for every approval request (`approval.r
 5. In your configuration, rename `notifications/phone.yaml.example` to `notifications/phone.yaml` (choose `events` and `priority` there).
 6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names it: `configuration: notification channels phone (pushover: approval.requested, run.failed, run.completed)`.
 7. Check the delivery: start `hello-developer` ([Everyday commands](#everyday-commands)). When it completes, the phone shows `Run <id> of hello-developer completed`, and `tend notification list` shows `phone delivered`. A failure shows there as `phone failed for <id>: …`: `secret TENDWORKS_PLATFORM_PUSHOVER_TOKEN is not set` (the secret did not reach the server: `up -d --wait`, not `restart`) or `Pushover refused the message (HTTP 400): …` with Pushover's reason (e.g. a wrong token or user key).
-8. Check the link, by hand: let `develop-issue` work an issue ([First test workloads](#first-test-workloads), 3). When the run completes, tap its message on the phone: it opens the pull request that `tend run get <id>` lists as `pullRequest`.
+8. Check the link, by hand: let `develop-issue` work an issue ([First test workloads](#first-test-workloads), 3). When the run completes, tap its message on the phone: it opens the pull request that `tend run get <id>` lists as `pullRequest` and under ARTIFACT.
 
 ### Waiting for a human: the human step and policies
 
@@ -533,7 +534,7 @@ Rotate the API token at once when a device that was signed in is lost.
 - **Sandboxes and the API port.** On a Linux engine, sandboxes don't reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). On Docker Desktop they reach it through `host.docker.internal`, and only the tokens guard the API. Sandboxes still reach everything else the bridge routes to, including your LAN and the internet.
 - **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network and can reach each other on it (ADR 0019). Other sandboxes stay apart. Through the gateway, sandboxes reach only `/mcp`, read-only.
 - **The agent token can merge** on repositories without rulesets ([GitHub access](#before-the-first-real-run-github-access)); only its role description tells the agent not to.
-- **Workflow tasks always hold the workspace's agent token.** Only a workspace assistant with `write: false` works without it; an agent in a workflow, also `check-workspace`, could push with it, and only its task text tells it not to.
+- **Workflow tasks may write by default.** An agent in a workflow holds its workspace's agent token unless the workflow asks for the workspace with `write: false` (as `check-workspace` does); review a workflow before you bind it.
 - **Token in the browser.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device" (ADR 0018). Don't tick that on a shared browser.
 - **Socket proxy.** It filters paths, not request bodies: whoever reaches it can create a privileged container, i.e. become root on the host. Only the worker reaches it (ADR 0001).
 - **Isolation class `container`** shares the host kernel. Put an outer boundary around it (dedicated VM) when agents process untrusted content such as public issues, or verify [gVisor](#optional-gvisor).
@@ -601,13 +602,12 @@ docker compose -f deploy/compose.yaml stop temporal-ui
 | Area | State |
 | --- | --- |
 | Stack, sandboxes, MCP gateway, token checks, clean-up, installation names, backup and restore | covered by the end-to-end tests on Ubuntu CI (`.github/workflows/ci.yml`, scripted agent in real sandboxes) |
-| Workspaces, trigger bindings, notification channels, the human step, workspace assistants | covered by the end-to-end tests with the scripted agent, a local bare repository and fake trigger and notification adapters; not end to end: a workspace assistant with `write: true`, a read-only chat on a directory workspace (both covered by harness tests), the real GitHub issue source and Pushover (contract tests against stubs) |
+| Workspaces, trigger bindings, notification channels, the human step, workspace assistants | covered by the end-to-end tests with the scripted agent, a local bare repository, schedule triggers and fake notification adapters; not end to end: a workspace assistant with `write: true`, a read-only chat on a directory workspace (both covered by harness tests), the real GitHub issue source and Pushover (contract tests against stubs) |
 | Real Claude Code, a real repository, Pushover, `assistant` and workspace chats on a Linux host | documented smoke tests and the [acceptance checklist](#acceptance-checklist) |
 | `gvisor` isolation class | not verified yet (issue #17); [optional step](#optional-gvisor) |
 | Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes (issue #23) |
 | Retention | nothing ages out: store, transcripts and the volumes of chats nobody ends grow forever (follow-up of issue #48). Watch the disk (`docker system df -v`) |
-| Notifications | delivered only to the configured notification channels (Pushover, or `fake` to the server log); without one they are only recorded. A failed delivery is not retried. Approval request messages carry no link |
-| Workflow tasks and the agent token | an agent in a workflow always holds its workspace's agent token; there is no read-only workflow task yet ([Residual risks](#residual-risks)) |
+| Notifications | delivered only to the configured notification channels (Pushover, or `fake` to the server log); without one they are only recorded. A failed delivery is not retried |
 | Forges | the issue trigger reads github.com only; git workspaces work on any host |
 
 ### Optional: gVisor

@@ -21,8 +21,9 @@ interface Choice {
  * Starts a chat (ADR 0015, `tend chat`): with one of the profiles that allow chats (those
  * with `chat` in `GET /agents`), e.g. the platform assistant, or with the assistant of a
  * workspace that has one (`GET /workspaces`, ADR 0022), and the first message. A profile
- * chosen directly works in an empty workspace, also one that serves as a workspace's
- * assistant. The platform decides; its reason for a refusal shows here.
+ * that serves as a workspace's assistant is offered only through its workspaces (except
+ * the platform assistant), so the operator picks the project; `tend chat <profile>` still
+ * starts it in an empty workspace. The platform decides; its reason for a refusal shows here.
  */
 export function NewChat() {
   const { client, canChange } = useApi();
@@ -30,8 +31,10 @@ export function NewChat() {
   const { data: choices, error } = usePolling(
     useCallback(async () => {
       const [agents, workspaces] = await Promise.all([answer(client.GET("/agents")), answer(client.GET("/workspaces"))]);
+      // A workspace assistant's profile is offered through its workspace, not on its own.
+      const assistantProfiles = new Set(workspaces.items.flatMap(({ assistant }) => (assistant ? [assistant.profile] : [])));
       const profiles = agents.items
-        .filter((profile) => profile.chat !== undefined)
+        .filter((profile) => profile.chat !== undefined && (profile.name === PLATFORM_ASSISTANT || !assistantProfiles.has(profile.name)))
         .map(({ name }): Choice => ({ value: `agent:${name}`, label: name, chatWith: { agent: name } }));
       const assistants = workspaces.items.flatMap(({ name, assistant }): Choice[] =>
         assistant ? [{ value: `workspace:${name}`, label: `Workspace ${name} (${assistant.write ? "may write" : "read-only"})`, chatWith: { workspace: name } }] : [],

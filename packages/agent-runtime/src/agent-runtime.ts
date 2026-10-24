@@ -304,15 +304,15 @@ export function createAgentRuntime({
     return task && facts ? { task, facts } : undefined;
   }
 
-  /** The configured workspace the message that starts a task names, with its branch; a problem for a malformed or unknown one. */
-  function workspaceFor(message: A2A.Message): { workspace?: Workspace; branch?: string } | { problem: string } {
+  /** The configured workspace the message that starts a task names, with its branch and read-only when it asks so; a problem for a malformed or unknown one. */
+  function workspaceFor(message: A2A.Message): { workspace?: Workspace; branch?: string; readOnlyWorkspace?: boolean } | { problem: string } {
     const requested = workspaceRequestOf(message);
     if ("problem" in requested) return requested;
     if (!requested.request) return {};
-    const { name, branch } = requested.request;
+    const { name, branch, write } = requested.request;
     const workspace = workspaces(name);
     if (!workspace) return { problem: `no workspace '${name}' is configured` };
-    return { workspace, ...(branch === undefined ? {} : { branch }) };
+    return { workspace, ...(branch === undefined ? {} : { branch }), ...(write === false ? { readOnlyWorkspace: true } : {}) };
   }
 
   async function work(profile: LoadedAgentProfile, request: A2A.SendMessageRequest, { onTask }: SendMessageOptions = {}): Promise<A2A.Task> {

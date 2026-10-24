@@ -34,7 +34,7 @@ Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision chang
 - **A domain owns its data.** No shared tables, no cross-domain imports. Access only via published API or events.
 - **Every boundary is a contract.** Sync: OpenAPI 3.1 + JSON Schema. Async: CloudEvents (AsyncAPI 3). Agent boundary: A2A task model. Harness: ACP. Tools: MCP.
 - **Contract-first.** Change `contracts/` first, in the same PR as the services. Contract tests on both sides.
-- **Ports and adapters.** Products (Temporal, Postgres, Docker, Claude, NATS …) only behind adapters. Product names never appear in contracts or event types.
+- **Ports and adapters.** Products (Temporal, Postgres, Docker, Claude, NATS …) only behind adapters. Product names never appear in contracts or event types. The one exception is an adapter selector in configuration (e.g. `harness: claude-code`, trigger kind `github-issues`, `integration: pushover`), listed with a reason in `tests/architecture/product-names.ts` (ADR 0013, 0023, 0025); event schemas never have one.
 - **Every port has ≥ 2 implementations** (the second may be a fake used in tests).
 - **UI and CLI are just clients** of the public control plane API. No private endpoints, no CLI-only endpoints.
 - **Everything declarative and human-readable.** Config as YAML with `apiVersion/kind/metadata/spec` envelope (agent profiles: Markdown + frontmatter, skills: `SKILL.md`, policies: Rego + tests). Runtime state must be exportable (`-o yaml|json`).

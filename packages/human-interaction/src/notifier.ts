@@ -64,9 +64,16 @@ export function createNotifier({ store, channels, now = () => new Date() }: Noti
 function toNotification(event: NotifiedEvent, createdAt: string): Notification {
   const base = { id: crypto.randomUUID(), runId: event.runid, createdAt, deliveries: [] };
   if (event.type === "dev.tendworks.approval.requested") {
-    const { id, question, answers } = event.data;
+    const { id, question, answers, links } = event.data;
     const offered = answers.map(({ label }) => `"${label}"`).join(", ");
-    return { ...base, kind: "approval.requested", title: `Approval needed: ${question}`, detail: `Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"` };
+    return {
+      ...base,
+      kind: "approval.requested",
+      title: `Approval needed: ${question}`,
+      detail: `Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"`,
+      // The request's links, so a channel that links one opens the first, like a run's first artifact.
+      ...(links.length > 0 ? { artifacts: links.map(({ title, url }) => ({ name: title, url })) } : {}),
+    };
   }
   const { artifacts } = event.data;
   if (event.type === "dev.tendworks.run.completed") {

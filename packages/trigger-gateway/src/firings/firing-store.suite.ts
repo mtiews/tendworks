@@ -53,9 +53,22 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
     it("keeps keys of different workspaces apart, and a binding without workspaces apart from both", async () => {
       await context.store.claim(key);
 
+      const { workspace: _workspace, ...withoutWorkspace } = key;
       expect(await context.store.claim({ ...key, workspace: "web" })).toBe(true);
-      expect(await context.store.claim({ ...key, workspace: "" })).toBe(true);
-      expect(await context.store.claim({ ...key, workspace: "" })).toBe(false);
+      expect(await context.store.claim(withoutWorkspace)).toBe(true);
+      expect(await context.store.claim(withoutWorkspace)).toBe(false);
+    });
+
+    it("releases and records a key without a workspace like any other", async () => {
+      const { workspace: _workspace, ...withoutWorkspace } = key;
+      await context.store.claim(withoutWorkspace);
+      await context.store.release(withoutWorkspace);
+      expect(await context.store.claim(withoutWorkspace)).toBe(true);
+
+      await context.store.fired(withoutWorkspace, "run-1", event("run-1", withoutWorkspace));
+      await context.store.release(withoutWorkspace);
+
+      expect(await context.store.claim(withoutWorkspace)).toBe(false);
     });
 
     it("makes a released claim claimable again", async () => {

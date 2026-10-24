@@ -75,7 +75,8 @@ $defs:
         pattern: ^(?:https?://[^/@\s]+(?:/\S*)?|file:///\S+)$
         description: >-
           Clone URL: `https://` or `http://` without credentials in it, or `file:///` for a
-          repository the sandbox image carries.
+          repository the sandbox image carries. A workspace with `credentials` needs
+          `https://`; the configuration refuses it with another URL when it loads.
       defaultBranch:
         type: string
         pattern: ^[^-\s]\S*$

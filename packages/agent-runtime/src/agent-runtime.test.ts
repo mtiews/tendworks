@@ -176,6 +176,18 @@ describe("agent runtime: workspaces", () => {
     ]);
   });
 
+  it("hands the harness a read-only workspace when the message asks for it with write: false", async () => {
+    const { tasks, runtime } = recording();
+
+    await runtime.sendMessage("developer", inWorkspace({ name: "app", write: false }));
+    await runtime.sendMessage("developer", inWorkspace({ name: "app", write: true }));
+
+    expect(tasks.map(({ workspace, readOnlyWorkspace }) => [workspace, readOnlyWorkspace])).toEqual([
+      [app, true],
+      [app, undefined],
+    ]);
+  });
+
   it("refuses a workspace that is not configured, or a malformed one, without starting the agent", async () => {
     const { tasks, runtime } = recording();
 

@@ -492,6 +492,10 @@ importers:
         version: 8.23.1
 
   packages/platform:
+    dependencies:
+      yaml:
+        specifier: 2.9.1
+        version: 2.9.1
     devDependencies:
       '@types/pg':
         specifier: 8.23.1
@@ -505,6 +509,9 @@ importers:
       '@tendworks/health':
         specifier: workspace:*
         version: link:../health
+      '@tendworks/platform':
+        specifier: workspace:*
+        version: link:../platform
       '@tendworks/shared':
         specifier: workspace:*
         version: link:../shared

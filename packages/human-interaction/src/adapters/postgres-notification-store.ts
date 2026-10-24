@@ -6,16 +6,14 @@ import type { NotificationStore } from "../notification-store.js";
 // Human interaction owns the schema `human_interaction`; no other domain reads these tables.
 /**
  * Human interaction's schema, one migration per change (docs/platform-implementation.md,
- * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
- * migrations; its `if not exists` statements adopt such a store with its data.
+ * "Schema migrations").
  */
 export const humanInteractionMigrations: readonly Migration[] = [
   {
     version: 1,
     name: "initial",
     sql: `
-create schema if not exists human_interaction;
-create table if not exists human_interaction.notifications (
+create table human_interaction.notifications (
   position   bigserial unique,
   id         text primary key,
   cause      text not null unique,
@@ -27,7 +25,7 @@ create table if not exists human_interaction.notifications (
   created_at timestamptz not null,
   deliveries jsonb not null
 );
-create table if not exists human_interaction.approval_requests (
+create table human_interaction.approval_requests (
   position     bigserial unique,
   id           text primary key,
   run_id       text not null,
@@ -42,9 +40,9 @@ create table if not exists human_interaction.approval_requests (
   answer       text,
   created_at   timestamptz not null,
   decided_at   timestamptz,
+  traceparent  text,
   unique (run_id, step)
 );
-alter table human_interaction.approval_requests add column if not exists traceparent text;
 `,
   },
 ];

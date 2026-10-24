@@ -5,7 +5,7 @@ import { client } from "./support/control-plane.js";
 type Run = ControlPlane.components["schemas"]["run"];
 type Notification = ControlPlane.components["schemas"]["notification"];
 
-const BINDING = "fake-issue-to-pull-request"; // tests/fixtures/config/triggers, fake trigger source
+const BINDING = "schedule-to-pull-request"; // tests/fixtures/config/triggers, schedule every 30 seconds
 
 async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -17,22 +17,24 @@ async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, tim
   }
 }
 
-// The automated path of the walking skeleton with fakes only: a trigger reports an
-// issue from the fake trigger source, the fake agent reports a pull request, the run
-// completes with it after the agent step and a notification is recorded.
+// The automated path of the walking skeleton with fakes only: a schedule trigger fires,
+// the fake agent reports a pull request, the run completes with it after the agent step
+// and a notification is recorded. Deduplication per item is covered by the contract tests.
 describe("the automated chain on the compose stack, with fakes", () => {
-  it("goes from a matching issue to a run that completes with the reported pull request, and a notification", { timeout: 120_000 }, async () => {
+  it("goes from a trigger to a run that completes with the reported pull request, and a notification", { timeout: 120_000 }, async () => {
     const run = await waitFor<Run>("a completed run started by the trigger", async () => {
       const { data } = await client.GET("/runs");
       const found = data?.items.find((item) => item.startedBy?.kind === "trigger" && item.startedBy.binding === BINDING);
       return found && (found.status === "completed" || found.status === "failed") ? found : undefined;
     });
 
+    if (run.startedBy?.kind !== "trigger") throw new Error("the run was not started by the trigger");
+    const tick = run.startedBy.item.key;
     expect(run).toMatchObject({
       workflow: "fake-develop-issue",
       status: "completed",
-      input: { workspace: "fake-playground", item: { key: "chain/playground#201", number: 201 } },
-      startedBy: { kind: "trigger", binding: BINDING, workspace: "fake-playground", item: { key: "chain/playground#201", title: "Open a pull request" } },
+      input: { workspace: "fake-playground", item: { key: tick } },
+      startedBy: { kind: "trigger", binding: BINDING, workspace: "fake-playground", item: { key: tick, title: `Scheduled at ${tick}` } },
       steps: [
         {
           name: "implement",
@@ -62,9 +64,9 @@ describe("the automated chain on the compose stack, with fakes", () => {
 
     const { data: triggers } = await client.GET("/triggers");
     expect(triggers?.items.find((trigger) => trigger.name === BINDING)?.lastEvaluation).toMatchObject({ status: "succeeded" });
-    // One firing per item, binding and workspace: no second run for the same issue.
+    // One firing per tick, binding and workspace: no second run for the same tick.
     const { data: runs } = await client.GET("/runs");
-    expect(runs?.items.filter((item) => item.startedBy?.kind === "trigger" && item.startedBy.binding === BINDING)).toHaveLength(1);
+    expect(runs?.items.filter((item) => item.startedBy?.kind === "trigger" && item.startedBy.binding === BINDING && item.startedBy.item.key === tick)).toHaveLength(1);
   });
 
   it("lists the playground binding as suspended until it is given the platform token", async () => {

@@ -23,7 +23,7 @@ function developer() {
 }
 
 describe("example workflow check-workspace", () => {
-  it("asks the developer for a check that changes nothing, in the workspace the input names, on a branch of the run", async () => {
+  it("asks the developer for a check that changes nothing, in the workspace the input names, read-only on its default branch", async () => {
     const executor = developer();
 
     await runWorkflow(definition, { runId, input: { workspace: "playground", item: tick }, executor });
@@ -32,7 +32,7 @@ describe("example workflow check-workspace", () => {
     const message = executor.requests[0]!.request.message;
     const text = message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("\n");
     expect(text).toContain("Do not change, commit or push anything");
-    expect(message.metadata?.["dev.tendworks/workspace"]).toEqual({ name: "playground", branch: "tendworks/check-0b6c4c1e" });
+    expect(message.metadata?.["dev.tendworks/workspace"]).toEqual({ name: "playground", write: false });
   });
 
   it("completes with the agent's report and the tick it checked at", async () => {

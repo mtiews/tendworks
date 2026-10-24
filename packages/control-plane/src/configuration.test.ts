@@ -154,16 +154,19 @@ describe("loadConfiguration", () => {
       "triggers/a.yaml": trigger("ready", "build"),
       "triggers/b.yaml": trigger("ready", "build"),
       "triggers/c.yaml": trigger("ghostly", "ghost"),
-      "triggers/d.yaml": trigger("broken", "build", "fake: { every: { fortnights: 1 } }"),
-      "triggers/e.yaml": trigger("twice", "build", "schedule: { every: { minutes: 5 } }\n    fake: { every: { minutes: 5 } }"),
+      "triggers/d.yaml": trigger("broken", "build", "github-issues: { labels: [ready], every: { fortnights: 1 }, token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
+      "triggers/e.yaml": trigger("twice", "build", "schedule: { every: { minutes: 5 } }\n    github-issues: { labels: [ready], every: { minutes: 5 }, token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
       "triggers/f.yaml": trigger("unknown", "build", "webhook: { path: /hook }"),
+      "triggers/g.yaml": trigger("faked", "build", "fake: { every: { minutes: 5 } }"),
     });
 
     expect(issuesOf(dir)).toEqual([
       "triggers/b.yaml: trigger binding 'ready' is already defined in triggers/a.yaml",
-      "triggers/d.yaml: /spec/trigger/fake/every: unsupported property 'fortnights'",
+      "triggers/d.yaml: /spec/trigger/github-issues/every: unsupported property 'fortnights'",
       "triggers/e.yaml: /spec/trigger: must NOT have more than 1 properties",
       "triggers/f.yaml: /spec/trigger: unsupported property 'webhook'",
+      // The test-only kind fake is not deployed with the platform.
+      "triggers/g.yaml: /spec/trigger: unsupported property 'fake'",
       "triggers/c.yaml: trigger binding 'ghostly' starts workflow 'ghost', but no workflow 'ghost' is configured",
     ]);
   });
@@ -346,6 +349,21 @@ do:
       "workspaces/b.yaml: workspace 'app' is already defined in workspaces/a.yaml",
       expect.stringMatching(/^workspaces\/c\.yaml: \/spec\/git\/url: must match pattern/),
       `workspaces/d.yaml: /spec/credentials/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
+    ]);
+  });
+
+  it("refuses credentials for a git workspace whose URL is not https, and accepts http and file URLs without them", () => {
+    const keyed = "credentials: { secretRef: { name: TENDWORKS_AGENT_APP_TOKEN } }";
+    const dir = folder({
+      "workspaces/plain.yaml": workspace("plain", keyed).replace("https://", "http://"),
+      "workspaces/local.yaml": workspace("local", keyed).replace("https://git.example/acme/local.git", "file:///srv/repos/local.git"),
+      "workspaces/public.yaml": workspace("public").replace("https://", "http://"),
+      "workspaces/bundled.yaml": workspace("bundled").replace("https://git.example/acme/bundled.git", "file:///srv/repos/bundled.git"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "workspaces/local.yaml: workspace 'local': credentials need an https:// URL, but git.url is file:///srv/repos/local.git; the credential would leave the sandbox unencrypted or go nowhere",
+      "workspaces/plain.yaml: workspace 'plain': credentials need an https:// URL, but git.url is http://git.example/acme/plain.git; the credential would leave the sandbox unencrypted or go nowhere",
     ]);
   });
 
