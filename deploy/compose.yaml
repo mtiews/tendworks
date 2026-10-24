@@ -16,6 +16,18 @@ name: tendworks
 x-sandbox-images:
   claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-2
 
+# The workspace root (TEND_WORKSPACE_ROOTS, ADR 0022), mounted read-only into server and
+# worker at the same path as on the host: both check that a directory workspace lies under
+# it after resolving symbolic links and `..`, and the worker binds the real path into the
+# sandbox. Sandboxes reach only the workspace's own directory, never the root. The stack
+# mounts one root; without one, an empty directory stands in and nothing is allowed. (Server
+# and worker accept several roots separated by `:`, for deployments that mount each one.)
+x-workspace-root: &workspace-root
+  type: bind
+  source: ${TEND_WORKSPACE_ROOTS:-./no-workspace-roots}
+  target: ${TEND_WORKSPACE_ROOTS:-/no-workspace-roots}
+  read_only: true
+
 services:
   postgres:
     image: postgres:18.6-alpine
@@ -119,8 +131,11 @@ services:
       # There are no defaults: the server refuses to start without both (scripts/setup-env.sh).
       TEND_API_TOKEN: ${TEND_API_TOKEN:-}
       TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
+      # Directory workspaces must lie under this root (ADR 0022); the server refuses others at startup.
+      TEND_WORKSPACE_ROOTS: ${TEND_WORKSPACE_ROOTS:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      - *workspace-root
     ports:
       - "127.0.0.1:${TEND_PORT:-8080}:8080"
     depends_on:
@@ -197,8 +212,12 @@ services:
       # variable of deploy/.env, read from the file agent-secrets writes, again at every
       # reference. Only TENDWORKS_AGENT_* resolve; platform secrets never get here.
       TEND_AGENT_SECRETS_FILE: /var/lib/tendworks/agent-secrets/agent-secrets.json
+      # Directory workspaces (ADR 0022): only directories under this root are bound into
+      # sandboxes, after resolving links and `..` against the root mounted below.
+      TEND_WORKSPACE_ROOTS: ${TEND_WORKSPACE_ROOTS:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      - *workspace-root
       # Transcripts of agent sessions, kept outside the sandboxes.
       - transcripts:/var/lib/tendworks/transcripts
       - agent-secrets:/var/lib/tendworks/agent-secrets:ro

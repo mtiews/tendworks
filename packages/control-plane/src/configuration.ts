@@ -3,6 +3,7 @@ import { join } from "node:path";
 import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
+import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 
 // The control plane reads the configuration folder and validates every document
 // against the JSON Schema of its kind (contracts/schemas), so mistakes surface at
@@ -49,6 +50,15 @@ export function emptyConfiguration(overrides: Partial<Configuration> = {}): Conf
   return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], ...overrides };
 }
 
+export interface LoadConfigurationOptions {
+  /**
+   * The roots directory workspaces must lie under (`TEND_WORKSPACE_ROOTS`), as paths on
+   * the sandbox host that this process sees at the same path; none by default, which
+   * refuses every directory workspace.
+   */
+  workspaceRoots?: readonly string[];
+}
+
 let ajv: Ajv2020 | undefined;
 const validators = new Map<string, ValidateFunction>();
 
@@ -65,9 +75,10 @@ function validatorFor(schemaFile: string): ValidateFunction {
 /**
  * Reads and validates the configuration folder: workflows (YAML with a `document`),
  * agent profiles (`agents/*.md`, Markdown with YAML frontmatter) and every other YAML
- * document by its `kind`. Throws a {@link ConfigurationError} listing every issue.
+ * document by its `kind`. A directory workspace must lie under a workspace root, also
+ * after resolving `..` and symbolic links. Throws a {@link ConfigurationError} listing every issue.
  */
-export function loadConfiguration(dir: string): Configuration {
+export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConfigurationOptions = {}): Configuration {
   let files: string[];
   try {
     files = listFiles(dir);
@@ -128,6 +139,12 @@ export function loadConfiguration(dir: string): Configuration {
     if (!check(file, schemaFile, document)) continue;
     if (kind === "Workspace") {
       const workspace = document as unknown as Workspace.Workspace;
+      const { directory } = workspace.spec;
+      const resolved = directory ? resolveWorkspaceDirectory(directory.path, workspaceRoots) : undefined;
+      if (resolved && "problem" in resolved) {
+        issues.push(`${file}: workspace '${workspace.metadata.name}': ${resolved.problem}`);
+        continue;
+      }
       const existing = workspaces.get(workspace.metadata.name);
       if (existing) issues.push(`${file}: workspace '${workspace.metadata.name}' is already defined in ${existing.file}`);
       else workspaces.set(workspace.metadata.name, { file, workspace });
@@ -262,9 +279,31 @@ function isFixed(value: unknown): value is string {
 }
 
 function describe(errors: ErrorObject[]): string[] {
-  return errors
+  return closestBranches(errors)
     .filter((error) => error.keyword !== "if") // the failing branch reports the cause
     .map((error) => `${error.instancePath || "/"}: ${message(error)}`);
+}
+
+/**
+ * For a failed `oneOf`, only the errors of the branch that came closest (fewest errors,
+ * the first on a tie), e.g. a git workspace's bad URL rather than every reason it is not a
+ * directory workspace. A `oneOf` that failed because several branches matched keeps its own message.
+ */
+function closestBranches(errors: ErrorObject[]): ErrorObject[] {
+  let kept = errors;
+  for (const failed of errors.filter((error) => error.keyword === "oneOf")) {
+    const prefix = `${failed.schemaPath}/`;
+    const branches = new Map<string, ErrorObject[]>();
+    for (const error of kept) {
+      if (!error.schemaPath.startsWith(prefix)) continue;
+      const branch = error.schemaPath.slice(prefix.length).split("/")[0]!;
+      branches.set(branch, [...(branches.get(branch) ?? []), error]);
+    }
+    if (branches.size === 0) continue;
+    const closest = [...branches.values()].reduce((best, branch) => (branch.length < best.length ? branch : best));
+    kept = kept.filter((error) => error !== failed && (!error.schemaPath.startsWith(prefix) || closest.includes(error)));
+  }
+  return kept;
 }
 
 function message(error: ErrorObject): string {
@@ -273,6 +312,8 @@ function message(error: ErrorObject): string {
       return `unsupported property '${error.params.additionalProperty}'`;
     case "const":
       return `must be '${error.params.allowedValue}'`;
+    case "false schema":
+      return "is not allowed here";
     case "enum":
       return `${error.message} (${(error.params.allowedValues as unknown[]).join(", ")})`;
     default:

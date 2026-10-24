@@ -22,6 +22,9 @@
 //
 // A prompt that starts with "workspace:" answers with what the checkout in the working
 // directory is: "branch <current branch>" and the first line of its README.md.
+//
+// A prompt "write: <file>" writes <file> into the working directory and answers
+// "wrote <file>", or "cannot write <file>: <reason>" (e.g. on a read-only workspace).
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -70,6 +73,18 @@ const connection = acp
     }
     if (said.startsWith("workspace:")) {
       const text = describeCheckout(session.cwd);
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
+    if (said.startsWith("write:")) {
+      const name = said.slice(6).trim();
+      let text;
+      try {
+        writeFileSync(join(session.cwd, name), "written by the scripted agent\n");
+        text = `wrote ${name}`;
+      } catch (error) {
+        text = `cannot write ${name}: ${error instanceof Error ? error.message : String(error)}`;
+      }
       await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
       return { stopReason: "end_turn" };
     }

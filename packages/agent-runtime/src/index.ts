@@ -8,9 +8,13 @@ export { AgentProfileError, loadAgentProfiles, type LoadedAgentProfile } from ".
 export { loadSkills, type SkillFile, type Skills } from "./skills.js";
 export { loadWorkspaces, WorkspaceError } from "./workspaces.js";
 export {
+  createDirectoryClaims,
+  createDirectoryWorkspace,
   createEmptyWorkspace,
   createGitWorkspace,
   createWorkspaces,
+  type DirectoryClaims,
+  type DirectoryWorkspaceSettings,
   type GitWorkspaceSettings,
   type PreparedWorkspace,
   type Workspace,

@@ -17,6 +17,8 @@ export interface HarnessTask {
   workspace?: Workspace;
   /** The branch of the workspace to work on; without it the workspace stays on its default branch. */
   branch?: string;
+  /** Whether the session may only read its workspace, e.g. a read-only assistant's; a directory is then bound read-only. */
+  readOnlyWorkspace?: boolean;
 }
 
 /**

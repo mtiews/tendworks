@@ -21,6 +21,7 @@ import { createSecretResolver, listsPlatformMcpServer } from "@tendworks/platfor
 import { migrateOrStop } from "@tendworks/platform/migrations";
 import { readSecretsFile } from "@tendworks/platform/secrets-file";
 import { storeConnectionString } from "@tendworks/platform/store-connection";
+import { parseWorkspaceRoots, WorkspaceRootsError } from "@tendworks/platform/workspace-roots";
 import {
   createExecutionEngineProbe,
   createFetchHttpExecutor,
@@ -45,15 +46,20 @@ let profiles;
 let templates;
 let skills;
 let workspaceDefinitions;
+let workspaceRoots: string[];
 try {
+  // Directory workspaces lie under the operator's roots (ADR 0022). The stack mounts them
+  // read-only at the same path, so the worker resolves links and `..` as the sandbox host
+  // does, and the sandbox adapter binds nothing from elsewhere.
+  workspaceRoots = parseWorkspaceRoots(process.env.TEND_WORKSPACE_ROOTS);
   profiles = loadAgentProfiles(env("TEND_CONFIG_DIR"));
   // The deployment's own sandbox images with their pins; templates name them by repository.
   templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"), { pinnedImages: env("TEND_SANDBOX_IMAGES", "").split(/[\s,]+/).filter(Boolean) });
   skills = loadSkills(env("TEND_CONFIG_DIR"));
   // Workspaces by name (ADR 0022); the server refuses references to unknown ones at startup.
-  workspaceDefinitions = loadWorkspaces(env("TEND_CONFIG_DIR"));
+  workspaceDefinitions = loadWorkspaces(env("TEND_CONFIG_DIR"), { roots: workspaceRoots });
 } catch (error) {
-  if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError) && !(error instanceof WorkspaceError)) throw error;
+  if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError) && !(error instanceof WorkspaceError) && !(error instanceof WorkspaceRootsError)) throw error;
   console.error(error.message);
   process.exit(1);
 }
@@ -82,7 +88,7 @@ for (const workspace of workspaceDefinitions) {
   const problem = secret === undefined ? undefined : secrets.problem(secret);
   if (problem) console.warn(`workspace ${workspace.metadata.name}: ${problem}; tasks in it will fail until this is fixed`);
 }
-const workspaces = createWorkspaces(workspaceDefinitions, { secrets });
+const workspaces = createWorkspaces(workspaceDefinitions, { secrets, roots: workspaceRoots });
 // The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
 // token, and the network of the MCP-only gateway that sandboxes reach it on (ADR 0019).
 // They go only to sessions of profiles that list it (mcp: [tendworks]), whose sandboxes
@@ -102,6 +108,7 @@ const sandboxes = createDockerSandboxApi({
   url: sandboxBackendUrl,
   ...(process.env.TEND_INSTALLATION ? { installation: process.env.TEND_INSTALLATION } : {}),
   networks: platformMcpNetwork ? [platformMcpNetwork] : [],
+  bindRoots: workspaceRoots,
 });
 const claudeCode = createClaudeCodeHarness({
   sandboxes,

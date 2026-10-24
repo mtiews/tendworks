@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -343,6 +343,40 @@ do:
       expect.stringMatching(/^workspaces\/c\.yaml: \/spec\/git\/url: must match pattern/),
       `workspaces/d.yaml: /spec/credentials/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
     ]);
+  });
+
+  it("loads directory workspaces under a workspace root and refuses those outside, also through '..' or a symbolic link", () => {
+    const host = realpathSync.native(mkdtempSync(join(tmpdir(), "tend-host-")));
+    const root = join(host, "root");
+    mkdirSync(join(root, "app"), { recursive: true });
+    mkdirSync(join(host, "outside"));
+    symlinkSync(join(host, "outside"), join(root, "escape"), "junction");
+    const directory = (name: string, path: string) =>
+      `apiVersion: tendworks.dev/v1\nkind: Workspace\nmetadata: { name: ${name} }\nspec:\n  directory: { path: ${JSON.stringify(path)} }\n`;
+    const files = {
+      "workspaces/app.yaml": directory("app", join(root, "app")),
+      "workspaces/dots.yaml": directory("dots", `${join(root, "app")}/../../outside`),
+      "workspaces/escape.yaml": directory("escape", join(root, "escape")),
+      "workspaces/keyed.yaml": `${directory("keyed", join(root, "app"))}  credentials: { secretRef: { name: TENDWORKS_AGENT_APP_TOKEN } }\n`,
+    };
+
+    let issues: string[] = [];
+    try {
+      loadConfiguration(folder(files), { workspaceRoots: [root] });
+    } catch (error) {
+      if (!(error instanceof ConfigurationError)) throw error;
+      issues = error.issues;
+    }
+    expect(issues).toEqual([
+      expect.stringMatching(/^workspaces\/dots\.yaml: workspace 'dots': directory .* is not under a workspace root/),
+      expect.stringMatching(/^workspaces\/escape\.yaml: workspace 'escape': directory .* is not under a workspace root/),
+      "workspaces/keyed.yaml: /spec/credentials: is not allowed here",
+    ]);
+    const { "workspaces/app.yaml": app } = files;
+    expect(loadConfiguration(folder({ "workspaces/app.yaml": app }), { workspaceRoots: [root] }).workspaces).toEqual([
+      { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "app" }, spec: { directory: { path: join(root, "app") } } },
+    ]);
+    expect(issuesOf(folder({ "workspaces/app.yaml": app }))).toEqual([expect.stringContaining("TEND_WORKSPACE_ROOTS allows no directory workspaces")]);
   });
 
   it("refuses a workflow or trigger binding that names a workspace that is not configured", () => {

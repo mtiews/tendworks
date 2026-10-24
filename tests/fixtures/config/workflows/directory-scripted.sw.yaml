@@ -1,0 +1,28 @@
+# End-to-end directory workspace test through the Claude Code harness with a scripted ACP
+# agent: the step works in the directory workspace its input names, and the agent writes a
+# file there, which then lies in the host directory.
+# Start it with: POST /runs {"workflow": "directory-scripted", "input": {"workspace": "scripted-directory"}}
+# (the workspace exists only in the configuration `pnpm e2e` assembles).
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: directory-scripted
+  version: '0.1.0'
+  summary: Lets the scripted ACP agent write a file into its directory workspace.
+do:
+  - write:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://scripted-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: 'write: written-by-the-agent.txt'
+            metadata:
+              dev.tendworks/workspace:
+                name: '${ .workspace }'
+      output:
+        as: '${ { state: .status.state, reply: .status.message.parts[0].text } }'

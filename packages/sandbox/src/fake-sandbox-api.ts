@@ -3,7 +3,7 @@ import {
   assertAbsolutePath,
   assertInstallation,
   assertSandboxId,
-  assertVolumeMounts,
+  assertMounts,
   assertVolumeName,
   defaultInstallation,
   defaultIsolationClass,
@@ -27,8 +27,10 @@ interface FakeSandbox {
   user: string;
   /** Files outside volumes, by absolute path. */
   files: Files;
-  /** Mounted volumes by mount path; their files by path relative to it. */
+  /** Mounted volumes and bound host directories by mount path; their files by path relative to it. */
   mounts: Map<string, Files>;
+  /** Mount paths the sandbox may only read. */
+  readOnly: Set<string>;
 }
 
 interface FakeVolume {
@@ -42,10 +44,12 @@ export interface FakeSandboxBackend {
   sandboxes: Map<string, FakeSandbox>;
   /** Volumes by installation and name ("<installation>/<name>"). */
   volumes: Map<string, FakeVolume>;
+  /** Host directories by host path, with their files; created empty on first bind. */
+  hostDirectories: Map<string, Files>;
 }
 
 export function createFakeSandboxBackend(): FakeSandboxBackend {
-  return { sandboxes: new Map(), volumes: new Map() };
+  return { sandboxes: new Map(), volumes: new Map(), hostDirectories: new Map() };
 }
 
 export interface FakeSandboxApiOptions {
@@ -54,12 +58,14 @@ export interface FakeSandboxApiOptions {
   installation?: string;
   /** Networks sandboxes may join on request; none by default. */
   networks?: readonly string[];
+  /** Host directories under which sandboxes may bind directories; none by default. */
+  bindRoots?: readonly string[];
 }
 
 /** Where a file lives: in the sandbox itself or in a mounted volume, and under which key. */
-function locate(sandbox: FakeSandbox, path: string): { files: Files; key: string } {
+function locate(sandbox: FakeSandbox, path: string): { files: Files; key: string; mount?: string } {
   for (const [mount, files] of sandbox.mounts) {
-    if (path.startsWith(`${mount}/`)) return { files, key: path.slice(mount.length + 1) };
+    if (path.startsWith(`${mount}/`)) return { files, key: path.slice(mount.length + 1), mount };
   }
   return { files: sandbox.files, key: path };
 }
@@ -75,6 +81,7 @@ export function createFakeSandboxApi({
   backend = createFakeSandboxBackend(),
   installation = defaultInstallation,
   networks: allowed = [],
+  bindRoots = [],
 }: FakeSandboxApiOptions = {}): SandboxApi {
   assertInstallation(installation);
   const { sandboxes } = backend;
@@ -88,8 +95,8 @@ export function createFakeSandboxApi({
   };
 
   return {
-    async create(template, { volumes: mounts = [], owner, networks: requested = [] } = {}) {
-      assertVolumeMounts(mounts);
+    async create(template, { volumes: mounts = [], binds = [], owner, networks: requested = [] } = {}) {
+      assertMounts(mounts, binds, bindRoots);
       const networks = allowedNetworks(requested, allowed);
       const user = sandboxUser(template);
       const sandbox: Sandbox = {
@@ -107,7 +114,13 @@ export function createFakeSandboxApi({
         if (!backend.volumes.has(key)) backend.volumes.set(key, { files: new Map(), createdAt: new Date().toISOString(), ...(owner === undefined ? {} : { owner }) });
         mounted.set(mountPath(path), backend.volumes.get(key)!.files);
       }
-      sandboxes.set(sandbox.id, { installation, sandbox, user, files: new Map(), mounts: mounted });
+      const readOnly = new Set<string>();
+      for (const { hostPath, path, readOnly: only } of binds) {
+        if (!backend.hostDirectories.has(hostPath)) backend.hostDirectories.set(hostPath, new Map());
+        mounted.set(mountPath(path), backend.hostDirectories.get(hostPath)!);
+        if (only) readOnly.add(mountPath(path));
+      }
+      sandboxes.set(sandbox.id, { installation, sandbox, user, files: new Map(), mounts: mounted, readOnly });
       return structuredClone(sandbox);
     },
     async list() {
@@ -139,7 +152,8 @@ export function createFakeSandboxApi({
     async writeFile(sandboxId, path, content) {
       const sandbox = find(sandboxId);
       assertAbsolutePath(path);
-      const { files, key } = locate(sandbox, path);
+      const { files, key, mount } = locate(sandbox, path);
+      if (mount !== undefined && sandbox.readOnly.has(mount)) throw new SandboxError("invalid-request", `${path} is on a read-only mount of sandbox ${sandboxId}`);
       files.set(key, content.slice());
     },
     async destroy(sandboxId) {

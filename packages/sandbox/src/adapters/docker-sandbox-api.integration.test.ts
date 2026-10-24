@@ -1,4 +1,7 @@
 import { execFile } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -62,18 +65,33 @@ const neighbour = `${installation}-volume`;
 const gateway = `${installation}_gateway`;
 // Starting a sandbox on a network without traffic between its containers takes Docker
 // several times longer, so only the tests about the network use one.
+// Host directories sandboxes may bind from: a temporary directory of this run, by the path
+// the Docker host knows it by (Docker Desktop on Windows sees the drives under /run/desktop/mnt/host).
+const bindDirectory = realpathSync.native(mkdtempSync(join(tmpdir(), "tend-binds-")));
+const onDockerHost = (path: string) =>
+  process.platform === "win32" ? `/run/desktop/mnt/host/${path[0]!.toLowerCase()}${path.slice(2).replaceAll("\\", "/")}` : path;
+const bindRoot = onDockerHost(bindDirectory);
+async function hostDirectory(): Promise<string> {
+  const name = crypto.randomUUID();
+  mkdirSync(join(bindDirectory, name));
+  chmodSync(join(bindDirectory, name), 0o777); // the sandbox user writes there
+  return `${bindRoot}/${name}`;
+}
+afterAll(() => rmSync(bindDirectory, { recursive: true, force: true }));
+
 const createApi = (name = installation, { sandboxNetwork = false } = {}) =>
   createDockerSandboxApi({
     url: proxyUrl,
     installation: name,
     sandboxNetwork,
     networks: [gateway],
+    bindRoots: [bindRoot],
     labels: { [runLabel.split("=")[0]!]: runLabel.split("=")[1]! },
   });
 
 describeSandboxApi("Docker adapter through the socket proxy", async () => {
   await docker("network", "create", "--internal", "--label", runLabel, gateway);
-  return { api: createApi(), neighbour: createApi(neighbour), image, network: gateway };
+  return { api: createApi(), neighbour: createApi(neighbour), image, network: gateway, bindRoot, hostDirectory };
 });
 
 describe.concurrent("Docker adapter", () => {

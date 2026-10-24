@@ -33,6 +33,7 @@ import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
 import { migrateOrStop } from "@tendworks/platform/migrations";
 import { storeConnectionString } from "@tendworks/platform/store-connection";
+import { parseWorkspaceRoots, WorkspaceRootsError } from "@tendworks/platform/workspace-roots";
 import pg from "pg";
 
 const env = (name: string, fallback?: string): string => {
@@ -43,10 +44,12 @@ const env = (name: string, fallback?: string): string => {
 
 let configuration: Configuration;
 try {
-  configuration = loadConfiguration(env("TEND_CONFIG_DIR"));
+  // Directory workspaces must lie under the operator's roots (ADR 0022), which the stack
+  // mounts read-only at the same path, so links and `..` resolve as on the sandbox host.
+  configuration = loadConfiguration(env("TEND_CONFIG_DIR"), { workspaceRoots: parseWorkspaceRoots(process.env.TEND_WORKSPACE_ROOTS) });
 } catch (error) {
   // Invalid configuration stops the platform before it accepts any request.
-  if (!(error instanceof ConfigurationError)) throw error;
+  if (!(error instanceof ConfigurationError) && !(error instanceof WorkspaceRootsError)) throw error;
   console.error(error.message);
   process.exit(1);
 }

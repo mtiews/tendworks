@@ -6,7 +6,7 @@ import {
   assertAbsolutePath,
   assertInstallation,
   assertSandboxId,
-  assertVolumeMounts,
+  assertMounts,
   assertVolumeName,
   defaultInstallation,
   defaultIsolationClass,
@@ -48,6 +48,12 @@ export interface DockerSandboxApiOptions {
    * reach every container on it, including each other unless the network forbids it.
    */
   networks?: readonly string[];
+  /**
+   * Host directories under which sandboxes may bind directories (the operator's workspace
+   * roots, ADR 0022); none by default. Checked here, since the socket proxy cannot see
+   * request bodies (ADR 0001); symbolic links are resolved by the caller.
+   */
+  bindRoots?: readonly string[];
 }
 
 const runtimes: Record<IsolationClass, string> = { container: "runc", gvisor: "runsc" };
@@ -155,6 +161,7 @@ export function createDockerSandboxApi({
   labels: extraLabels = {},
   sandboxNetwork = true,
   networks: allowed = [],
+  bindRoots = [],
 }: DockerSandboxApiOptions): SandboxApi {
   assertInstallation(installation);
   const containerName = (sandboxId: string) => `${installation}-sandbox-${sandboxId}`;
@@ -234,8 +241,8 @@ export function createDockerSandboxApi({
     }));
 
   const api: SandboxApi = {
-    async create(template, { volumes = [], owner, networks: requested = [] } = {}) {
-      assertVolumeMounts(volumes);
+    async create(template, { volumes = [], binds = [], owner, networks: requested = [] } = {}) {
+      assertMounts(volumes, binds, bindRoots);
       const networks = allowedNetworks(requested, allowed);
       if (sandboxNetwork) await ensureNetwork();
       const id = newSandboxId();
@@ -259,15 +266,26 @@ export function createDockerSandboxApi({
             Runtime: runtimes[isolationClass],
             Init: true,
             Privileged: false, // always set explicitly: the socket proxy cannot stop a privileged container (it filters paths, not bodies)
-            Binds: [], // no host mounts, only named volumes
+            Binds: [], // host directories only as checked bind mounts below
             // A named volume is created on first use and, while empty, takes over the content
             // and ownership of the image directory it is mounted on.
-            Mounts: volumes.map(({ volume, path }) => ({
-              Type: "volume",
-              Source: volumeName(volume),
-              Target: mountPath(path),
-              VolumeOptions: { Labels: { ...labels, ...ownerLabel(owner), [LABEL.volume]: volume } },
-            })),
+            Mounts: [
+              ...volumes.map(({ volume, path }) => ({
+                Type: "volume",
+                Source: volumeName(volume),
+                Target: mountPath(path),
+                VolumeOptions: { Labels: { ...labels, ...ownerLabel(owner), [LABEL.volume]: volume } },
+              })),
+              // Only host directories under bindRoots (assertMounts); Docker refuses a missing
+              // source instead of creating it, and nothing propagates back to the host.
+              ...binds.map(({ hostPath, path, readOnly }) => ({
+                Type: "bind",
+                Source: hostPath,
+                Target: mountPath(path),
+                ReadOnly: readOnly,
+                BindOptions: { Propagation: "rprivate" },
+              })),
+            ],
             ...(sandboxNetwork ? { NetworkMode: network } : {}),
             CapDrop: ["ALL"],
             SecurityOpt: ["no-new-privileges:true"],

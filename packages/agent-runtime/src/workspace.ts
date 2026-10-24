@@ -1,4 +1,6 @@
+import { isAbsolute, relative, sep } from "node:path";
 import type { SecretResolver } from "@tendworks/platform";
+import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 import type { A2A, Workspace as Kind } from "@tendworks/shared";
 import type { TranscriptRecord } from "./transcripts/transcript-store.js";
 
@@ -14,12 +16,15 @@ export interface WorkspaceSession {
   taskId: string;
   /** The branch to work on; without it the workspace stays on its default branch. */
   branch?: string;
+  /** Whether the session may only read the workspace (e.g. a read-only assistant); a directory is then bound read-only. */
+  readOnly?: boolean;
 }
 
-/** What a sandbox mounts at its workspace path: a volume of the agent session, removed with it. */
-export interface WorkspaceMount {
-  volume: string;
-}
+/**
+ * What a sandbox mounts at its workspace path: a volume of the agent session, removed with
+ * it, or a host directory, bound and never removed.
+ */
+export type WorkspaceMount = { volume: string } | { hostPath: string; readOnly: boolean };
 
 /** What was checked out, as the transcript records it (contracts/schemas/transcript-entry.schema.yaml#/$defs/checkedOutWorkspace). */
 export type CheckedOutWorkspace = Extract<TranscriptRecord, { type: "workspace-checkout" }>["workspace"];
@@ -39,11 +44,16 @@ export interface PreparedWorkspace {
   secrets: string[];
   /** What the agent is told about its workspace; empty when there is nothing to say. */
   instructions: string;
+  /**
+   * Frees what preparing took for the session (e.g. its claim on a directory); called once
+   * the session has ended for good. Preparing again for the same session takes nothing more.
+   */
+  release?: () => void;
 }
 
 /**
  * The workspace port (ADR 0022): how a workspace gets into an agent session's sandbox,
- * e.g. a git repository cloned with the workspace's own credential.
+ * e.g. a git repository cloned with the workspace's own credential, or a host directory bound into it.
  *
  * @port
  */
@@ -110,10 +120,86 @@ export function createGitWorkspace({ name, url, defaultBranch, credentials }: Gi
   };
 }
 
-/** The configured workspaces by name, each behind the implementation its kind selects. */
-export function createWorkspaces(definitions: readonly Kind.Workspace[], { secrets }: { secrets: SecretResolver }): (name: string) => Workspace | undefined {
+/**
+ * Which agent session works in which host directory, so that only one does at a time,
+ * also when two workspaces name the same directory or one inside the other. Kept in the
+ * worker's memory: a worker restart forgets it, and resumed sessions claim again.
+ */
+export interface DirectoryClaims {
+  /** Claims `directory` for `holder`; the holder of a conflicting claim, if there is one (never `holder` itself). */
+  claim(directory: string, holder: string): string | undefined;
+  release(directory: string, holder: string): void;
+}
+
+export function createDirectoryClaims(): DirectoryClaims {
+  const claims = new Map<string, string>();
+  const overlap = (a: string, b: string) => a === b || isInside(a, b) || isInside(b, a);
+  return {
+    claim(directory, holder) {
+      for (const [claimed, by] of claims) if (by !== holder && overlap(claimed, directory)) return by;
+      claims.set(directory, holder);
+      return undefined;
+    },
+    release(directory, holder) {
+      if (claims.get(directory) === holder) claims.delete(directory);
+    },
+  };
+}
+
+function isInside(path: string, directory: string): boolean {
+  const rest = relative(directory, path);
+  return rest !== "" && rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest);
+}
+
+export interface DirectoryWorkspaceSettings {
+  name: string;
+  /** The `directory.path` of the `Workspace`, on the sandbox host, which the worker sees at the same path. */
+  path: string;
+}
+
+/**
+ * A directory workspace: a host directory under one of the operator's roots, bound at the
+ * workspace path read-write, or read-only when the session asks. Before every session the
+ * path is resolved again (a symbolic link may have changed since the configuration loaded)
+ * and its real path is bound. Only one session at a time works in a directory; a second
+ * one fails, naming the session that holds it.
+ */
+export function createDirectoryWorkspace(
+  { name, path }: DirectoryWorkspaceSettings,
+  { roots, claims = createDirectoryClaims() }: { roots: readonly string[]; claims?: DirectoryClaims },
+): Workspace {
+  return {
+    async prepare({ taskId, readOnly = false }) {
+      const resolved = resolveWorkspaceDirectory(path, roots);
+      if ("problem" in resolved) return resolved;
+      const { directory } = resolved;
+      const holder = claims.claim(directory, taskId);
+      if (holder !== undefined) {
+        return { problem: `directory ${path} is in use by another agent session (task ${holder}); only one session at a time works in a directory` };
+      }
+      return {
+        mount: { hostPath: directory, readOnly },
+        sessionEnv: {},
+        secrets: [],
+        instructions: `Your workspace is the directory ${name}${readOnly ? ", read-only: you cannot change its files" : ""}.`,
+        release: () => claims.release(directory, taskId),
+      };
+    },
+  };
+}
+
+/** The configured workspaces by name, each behind the implementation its kind selects; directories share one set of claims. */
+export function createWorkspaces(
+  definitions: readonly Kind.Workspace[],
+  { secrets, roots = [] }: { secrets: SecretResolver; roots?: readonly string[] },
+): (name: string) => Workspace | undefined {
+  const claims = createDirectoryClaims();
   const byName = new Map(
-    definitions.map(({ metadata: { name }, spec }) => [name, createGitWorkspace({ name, ...spec.git, ...(spec.credentials ? { credentials: spec.credentials } : {}) }, secrets)]),
+    definitions.map(({ metadata: { name }, spec }): [string, Workspace] => {
+      if (spec.directory) return [name, createDirectoryWorkspace({ name, path: spec.directory.path }, { roots, claims })];
+      if (!spec.git) throw new Error(`workspace ${name} is neither git nor directory`);
+      return [name, createGitWorkspace({ name, ...spec.git, ...(spec.credentials ? { credentials: spec.credentials } : {}) }, secrets)];
+    }),
   );
   return (name) => byName.get(name);
 }

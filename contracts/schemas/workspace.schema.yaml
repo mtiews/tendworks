@@ -5,7 +5,9 @@ description: >-
   A workspace agents work in, declared once and referred to by name (ADR 0022): workflows
   name it in the `dev.tendworks/workspace` metadata of an agent task
   (contracts/schemas/a2a.schema.yaml#/$defs/workspace). A `git` workspace is a repository
-  on any git host, cloned in the agent's sandbox with the workspace's own credential.
+  on any git host, cloned in the agent's sandbox with the workspace's own credential. A
+  `directory` workspace is a directory on the sandbox host under one of the roots the
+  operator allows (`TEND_WORKSPACE_ROOTS`), bound into the agent's sandbox.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -24,14 +26,26 @@ properties:
         $ref: '#/$defs/workspaceName'
   spec:
     title: WorkspaceSpec
+    description: Exactly one of `git` and `directory`; only a `git` workspace has credentials.
     type: object
-    required: [git]
     additionalProperties: false
     properties:
       git:
         $ref: '#/$defs/gitWorkspace'
+      directory:
+        $ref: '#/$defs/directoryWorkspace'
       credentials:
         $ref: '#/$defs/workspaceCredentials'
+    oneOf:
+      - title: DirectoryWorkspaceSpec
+        required: [directory]
+        properties:
+          directory: true
+          credentials: false
+      - title: GitWorkspaceSpec
+        required: [git]
+        properties:
+          git: true
 $defs:
   workspaceName:
     title: WorkspaceName
@@ -64,6 +78,25 @@ $defs:
         type: string
         pattern: ^[^-\s]\S*$
         description: The branch new branches start from, and the one checked out when a task asks for none.
+  directoryWorkspace:
+    title: DirectoryWorkspace
+    description: >-
+      A directory on the sandbox host, bound into the sandbox's workspace, read-write or
+      read-only as the session asks (e.g. read-only for a read-only assistant). It must
+      lie strictly under one of the roots in `TEND_WORKSPACE_ROOTS`, also after resolving
+      `..` and symbolic links; anything else is refused when the configuration loads and
+      again before each session. Only one agent session at a time works in a directory.
+    type: object
+    required: [path]
+    additionalProperties: false
+    examples:
+      - path: /srv/tendworks/workspaces/app
+    properties:
+      path:
+        type: string
+        minLength: 2
+        maxLength: 4096
+        description: Absolute path of the directory on the sandbox host, strictly under a workspace root.
   workspaceCredentials:
     title: WorkspaceCredentials
     description: >-

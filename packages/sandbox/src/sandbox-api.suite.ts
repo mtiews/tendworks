@@ -24,6 +24,10 @@ export interface SandboxApiSuiteContext {
   neighbour: SandboxApi;
   /** A network on the backend that `api` allows sandboxes to join. */
   network: string;
+  /** A host directory `api` allows binds under, as the sandbox host knows it. */
+  bindRoot: string;
+  /** Creates a new, empty directory under `bindRoot` that the sandbox user may write to, and returns its host path. */
+  hostDirectory(): Promise<string>;
 }
 
 /**
@@ -368,6 +372,54 @@ export function describeSandboxApi(name: string, setup: () => Promise<SandboxApi
 
     it("refuses a network the installation does not allow", async () => {
       await expect(context.api.create(template(), { networks: ["not-allowed-for-sandboxes"] })).rejects.toMatchObject({ code: "invalid-request" });
+    });
+
+    const withBind = async (hostPath: string, readOnly: boolean) => {
+      const sandbox = await context.api.create(template(), { binds: [{ hostPath, path: "/mnt/bound", readOnly }] });
+      created.push(sandbox.id);
+      return sandbox;
+    };
+
+    it("binds a host directory read-write: what one sandbox writes there, a later one binding it finds, and no volume is created", async () => {
+      const hostPath = await context.hostDirectory();
+      const first = await withBind(hostPath, false);
+      await context.api.writeFile(first.id, "/mnt/bound/notes/result.txt", encode("written\n"));
+      await context.api.destroy(first.id);
+
+      const second = await withBind(hostPath, false);
+
+      expect(new TextDecoder().decode(await context.api.readFile(second.id, "/mnt/bound/notes/result.txt"))).toBe("written\n");
+      expect((await context.api.exec(second.id, { command: ["cat", "/mnt/bound/notes/result.txt"] })).stdout).toBe("written\n");
+      expect((await context.api.listVolumes()).map(({ name }) => name).filter((name) => name.includes("bound"))).toEqual([]);
+    });
+
+    it("binds a host directory read-only: the sandbox reads it but cannot write into it", async () => {
+      const hostPath = await context.hostDirectory();
+      const writer = await withBind(hostPath, false);
+      await context.api.writeFile(writer.id, "/mnt/bound/README.md", encode("read me\n"));
+
+      const reader = await withBind(hostPath, true);
+
+      expect(new TextDecoder().decode(await context.api.readFile(reader.id, "/mnt/bound/README.md"))).toBe("read me\n");
+      await expect(context.api.writeFile(reader.id, "/mnt/bound/README.md", encode("changed\n"))).rejects.toBeInstanceOf(Error);
+      expect(new TextDecoder().decode(await context.api.readFile(writer.id, "/mnt/bound/README.md"))).toBe("read me\n");
+    });
+
+    it("refuses to bind a host directory outside the allowed ones, a root itself, a path with '..', or on a volume's path", async () => {
+      const inside = await context.hostDirectory();
+      const refused = [
+        { hostPath: `${context.bindRoot}-elsewhere/app`, path: "/mnt/bound" },
+        { hostPath: context.bindRoot, path: "/mnt/bound" },
+        { hostPath: `${inside}/../../escape`, path: "/mnt/bound" },
+        { hostPath: "relative/app", path: "/mnt/bound" },
+        { hostPath: inside, path: "/" },
+      ];
+      for (const bind of refused) {
+        await expect(context.api.create(template(), { binds: [{ ...bind, readOnly: false }] }), bind.hostPath).rejects.toMatchObject({ code: "invalid-request" });
+      }
+      await expect(
+        context.api.create(template(), { volumes: [{ volume: volumeName(), path: "/mnt/bound" }], binds: [{ hostPath: inside, path: "/mnt/bound/", readOnly: false }] }),
+      ).rejects.toMatchObject({ code: "invalid-request" });
     });
 
     it("keeps files of different sandboxes apart", async () => {

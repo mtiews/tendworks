@@ -163,14 +163,18 @@ export function createClaudeCodeHarness({
     session: HarnessSession | undefined,
     observer: HarnessObserver,
   ): Promise<{ sandboxId: string; volumes: VolumeMount[] } | { failure: HarnessResult }> {
-    const volumes = [{ volume: workspace.mount.volume, path: WORKSPACE }, sessionVolume(taskId)];
+    // A host directory is bound, never a volume of the session, so nothing here ever deletes it.
+    const { mount } = workspace;
+    const volumes = "volume" in mount ? [{ volume: mount.volume, path: WORKSPACE }, sessionVolume(taskId)] : [sessionVolume(taskId)];
+    const binds = "hostPath" in mount ? [{ hostPath: mount.hostPath, path: WORKSPACE, readOnly: mount.readOnly }] : [];
     if (session?.sandboxId !== undefined) {
       observer.progress("removing the sandbox of the interrupted session");
       await remove(observer, `sandbox ${session.sandboxId}`, () => sandboxes.destroy(session.sandboxId!));
     }
     observer.progress("starting a sandbox");
     try {
-      return { sandboxId: (await sandboxes.create(template, { volumes, owner: taskId, ...(networks.length === 0 ? {} : { networks }) })).id, volumes };
+      const options = { volumes, ...(binds.length === 0 ? {} : { binds }), owner: taskId, ...(networks.length === 0 ? {} : { networks }) };
+      return { sandboxId: (await sandboxes.create(template, options)).id, volumes };
     } catch (error) {
       // The task fails for good, so volumes the backend may have created go too.
       await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
@@ -224,14 +228,15 @@ export function createClaudeCodeHarness({
    * secrets from what the harness writes. The session's environment is the profile's
    * secrets plus what the workspace gives the session.
    */
-  async function prepare({ taskId, profile, workspace = emptyWorkspace, branch }: HarnessSessionTask): Promise<Prepared | { failure: HarnessResult }> {
+  async function prepare({ taskId, profile, workspace = emptyWorkspace, branch, readOnlyWorkspace }: HarnessSessionTask): Promise<Prepared | { failure: HarnessResult }> {
     const valid = validate(profile);
     if ("failure" in valid) return valid;
     const resolved = resolveSecrets(profile);
     if ("failure" in resolved) return resolved;
     const servers = mcpServersOf(profile);
     if ("failure" in servers) return servers;
-    const prepared = await workspace.prepare({ taskId, ...(branch === undefined ? {} : { branch }) });
+    // Last, so that what the workspace takes (e.g. a directory's claim) is released by whoever ends the session.
+    const prepared = await workspace.prepare({ taskId, ...(branch === undefined ? {} : { branch }), ...(readOnlyWorkspace ? { readOnly: true } : {}) });
     if ("problem" in prepared) return { failure: failed(`workspace: ${prepared.problem}`) };
     const hidden = [valid.credential.value, ...Object.values(resolved.env), ...prepared.secrets, platformMcp?.token ?? ""].filter((value) => value !== "");
     const redact = (text: string) => hidden.reduce((result, value) => result.replaceAll(value, "***"), text);
@@ -299,7 +304,10 @@ export function createClaudeCodeHarness({
       const { env, mcpServers, redact } = valid;
 
       const started = await startSandbox(taskId, valid, session, observer);
-      if ("failure" in started) return started.failure;
+      if ("failure" in started) {
+        valid.workspace.release?.();
+        return started.failure;
+      }
       const { sandboxId, volumes } = started;
       try {
         // Kept at once, so a restart before the ACP session exists still finds this sandbox.
@@ -317,6 +325,7 @@ export function createClaudeCodeHarness({
         // The session has ended, so its volumes go too; only an interrupted session keeps them.
         await remove(observer, `sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
         await Promise.all(volumes.map(({ volume }) => remove(observer, `volume ${volume}`, () => sandboxes.deleteVolume(volume))));
+        valid.workspace.release?.();
       }
     },
 
@@ -379,12 +388,16 @@ export function createClaudeCodeHarness({
 
       /** Set when the running turn is cancelled before its prompt reached the agent. */
       let cancelled = false;
+      /** Frees what the session's workspace took, once the session ends. */
+      let release: (() => void) | undefined;
 
       return {
         async turn(message, { interrupted = false } = {}) {
           cancelled = false;
           const prepared = await prepare(task);
           if ("failure" in prepared) return { state: "TASK_STATE_FAILED", message: prepared.failure.message };
+          // The workspace stays the session's between turns, until it ends.
+          release = prepared.workspace.release;
           try {
             const connected = await connect(prepared);
             if ("failure" in connected) return { state: "TASK_STATE_FAILED", message: connected.failure.message };
@@ -437,7 +450,10 @@ export function createClaudeCodeHarness({
           for (const sandboxId of sandboxIds) await attempt(`sandbox ${sandboxId}`, () => sandboxes.destroy(sandboxId));
           await current?.acp.close();
           current = undefined;
+          // A directory workspace has no volume; deleting the session's never-created workspace volume is a no-op.
           await Promise.all(volumesOf(taskId).map(({ volume }) => attempt(`volume ${volume}`, () => sandboxes.deleteVolume(volume))));
+          release?.();
+          release = undefined;
           if (failures.length > 0) throw new Error(`${failures.join("; ")}; the sandbox clean-up retries it`);
         },
       };

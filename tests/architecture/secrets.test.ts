@@ -12,7 +12,7 @@ type Service = {
   networks?: string[];
   network_mode?: string;
   command?: string[];
-  volumes?: string[];
+  volumes?: (string | { source: string })[];
   depends_on?: Record<string, { condition: string }>;
 };
 const read = (path: string) => readFileSync(new URL(`../../deploy/${path}`, import.meta.url), "utf8");
@@ -56,7 +56,7 @@ it("gives agent secrets only to the worker, which reads them from the exporter's
   expect(compose.services.worker?.volumes).toContain("agent-secrets:/var/lib/tendworks/agent-secrets:ro");
   expect(compose.services.worker?.environment?.TEND_AGENT_SECRETS_FILE).toBe("/var/lib/tendworks/agent-secrets/agent-secrets.json");
   expect(compose.services.worker?.depends_on?.["agent-secrets"]).toEqual({ condition: "service_completed_successfully" });
-  expect(compose.services.server?.volumes?.filter((volume) => volume.startsWith("agent-secrets:"))).toEqual([]);
+  expect(compose.services.server?.volumes?.filter((volume) => (typeof volume === "string" ? volume : volume.source).startsWith("agent-secrets"))).toEqual([]);
   expect(environment("server").filter((name) => name.startsWith("TENDWORKS_AGENT_"))).toEqual([]);
 });
 

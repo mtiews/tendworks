@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,33 @@ describe("loadWorkspaces", () => {
       "workspaces/b.yaml: workspace 'app' is already defined in workspaces/a.yaml",
       `workspaces/c.yaml: /spec/credentials/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
     ]);
+  });
+
+  it("reads directory workspaces under a workspace root and refuses those outside, also through '..' or a symbolic link", () => {
+    const host = realpathSync.native(mkdtempSync(join(tmpdir(), "tend-host-")));
+    const root = join(host, "root");
+    mkdirSync(join(root, "app"), { recursive: true });
+    mkdirSync(join(host, "outside"));
+    symlinkSync(join(host, "outside"), join(root, "escape"), "junction");
+    const directory = (name: string, path: string) =>
+      `apiVersion: tendworks.dev/v1\nkind: Workspace\nmetadata: { name: ${name} }\nspec:\n  directory: { path: ${JSON.stringify(path)} }\n`;
+    const app = { "workspaces/app.yaml": directory("app", join(root, "app")) };
+
+    expect(loadWorkspaces(folder(app), { roots: [root] }).map((w) => w.spec.directory?.path)).toEqual([join(root, "app")]);
+    let issues: string[] = [];
+    try {
+      loadWorkspaces(folder({ ...app, "workspaces/dots.yaml": directory("dots", `${join(root, "app")}/../../outside`), "workspaces/escape.yaml": directory("escape", join(root, "escape")) }), {
+        roots: [root],
+      });
+    } catch (error) {
+      if (!(error instanceof WorkspaceError)) throw error;
+      issues = error.issues;
+    }
+    expect(issues).toEqual([
+      expect.stringMatching(/^workspaces\/dots\.yaml: workspace 'dots': directory .* is not under a workspace root/),
+      expect.stringMatching(/^workspaces\/escape\.yaml: workspace 'escape': directory .* is not under a workspace root/),
+    ]);
+    expect(issuesOf(folder(app))).toEqual([expect.stringContaining("TEND_WORKSPACE_ROOTS allows no directory workspaces")]);
   });
 
   it("reads the starter configuration's workspaces", () => {

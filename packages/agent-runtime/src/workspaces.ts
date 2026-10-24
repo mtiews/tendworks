@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { resolveWorkspaceDirectory } from "@tendworks/platform/workspace-roots";
 import type { Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject } from "ajv/dist/2020.js";
 import { parse } from "yaml";
@@ -18,10 +19,12 @@ let validate: ((data: unknown) => boolean) & { errors?: ErrorObject[] | null };
 /**
  * Reads the workspaces (`kind: Workspace`, ADR 0022) from a configuration folder, in any
  * YAML file outside hidden directories, and validates them. Other documents are left to
- * the control plane, which validates the whole configuration. Throws a
+ * the control plane, which validates the whole configuration. A directory workspace must
+ * lie under one of `roots` (`TEND_WORKSPACE_ROOTS`, seen at the same path as on the
+ * sandbox host), also after resolving `..` and symbolic links. Throws a
  * {@link WorkspaceError} listing every issue by file.
  */
-export function loadWorkspaces(configDir: string): Workspace.Workspace[] {
+export function loadWorkspaces(configDir: string, { roots = [] }: { roots?: readonly string[] } = {}): Workspace.Workspace[] {
   validate ??= new Ajv2020({ allErrors: true, strict: true }).compile(parse(readFileSync(SCHEMA, "utf8")));
   const issues: string[] = [];
   const workspaces = new Map<string, { file: string; workspace: Workspace.Workspace }>();
@@ -39,6 +42,12 @@ export function loadWorkspaces(configDir: string): Workspace.Workspace[] {
       continue;
     }
     const workspace = document as Workspace.Workspace;
+    const { directory } = workspace.spec;
+    const resolved = directory ? resolveWorkspaceDirectory(directory.path, roots) : undefined;
+    if (resolved && "problem" in resolved) {
+      issues.push(`${file}: workspace '${workspace.metadata.name}': ${resolved.problem}`);
+      continue;
+    }
     const existing = workspaces.get(workspace.metadata.name);
     if (existing) issues.push(`${file}: workspace '${workspace.metadata.name}' is already defined in ${existing.file}`);
     else workspaces.set(workspace.metadata.name, { file, workspace });

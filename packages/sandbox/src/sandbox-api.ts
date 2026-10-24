@@ -1,3 +1,4 @@
+import { posix } from "node:path";
 import type { Sandbox as Contract } from "@tendworks/shared";
 
 type Schemas = Contract.components["schemas"];
@@ -7,6 +8,7 @@ export type IsolationClass = Schemas["IsolationClass"];
 export type Sandbox = Schemas["Sandbox"];
 export type ExecRequest = Schemas["ExecRequest"];
 export type VolumeMount = Schemas["VolumeMount"];
+export type BindMount = Schemas["BindMount"];
 export type ExecResult = Schemas["ExecResult"];
 export type Volume = Schemas["Volume"];
 export type CreateSandboxOptions = Omit<Schemas["CreateSandboxRequest"], "template">;
@@ -36,7 +38,9 @@ export interface SandboxApi {
    * Creates and starts a sandbox; it runs until it is destroyed. Volumes are created
    * on first use and outlive the sandbox until {@link SandboxApi.deleteVolume}. The
    * owner (e.g. a task id) is recorded on the sandbox and the volumes it creates. The
-   * sandbox joins the requested networks only if the installation allows them.
+   * sandbox joins the requested networks only if the installation allows them. Host
+   * directories are bound only from under the directories the installation allows; a
+   * bind is no volume, so nothing here creates, lists or deletes its directory.
    */
   create(template: SandboxTemplate, options?: CreateSandboxOptions): Promise<Sandbox>;
   /** The installation's sandboxes, also stopped ones and those nobody remembers. */
@@ -94,15 +98,38 @@ export function assertVolumeName(volume: string): void {
   if (!volumeNamePattern.test(volume)) throw new SandboxError("invalid-request", `not a volume name: ${JSON.stringify(volume)}`);
 }
 
-/** Checks the volumes of a new sandbox: valid names, absolute paths, each path once. */
-export function assertVolumeMounts(volumes: VolumeMount[]): void {
+/**
+ * Checks the mounts of a new sandbox: volumes with valid names, host directories strictly
+ * under one of `bindRoots` (normalized, so `..` cannot leave them), absolute paths that are
+ * not /, each path once. The check is lexical; resolving symbolic links is up to the
+ * caller, which sees the host directories (ADR 0022). It is the adapter's own, since the
+ * socket proxy cannot inspect request bodies (ADR 0001).
+ */
+export function assertMounts(volumes: readonly VolumeMount[], binds: readonly BindMount[], bindRoots: readonly string[]): void {
   for (const { volume, path } of volumes) {
     assertVolumeName(volume);
-    assertAbsolutePath(path);
-    if (mountPath(path) === "/") throw new SandboxError("invalid-request", "a volume cannot be mounted on /");
+    assertMountPath(path);
   }
-  const paths = volumes.map(({ path }) => mountPath(path));
-  if (new Set(paths).size !== paths.length) throw new SandboxError("invalid-request", "two volumes are mounted on the same path");
+  for (const { hostPath, path } of binds) {
+    assertMountPath(path);
+    if (!bindRoots.some((root) => isStrictlyUnder(hostPath, root))) {
+      throw new SandboxError("invalid-request", `host directory ${JSON.stringify(hostPath)} is not under a directory this installation allows binds from`);
+    }
+  }
+  const paths = [...volumes, ...binds].map(({ path }) => mountPath(path));
+  if (new Set(paths).size !== paths.length) throw new SandboxError("invalid-request", "two mounts are on the same path");
+}
+
+function assertMountPath(path: string): void {
+  assertAbsolutePath(path);
+  if (mountPath(path) === "/") throw new SandboxError("invalid-request", "nothing can be mounted on /");
+}
+
+/** Whether `hostPath` is a normalized absolute path strictly under `root` (both host paths, POSIX). */
+function isStrictlyUnder(hostPath: string, root: string): boolean {
+  const normalized = mountPath(posix.normalize(hostPath));
+  if (!posix.isAbsolute(hostPath) || normalized !== mountPath(hostPath)) return false;
+  return normalized.startsWith(`${mountPath(posix.normalize(root))}/`);
 }
 
 /** A mount path without trailing slashes. */

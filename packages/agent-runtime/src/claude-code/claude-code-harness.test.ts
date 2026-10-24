@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { createSecretResolver } from "@tendworks/platform";
 import type { A2A, AgentProfile, Workspace } from "@tendworks/shared";
@@ -15,7 +18,7 @@ import {
 } from "../index.js";
 import type { Sandboxes } from "../sandboxes.js";
 import type { TranscriptRecord } from "../transcripts/transcript-store.js";
-import { createGitWorkspace } from "../workspace.js";
+import { createDirectoryClaims, createDirectoryWorkspace, createGitWorkspace } from "../workspace.js";
 import { dyingWorker, encode, refusingRemovals, scriptedSandboxes, scriptedTemplate as template, type AgentScript } from "./scripted-acp-agent.stub.js";
 
 const profile = (sandbox: string | undefined = "claude-code"): AgentProfile.AgentProfile => ({
@@ -667,6 +670,110 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     await harness(sandboxes.api).run(task(), observe().observer);
 
     expect(sandboxes.execs).toEqual([]);
+  });
+
+  describe("in a directory workspace", () => {
+    /** A workspace root with the directory `app`, as the worker sees the sandbox host. */
+    function hostWithApp() {
+      const root = join(realpathSync.native(mkdtempSync(join(tmpdir(), "tend-root-"))), "root");
+      mkdirSync(join(root, "app"), { recursive: true });
+      return { root, app: join(root, "app") };
+    }
+    const inDirectory = (taskId: string, workspace: ReturnType<typeof createDirectoryWorkspace>, readOnlyWorkspace?: boolean) => ({
+      taskId,
+      message: message(),
+      profile: developer(),
+      workspace,
+      ...(readOnlyWorkspace === undefined ? {} : { readOnlyWorkspace }),
+    });
+
+    it("binds the directory read-write at the workspace path, with no checkout and no workspace volume, and never deletes it", async () => {
+      const { root, app } = hostWithApp();
+      const sandboxes = scriptedSandboxes();
+
+      const result = await harness(sandboxes.api).run(inDirectory("task-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] })), observe().observer);
+
+      expect(result.state).toBe("TASK_STATE_COMPLETED");
+      expect(sandboxes.created[0]?.binds).toEqual([{ hostPath: app, path: "/workspace", readOnly: false }]);
+      expect(sandboxes.created[0]?.volumes).toEqual([{ volume: "task-1-session", path: "/session" }]);
+      expect(sandboxes.execs).toEqual([]);
+      expect(sandboxes.deletedVolumes).toEqual(["task-1-session"]);
+    });
+
+    it("binds the directory read-only when the task asks for it, and tells a chat's agent", async () => {
+      const { root, app } = hostWithApp();
+      const sandboxes = scriptedSandboxes();
+
+      const session = harness(sandboxes.api).open!(inDirectory("chat-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] }), true), observe().observer);
+      await session.turn(message());
+      await session.end();
+
+      expect(sandboxes.created[0]?.binds).toEqual([{ hostPath: app, path: "/workspace", readOnly: true }]);
+      const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+      expect(append).toContain("Your workspace is the directory app, read-only: you cannot change its files.");
+    });
+
+    it("refuses a second live session on the same directory until the first ends, also through another workspace naming it", async () => {
+      const { root, app } = hostWithApp();
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const first = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims });
+      const alias = createDirectoryWorkspace({ name: "app-again", path: app }, { roots: [root], claims });
+      const chat = harness(sandboxes.api).open!(inDirectory("chat-1", first), observe().observer);
+      await chat.turn(message());
+
+      const refused = await harness(sandboxes.api).run(inDirectory("task-2", alias), observe().observer);
+      const again = await chat.turn(message());
+      await chat.end();
+      const after = await harness(sandboxes.api).run(inDirectory("task-3", alias), observe().observer);
+
+      expect(refused).toEqual({ state: "TASK_STATE_FAILED", message: `workspace: directory ${app} is in use by another agent session (task chat-1); only one session at a time works in a directory` });
+      expect(again.state).toBe("TASK_STATE_INPUT_REQUIRED");
+      expect(after.state).toBe("TASK_STATE_COMPLETED");
+      expect(sandboxes.created).toHaveLength(2);
+    });
+
+    it("refuses a session in a directory inside or around one that is in use", async () => {
+      const { root, app } = hostWithApp();
+      mkdirSync(join(app, "sub"));
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const outer = harness(sandboxes.api).open!(inDirectory("chat-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims })), observe().observer);
+      await outer.turn(message());
+
+      const inner = await harness(sandboxes.api).run(inDirectory("task-2", createDirectoryWorkspace({ name: "sub", path: join(app, "sub") }, { roots: [root], claims })), observe().observer);
+      await outer.end();
+
+      expect(inner).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("is in use by another agent session (task chat-1)") });
+    });
+
+    it("frees the directory when the sandbox cannot be created", async () => {
+      const { root, app } = hostWithApp();
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] });
+      const failing = scriptedSandboxes();
+      const create = failing.api.create.bind(failing.api);
+      failing.api.create = () => Promise.reject(new Error("no sandbox today"));
+
+      await harness(failing.api).run(inDirectory("task-1", workspace), observe().observer);
+      failing.api.create = create;
+      const next = await harness(failing.api).run(inDirectory("task-2", workspace), observe().observer);
+
+      expect(next.state).toBe("TASK_STATE_COMPLETED");
+    });
+
+    it("fails the task without a sandbox when the directory no longer lies under a root, e.g. replaced by a link out of it", async () => {
+      const { root, app } = hostWithApp();
+      const outside = realpathSync.native(mkdtempSync(join(tmpdir(), "tend-outside-")));
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] });
+      rmSync(app, { recursive: true });
+      symlinkSync(outside, app, "junction");
+      const sandboxes = scriptedSandboxes();
+
+      const result = await harness(sandboxes.api).run(inDirectory("task-1", workspace), observe().observer);
+
+      expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringMatching(/^workspace: directory .* is not under a workspace root/) });
+      expect(sandboxes.created).toEqual([]);
+    });
   });
 
   it("fails the task with the checkout's error output when the workspace cannot be checked out", async () => {
