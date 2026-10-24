@@ -42,7 +42,7 @@ The stack (`deploy/compose.yaml`) has no identity (OIDC), no TLS of its own and 
 | What | Why | Notes |
 | --- | --- | --- |
 | Ubuntu 24.04 LTS, x86-64 | the tested target | **not supported yet:** ARM hosts, rootless Docker, several hosts, Kubernetes |
-| Docker Engine with the compose plugin, rootful, from [Docker's apt repository](https://docs.docker.com/engine/install/ubuntu/) | runs the whole stack; images build inside Docker (`deploy/Dockerfile` runs `pnpm install` and `pnpm build` itself) | the socket proxy mounts `/var/run/docker.sock`. The Docker service must start at boot (`systemctl is-enabled docker` says `enabled`, the package's default) |
+| Docker Engine with the compose plugin, rootful, from [Docker's apt repository](https://docs.docker.com/engine/install/ubuntu/) | runs the whole stack; images build inside Docker (`deploy/Dockerfile` runs `pnpm install` and `pnpm build` itself) | `docker compose version` must work: Ubuntu's own `docker.io` package and the snap bring no compose plugin, so remove them and install `docker-ce` with `docker-compose-plugin` from Docker's repository. The socket proxy mounts `/var/run/docker.sock`. The Docker service must start at boot (`systemctl is-enabled docker` says `enabled`, the package's default) |
 | git | install and update from release tags | |
 | curl | `/status`, starting runs by hand | |
 | Node.js 24 and pnpm | only on the host for the `tend` CLI and the smoke scripts; the stack does not need them | `corepack enable pnpm` (may need `sudo` with a system-wide Node). Ubuntu's own `nodejs` package is older than 24, so install Node 24 another way |
@@ -185,7 +185,7 @@ Rules the loader enforces:
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
 | `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: remove `develop-issue` from `ask-before-merge` to let `merge-gate` merge automatically | server |
-| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb` | worker (server validates) |
+| `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
 | `PullRequestIntegration` | `integrations/pull-requests/*.yaml` | one per host; `github` on `github.com` with the platform token | server |
 
@@ -302,6 +302,10 @@ Without a third party: a reverse proxy on the host (e.g. Caddy or nginx) that te
 - Listen only on the LAN interface; no port forward on the router.
 - Pass long-lived responses through unbuffered: transcripts and chats stream as Server-Sent Events (`.../stream`).
 - Everyone on your LAN reaches the sign-in page; with Tailscale only your devices do.
+
+### Alternative: an SSH tunnel
+
+Without any extra service: forward the port over SSH, which encrypts the traffic while the server stays on `127.0.0.1`. From a laptop: `ssh -L 8080:localhost:8080 <host>`, then `http://localhost:8080/`. On a phone, an SSH client with port forwarding does the same (for example ConnectBot on Android: a local port forward `8080` → `localhost:8080`, then `http://localhost:8080/` in the phone's browser). The tunnel must be up while you use the UI.
 
 ### Locally and for the engine's UI
 
