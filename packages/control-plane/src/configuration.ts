@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentProfile, TriggerBinding, Workflow } from "@tendworks/shared";
+import type { AgentProfile, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
@@ -15,6 +15,7 @@ const KINDS: Record<string, string> = {
   AgentProfile: "agent-profile.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
   TriggerBinding: "trigger-binding.schema.yaml",
+  Workspace: "workspace.schema.yaml",
 };
 const WORKFLOW_SCHEMA = "serverless-workflow.schema.yaml";
 
@@ -33,11 +34,13 @@ export interface Configuration {
   agentProfiles: AgentProfile.AgentProfile[];
   /** Trigger bindings, ordered by name; each starts a configured workflow. */
   triggerBindings: TriggerBinding.TriggerBinding[];
+  /** Workspaces agents work in, ordered by name (ADR 0022). */
+  workspaces: Workspace.Workspace[];
 }
 
 /** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
 export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
-  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], ...overrides };
+  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], ...overrides };
 }
 
 let ajv: Ajv2020 | undefined;
@@ -70,6 +73,7 @@ export function loadConfiguration(dir: string): Configuration {
   const workflows = new Map<string, { file: string; definition: Workflow.Workflow }>();
   const profiles = new Map<string, { file: string; profile: AgentProfile.AgentProfile }>();
   const bindings = new Map<string, { file: string; binding: TriggerBinding.TriggerBinding }>();
+  const workspaces = new Map<string, { file: string; workspace: Workspace.Workspace }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -114,6 +118,13 @@ export function loadConfiguration(dir: string): Configuration {
       continue;
     }
     if (!check(file, schemaFile, document)) continue;
+    if (kind === "Workspace") {
+      const workspace = document as unknown as Workspace.Workspace;
+      const existing = workspaces.get(workspace.metadata.name);
+      if (existing) issues.push(`${file}: workspace '${workspace.metadata.name}' is already defined in ${existing.file}`);
+      else workspaces.set(workspace.metadata.name, { file, workspace });
+      continue;
+    }
     if (kind !== "TriggerBinding") continue;
     const binding = document as unknown as TriggerBinding.TriggerBinding;
     const existing = bindings.get(binding.metadata.name);
@@ -125,12 +136,19 @@ export function loadConfiguration(dir: string): Configuration {
     for (const [reference, agent] of agentCalls(definition.do, "")) {
       if (!profiles.has(agent)) issues.push(`${file}: ${reference} calls agent://${agent}, but no agent profile '${agent}' is configured`);
     }
+    for (const [reference, name] of workspaceReferences(definition.do, "")) {
+      if (!workspaces.has(name)) issues.push(`${file}: ${reference} works in workspace '${name}', but no workspace '${name}' is configured`);
+    }
   }
 
   for (const { file, binding } of bindings.values()) {
     const { workflow } = binding.spec;
     if (!workflows.has(workflow)) {
       issues.push(`${file}: trigger binding '${binding.metadata.name}' starts workflow '${workflow}', but no workflow '${workflow}' is configured`);
+    }
+    const workspace = binding.spec.input?.workspace;
+    if (isFixed(workspace) && !workspaces.has(workspace)) {
+      issues.push(`${file}: trigger binding '${binding.metadata.name}' starts its runs in workspace '${workspace}', but no workspace '${workspace}' is configured`);
     }
   }
 
@@ -140,6 +158,7 @@ export function loadConfiguration(dir: string): Configuration {
     workflow: (name) => workflows.get(name)?.definition,
     agentProfiles: [...profiles.values()].map(({ profile }) => profile),
     triggerBindings: [...bindings.values()].map(({ binding }) => binding).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+    workspaces: [...workspaces.values()].map(({ workspace }) => workspace).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 
@@ -177,6 +196,34 @@ function agentCalls(tasks: Workflow.TaskList, scope: string): [string, string][]
       return "do" in task ? agentCalls(task.do, reference) : [];
     }),
   );
+}
+
+/** Message metadata key of the workspace an agent task asks for (contracts/schemas/a2a.schema.yaml#/$defs/workspace). */
+const WORKSPACE_METADATA = "dev.tendworks/workspace";
+
+/**
+ * Every workspace a `call: a2a` names by a fixed name (no expression) in its message's
+ * `dev.tendworks/workspace`, as [task reference, workspace name]. A name the workflow
+ * takes from its input is checked when the task starts.
+ */
+function workspaceReferences(tasks: Workflow.TaskList, scope: string): [string, string][] {
+  return tasks.flatMap((item, index) =>
+    Object.entries(item).flatMap(([name, task]): [string, string][] => {
+      const reference = `${scope}/do/${index}/${name}`;
+      if ("call" in task) {
+        if (task.call !== "a2a") return [];
+        const requested = task.with.parameters.message.metadata?.[WORKSPACE_METADATA];
+        const workspace = isObject(requested) ? requested.name : undefined;
+        return isFixed(workspace) ? [[reference, workspace]] : [];
+      }
+      return "do" in task ? workspaceReferences(task.do, reference) : [];
+    }),
+  );
+}
+
+/** A string without a runtime expression (`${ … }`), so it can be checked when the configuration loads. */
+function isFixed(value: unknown): value is string {
+  return typeof value === "string" && !value.includes("${");
 }
 
 function describe(errors: ErrorObject[]): string[] {

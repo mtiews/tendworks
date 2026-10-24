@@ -8,9 +8,12 @@ import {
   createFileTranscriptStore,
   createPostgresTaskStore,
   createSandboxCleanup,
+  createWorkspaces,
   loadAgentProfiles,
   loadSkills,
+  loadWorkspaces,
   migrateAgentRuntimeStore,
+  WorkspaceError,
 } from "@tendworks/agent-runtime";
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
@@ -41,13 +44,16 @@ const env = (name: string, fallback?: string): string => {
 let profiles;
 let templates;
 let skills;
+let workspaceDefinitions;
 try {
   profiles = loadAgentProfiles(env("TEND_CONFIG_DIR"));
   // The deployment's own sandbox images with their pins; templates name them by repository.
   templates = loadSandboxTemplates(env("TEND_CONFIG_DIR"), { pinnedImages: env("TEND_SANDBOX_IMAGES", "").split(/[\s,]+/).filter(Boolean) });
   skills = loadSkills(env("TEND_CONFIG_DIR"));
+  // Workspaces by name (ADR 0022); the server refuses references to unknown ones at startup.
+  workspaceDefinitions = loadWorkspaces(env("TEND_CONFIG_DIR"));
 } catch (error) {
-  if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError)) throw error;
+  if (!(error instanceof AgentProfileError) && !(error instanceof SandboxTemplateError) && !(error instanceof WorkspaceError)) throw error;
   console.error(error.message);
   process.exit(1);
 }
@@ -58,7 +64,7 @@ const selected = claudeCodeCredentialFromEnv(process.env);
 if ("problem" in selected && profiles.some((profile) => profile.spec.harness === "claude-code")) {
   console.warn(`harness claude-code: ${selected.problem}; its tasks will fail until this is fixed`);
 }
-// Secrets agent profiles pass into sandboxes (spec.env): only TENDWORKS_AGENT_* variables
+// Secrets agent profiles (spec.env) and workspaces (credentials) pass into sandboxes: only TENDWORKS_AGENT_* variables
 // resolve, so platform secrets never reach an agent (ADR 0008). Never log their values.
 // In the compose stack they come from the file agent-secrets writes from deploy/.env, read
 // again at every reference, so a secret added there needs no restart of the worker.
@@ -70,6 +76,13 @@ for (const profile of profiles) {
     if (problem) console.warn(`agent profile ${profile.metadata.name}: ${variable}: ${problem}; its tasks will fail until this is fixed`);
   }
 }
+// Each workspace's credential is its own agent secret, resolved again for every session.
+for (const workspace of workspaceDefinitions) {
+  const secret = workspace.spec.credentials?.secretRef.name;
+  const problem = secret === undefined ? undefined : secrets.problem(secret);
+  if (problem) console.warn(`workspace ${workspace.metadata.name}: ${problem}; tasks in it will fail until this is fixed`);
+}
+const workspaces = createWorkspaces(workspaceDefinitions, { secrets });
 // The platform MCP server (ADR 0016): its address as sandboxes reach it, the read-only
 // token, and the network of the MCP-only gateway that sandboxes reach it on (ADR 0019).
 // They go only to sessions of profiles that list it (mcp: [tendworks]), whose sandboxes
@@ -143,6 +156,7 @@ const agents = createAgentRuntime({
   harnesses: { "claude-code": claudeCode },
   store: tasks,
   transcripts: createFileTranscriptStore({ directory: env("TEND_TRANSCRIPT_DIR") }),
+  workspaces,
 });
 // Sandboxes and session volumes of this installation that belong to no live task or open
 // chat go, on start and every 5 minutes; each removal is logged, failed ones are logged,

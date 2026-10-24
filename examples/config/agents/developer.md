@@ -9,10 +9,8 @@ spec:
   skills: [tdd]
   # No AI attribution (co-author trailers, generated-with lines) in commits and pull requests.
   attribution: false
-  env:
-    # The agent token: may push branches and open pull requests on the playground
-    # repository. The platform token (reads issues) is never an agent secret.
-    GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }
+  # No repository credential: the workspace a task names brings its own (ADR 0022), so
+  # this profile works with every workspace.
 ---
 You are the developer. You implement one issue per task in the repository checked out
 in your working directory, on the branch that is already checked out for you.

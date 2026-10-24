@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import type { AgentRuntime } from "./agent-runtime.js";
 import { AgentNotFoundError } from "./agent-tasks.js";
 import { ChatBusyError, ChatEndedError, ChatNotAllowedError, InvalidRepositoryError, type Chat } from "./chats.js";
-import { WORKSPACE } from "./workspace.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 type Schemas = Contract.components["schemas"];
@@ -42,9 +41,9 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
       return problem(400, "Invalid request", "the body must be { agent, text, repository? } with the name of an agent profile, the first message and a clone URL");
     }
     try {
-      // The repository becomes the workspace of the chat's task (ADR 0010), on its default branch.
+      // The repository becomes the workspace of the chat, on its default branch.
       const message = userMessage(text);
-      const chat = await runtime.startChat(body.agent, repository === undefined ? message : { ...message, metadata: { [WORKSPACE]: { repository } } });
+      const chat = await runtime.startChat(body.agent, message, repository === undefined ? {} : { repository });
       return c.json(chat satisfies Chat, 201, { location: `/chats/${chat.id}` });
     } catch (error) {
       if (error instanceof AgentNotFoundError) return problem(400, "Unknown agent profile", error.message);

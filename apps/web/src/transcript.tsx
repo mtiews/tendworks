@@ -245,7 +245,7 @@ function Entry({ entry, showHarness, open, toggle }: { entry: Extract<Item, { ki
     case "workspace-checkout":
       return (
         <Expandable className={`entry entry-tool${entry.exitCode === 0 ? "" : " entry-error"}`} time={entry.time} open={open} toggle={toggle} detail={entry.output || "(no output)"}>
-          Checked out {[entry.workspace.repository, entry.workspace.branch].filter(Boolean).join(" ")} (exit code {entry.exitCode})
+          Checked out {[entry.workspace.url, entry.workspace.branch].filter(Boolean).join(" ")} (exit code {entry.exitCode})
         </Expandable>
       );
     case "artifacts":

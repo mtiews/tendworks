@@ -36,7 +36,7 @@ describe("the automated chain on the compose stack, with fakes", () => {
         {
           name: "implement",
           status: "completed",
-          workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" },
+          workspace: { name: "fake-playground", branch: "tendworks/fake" },
           artifacts: [{ name: "pull-request", url: "https://git.example/example/playground/pull/1" }],
         },
       ],

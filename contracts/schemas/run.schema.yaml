@@ -147,14 +147,15 @@ $defs:
     title: StepWorkspace
     description: >-
       The workspace the step handed to its agent (the run's workflow set it, not the
-      agent): the repository checked out and the branch the agent works on.
+      agent): the configured workspace by name and the branch the agent works on, absent
+      when it works on the workspace's default branch.
     type: object
     additionalProperties: false
-    required: [repository, branch]
+    required: [name]
     properties:
-      repository:
+      name:
         type: string
-        description: Clone URL, e.g. `https://github.com/acme/playground.git`.
+        description: Name of the workspace (contracts/schemas/workspace.schema.yaml).
       branch:
         type: string
   stepArtifact:

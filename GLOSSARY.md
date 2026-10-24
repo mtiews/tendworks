@@ -30,6 +30,10 @@ _Avoid_: container (that is one isolation class), VM, box
 The declarative recipe a sandbox is created from: image, isolation class, resources and egress allowlist.
 _Avoid_: sandbox profile, sandbox config
 
+**Workspace**:
+What an agent session works on, declared once by name: a git repository on any host with its own credential, cloned into the sandbox at `/workspace`. Workflows and trigger bindings refer to it by name; agent profiles carry no repository credentials.
+_Avoid_: repository (one kind of workspace), project, checkout (what the agent runtime makes of a git workspace)
+
 **Isolation class**:
 How strongly a sandbox is separated from its host: `container`, `gvisor` or `microvm`. Chosen by the operator per sandbox template.
 _Avoid_: security level, sandbox type, runtime

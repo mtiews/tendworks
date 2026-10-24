@@ -39,7 +39,7 @@ export interface Step {
   /** What the agent session cost, as the agent reported it. */
   cost?: { amount: number; currency: string };
   /** The workspace the step handed to the agent (`dev.tendworks/workspace` of its message), as the workflow set it. */
-  workspace?: { repository: string; branch: string };
+  workspace?: { name: string; branch?: string };
   /** Links the agent reported as artifacts of its task, e.g. a pull request. */
   artifacts?: { name: string; url: string; description?: string }[];
   error?: WorkflowError;
@@ -287,11 +287,11 @@ function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost" | "arti
   };
 }
 
-/** The workspace a message asks for, when it names a repository and a branch. */
+/** The workspace a message asks for, when it names one, with the branch when it names one. */
 function workspaceOf(metadata: Record<string, unknown> | undefined): Step["workspace"] {
   const value = metadata?.[WORKSPACE];
-  if (!isObject(value) || typeof value.repository !== "string" || typeof value.branch !== "string") return undefined;
-  return { repository: value.repository, branch: value.branch };
+  if (!isObject(value) || typeof value.name !== "string") return undefined;
+  return { name: value.name, ...(typeof value.branch === "string" ? { branch: value.branch } : {}) };
 }
 
 function toPart(part: Workflow.A2APart): A2A.Part {

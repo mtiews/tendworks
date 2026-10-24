@@ -19,11 +19,13 @@ GitHub → Settings → Developer settings → Fine-grained tokens → Generate 
 | Setting | Value |
 | --- | --- |
 | Expiration | 30–90 days |
-| Repository access | Only select repositories: the repositories the agent works on |
+| Repository access | Only select repositories: the repository of the workspace (one token per workspace keeps each scoped to its repository) |
 | Contents | Read and write (push branches) |
 | Pull requests | Read and write (open pull requests) |
 | Metadata | Read (set automatically) |
 | **Everything else** | **No access**. Especially **Workflows** (cannot change `.github/workflows`), **Actions** (cannot start or re-run workflows), **Secrets**, **Environments**, **Administration** (cannot change settings) |
+
+The token is the workspace's credential (`spec.credentials` of its `Workspace`, ADR 0022): git clones and pushes with it through the sandbox's credential helper, and the session sees it as `GH_TOKEN` for `gh` when the workspace sets `env: GH_TOKEN`, as the starter's `playground` does. For another repository, declare another workspace with its own `TENDWORKS_AGENT_*` token; agent profiles hold none.
 
 ### 2. Platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
 

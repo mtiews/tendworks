@@ -22,7 +22,7 @@ do:
             # The workspace the run hands to the agent; the fake agent checks nothing out.
             metadata:
               dev.tendworks/workspace:
-                repository: https://git.example/example/playground.git
+                name: fake-playground
                 branch: tendworks/fake
       output:
         as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'

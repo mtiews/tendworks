@@ -24,11 +24,12 @@ RUN apt-get update \
  && apt-get purge -y curl && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
 
-# git reaches GitHub with the token the agent profile passes in as GH_TOKEN, through
-# the GitHub CLI as credential helper; commits carry a fixed agent identity.
-RUN git config --system credential.https://github.com.helper "" \
- && git config --system --add credential.https://github.com.helper "!/usr/local/bin/gh auth git-credential" \
- && git config --system user.name "Tendworks agent" \
+# git reaches any host with the workspace's own credential through a generic credential
+# helper, which the agent runtime's checkout configures for the repository's host only
+# (ADR 0022); the GitHub CLI is an agent tool and reads its token from the variable the
+# workspace exposes (e.g. GH_TOKEN). Commits carry a fixed agent identity.
+COPY --chmod=0755 git-credential-tendworks /usr/local/bin/git-credential-tendworks
+RUN git config --system user.name "Tendworks agent" \
  && git config --system user.email "agent@tendworks.invalid" \
  && git config --system init.defaultBranch main \
  && gh --version

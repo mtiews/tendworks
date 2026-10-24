@@ -14,7 +14,7 @@ name: tendworks
 # and the worker, which fills the pin into sandbox templates that name the image by its
 # repository alone, both read this value.
 x-sandbox-images:
-  claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-1
+  claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-2
 
 services:
   postgres:
@@ -189,7 +189,7 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
-      # Secrets agent profiles pass into sandboxes (spec.env): every TENDWORKS_AGENT_*
+      # Secrets workspaces (credentials) and agent profiles (spec.env) pass into sandboxes: every TENDWORKS_AGENT_*
       # variable of deploy/.env, read from the file agent-secrets writes, again at every
       # reference. Only TENDWORKS_AGENT_* resolve; platform secrets never get here.
       TEND_AGENT_SECRETS_FILE: /var/lib/tendworks/agent-secrets/agent-secrets.json

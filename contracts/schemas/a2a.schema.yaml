@@ -226,21 +226,21 @@ $defs:
     title: Workspace
     description: >-
       Tendworks extension, sent as `Message.metadata["dev.tendworks/workspace"]` of the
-      message that starts a task: the agent's workspace is a checkout of `repository` on
-      `branch`. An existing branch is checked out, a missing one is created from the
-      repository's default branch, so a task sent again for the same branch continues
-      where the last attempt left off. Without `branch` (a chat's workspace), the
-      checkout stays on the repository's default branch. The agent reaches the
-      repository with the credentials its agent profile passes into the sandbox
-      (`spec.env`); a public repository needs none.
+      message that starts a task: the agent works in the workspace configured under
+      `name` (contracts/schemas/workspace.schema.yaml). For a git workspace an existing
+      `branch` is checked out and a missing one is created from the workspace's default
+      branch, so a task sent again for the same branch continues where the last attempt
+      left off; without `branch` the checkout stays on the default branch. The agent
+      reaches the repository with the workspace's own credential, never one of its
+      agent profile. A name no workspace is configured under fails the task.
     type: object
     additionalProperties: false
-    required: [repository]
+    required: [name]
     properties:
-      repository:
+      name:
         type: string
-        pattern: ^[^-\s]\S*$
-        description: Clone URL of a Git repository, e.g. `https://git.example/owner/name.git`.
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name of a configured workspace (`metadata.name` of a `Workspace`).
       branch:
         type: string
         pattern: ^[^-\s]\S*$
