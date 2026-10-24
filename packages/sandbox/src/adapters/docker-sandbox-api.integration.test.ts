@@ -248,7 +248,8 @@ describe("Docker adapter resources of an installation", () => {
 
     await docker("stop", "-t", "0", `${own}-sandbox-${id}`);
 
-    expect(await api.list()).toContainEqual(expect.objectContaining({ id, state: "stopped" }));
+    // The engine may still report the container as running for a moment after `docker stop` returns.
+    await expect.poll(() => api.list(), { timeout: 10_000 }).toContainEqual(expect.objectContaining({ id, state: "stopped" }));
   });
 });
 
