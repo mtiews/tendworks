@@ -40,10 +40,21 @@
   overflow-wrap: anywhere;
 }
 
-.status-approved {
+.approval-question {
+  margin: 0 0 var(--space-2);
+  overflow-wrap: anywhere;
+}
+
+.approval-links {
+  margin: var(--space-2) 0;
+  padding-left: var(--space-4);
+}
+
+.status-decided,
+.answer-continue {
   color: var(--color-ok);
 }
 
-.status-rejected {
+.answer-stop {
   color: var(--color-error);
 }

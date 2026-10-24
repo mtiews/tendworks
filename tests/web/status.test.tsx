@@ -21,10 +21,13 @@ function run(id: string, status: "pending" | "running" | "completed" | "failed")
 
 const approval = {
   runId: "r-1",
-  workflow: "develop-issue",
-  action: "merge" as const,
+  workflow: "wait-for-merge",
+  step: "/do/1/confirmMerge",
+  action: "merge-pull-request",
   policy: "careful",
-  question: "Merge https://github.com/example/playground/pull/7 for run r-1 of develop-issue?",
+  question: "Merge https://github.com/example/playground/pull/7, then continue?",
+  links: [],
+  answers: [{ label: "Merged", outcome: "continue" as const }],
   createdAt: "2026-10-18T09:00:00.000Z",
 };
 
@@ -37,7 +40,7 @@ describe("status page: platform health", () => {
       runs,
       approvals: createInMemoryApprovals([
         { ...approval, id: "a-1", status: "pending" },
-        { ...approval, id: "a-2", status: "approved", decidedAt: "2026-10-18T09:01:00.000Z" },
+        { ...approval, id: "a-2", status: "decided", answer: "Merged", decidedAt: "2026-10-18T09:01:00.000Z" },
       ]),
     });
 

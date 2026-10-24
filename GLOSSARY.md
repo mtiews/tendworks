@@ -49,5 +49,5 @@ A declarative rule (`kind: Policy`) that decides per action name and workflow wh
 _Avoid_: rule, gate setting, permission
 
 **Approval request**:
-A question to the human with options, created when a policy decides a gate applies; the run waits for its decision.
+A question to the human from a workflow's human step: an action name, links and custom answers, each continuing or stopping the run. Created when no policy allows the action; the run waits until it is decided with one of its answers.
 _Avoid_: approval task, confirmation, ticket

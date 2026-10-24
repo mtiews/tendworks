@@ -42,8 +42,9 @@ export function createNotifier({ store, channel, now = () => new Date() }: Notif
 function toNotification(event: NotifiedEvent, createdAt: string): Notification {
   const base = { id: crypto.randomUUID(), runId: event.runid, createdAt, delivery: { status: "pending" as const } };
   if (event.type === "dev.tendworks.approval.requested") {
-    const { id, question } = event.data;
-    return { ...base, kind: "approval.requested", title: `Approval needed: ${question}`, detail: `Answer with: tend approval approve ${id} (or reject ${id})` };
+    const { id, question, answers } = event.data;
+    const offered = answers.map(({ label }) => `"${label}"`).join(", ");
+    return { ...base, kind: "approval.requested", title: `Approval needed: ${question}`, detail: `Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"` };
   }
   if (event.type === "dev.tendworks.run.completed") {
     return { ...base, kind: "run.completed", title: `Run ${event.runid} of ${event.data.workflow} completed` };

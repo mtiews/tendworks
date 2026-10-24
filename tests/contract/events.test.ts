@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createAgentRuntime, createInMemoryTaskStore } from "@tendworks/agent-runtime";
 import { loadConfiguration } from "@tendworks/control-plane";
-import { approvalRequested, createApprovals, createInMemoryApprovalStore } from "@tendworks/human-interaction";
+import { createApprovals, createInMemoryApprovalStore } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
 import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "@tendworks/trigger-gateway";
 import { afterAll, describe, expect, it } from "vitest";
@@ -104,20 +104,22 @@ describe("events the domains emit", () => {
 
   it("human interaction: approval.requested and approval.decided", async () => {
     const approvals = createInMemoryApprovalStore();
-    const request = {
-      id: "a-1",
-      runId: "r-1",
-      workflow: "release-app",
-      action: "deploy",
-      policy: "careful",
-      question: "Deploy release 1.4 for run r-1 of release-app?",
-      status: "pending" as const,
-      traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-      createdAt: "2026-10-19T10:00:00.000Z",
-    };
+    const run = { id: "r-1", workflow: "release-app", status: "running" as const, traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" };
+    const human = createApprovals({ store: approvals, runs: async () => run });
 
-    await approvals.open(request, (opened) => approvalRequested(opened, opened.createdAt));
-    await createApprovals({ store: approvals }).decide("a-1", "approve");
+    const asked = await human.ask({
+      run: "r-1",
+      step: "/do/1/confirm",
+      action: "deploy",
+      question: "Deploy release 1.4 for run r-1 of release-app?",
+      links: [{ title: "Release notes", url: "https://git.example/acme/app/releases/1.4" }],
+      answers: [
+        { label: "Deploy", outcome: "continue" },
+        { label: "Cancel", outcome: "stop" },
+      ],
+    });
+    if (!("approvalRequest" in asked) || !asked.approvalRequest) throw new Error("expected an approval request");
+    await human.decide(asked.approvalRequest.id, "Cancel");
 
     expect(approvals.published.map((event) => event.type)).toEqual(["dev.tendworks.approval.requested", "dev.tendworks.approval.decided"]);
     expectValid(approvals.published);

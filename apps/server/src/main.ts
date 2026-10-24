@@ -114,9 +114,15 @@ const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
 const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
 // Human interaction: approval requests; approval.requested and approval.decided go onto
-// the bus with each write.
+// the bus with each write. A workflow's human step asks here: the policies of the run's
+// workflow decide, by orchestration's record of the run, never by what the caller claims.
 const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
-const approvals = createApprovals({ store: approvalStore });
+const approvals = createApprovals({
+  store: approvalStore,
+  policies: configuration.policies,
+  runs: (runId) => orchestration.get(runId),
+});
+console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control

@@ -1,0 +1,61 @@
+$id: https://tendworks.dev/schemas/v1/schemas/policy.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Policy
+description: >-
+  Decides per action name and workflow whether a workflow's human step (`call: approval`)
+  proceeds right away (`allow`) or asks the human first (`ask`), ADR 0024. Human
+  interaction evaluates every policy that applies to the run's workflow and names the
+  step's action; the strictest decision wins, and the platform asks when no policy
+  applies. The run cannot pick the policy.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: Policy
+  metadata:
+    type: object
+    title: PolicyMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name of the policy, e.g. in the approval requests it caused.
+  spec:
+    title: PolicySpec
+    type: object
+    required: [actions]
+    additionalProperties: false
+    properties:
+      workflows:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+        description: >-
+          Names of the workflows (`document.name`) the policy applies to. Without it the
+          policy applies to every workflow.
+      actions:
+        type: object
+        title: PolicyActions
+        description: >-
+          The decision per action name of a human step, e.g. `merge-pull-request: allow`.
+          Actions not named here are not decided by this policy.
+        minProperties: 1
+        propertyNames:
+          pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        additionalProperties:
+          $ref: '#/$defs/decision'
+$defs:
+  decision:
+    title: PolicyDecision
+    description: >-
+      What a policy decides for a human step's action. `allow`: the step proceeds without
+      asking. `ask`: an approval request decides first.
+    type: string
+    enum: [allow, ask]

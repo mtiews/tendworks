@@ -264,7 +264,7 @@ The class is set per tool in the integration configuration; unclassified tools c
 
 ## Human-in-the-loop and notification
 
-The human is only called via `ApprovalRequest`s, and whether one is created is decided by a policy, not by the workflow author case by case. A workflow step "wait for approval" is a `listen` on `approval.decided` in Serverless Workflow.
+The human is only called via `ApprovalRequest`s, and whether one is created is decided by a policy, not by the workflow author case by case. A workflow waits for a human with the human step `call: approval` (ADR 0024): it names an action, a question, links and custom answers, each mapped to continue or stop; policies decide per action name and workflow whether it asks (`ask`) or proceeds (`allow`), and the step waits for the `approval.decided` of its own request.
 
 **Gate types**
 
@@ -305,7 +305,7 @@ Tendworks has two first-party clients, both built only on the public control pla
 - `tend run list|get|logs|cancel|resume` — runs and steps; `--follow` streams live events
 - `tend trigger list|fire` — triggers including the next scheduled execution; fire one manually
 - `tend agent list` and `tend chat <profile> [--repo …]` — start an agent session in the terminal; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
-- `tend approval list|approve|reject` — answer gates from the terminal
+- `tend approval list|get|answer` — show approval requests with their answers and decide them from the terminal
 - `tend config validate|diff|apply` — check configuration against the JSON Schemas; apply directly in local mode, otherwise open a pull request
 - `tend context use <name>` — switch between laptop, server and cluster
 

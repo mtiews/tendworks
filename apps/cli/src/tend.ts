@@ -22,6 +22,7 @@ type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
+type ApprovalRequest = ControlPlane.components["schemas"]["approvalRequest"];
 type AgentList = ControlPlane.components["schemas"]["AgentList"];
 type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
 type Chat = ControlPlane.components["schemas"]["chat"];
@@ -225,26 +226,38 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatApprovalList));
     });
 
-  for (const [name, decision, done] of [
-    ["approve", "approve", "approved"],
-    ["reject", "reject", "rejected"],
-  ] as const) {
-    approval
-      .command(name)
-      .description(`${name} an approval request; the waiting run goes on`)
-      .argument("<id>", "approval request id")
-      .action(async (id: string, _options: unknown, command: Command) => {
-        const { baseUrl, client } = controlPlane(command);
-        const { data, error, response } = await client
-          .POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { decision } })
-          .catch((cause: unknown) => {
-            throw new UnreachableError(baseUrl, cause);
-          });
-        if (response.status === 404) throw new Error(`approval request ${id} not found`);
-        if (!data) throw new AnswerError(response, error);
-        io.stdout(`approval request ${data.id} ${done}\n`);
+  approval
+    .command("get")
+    .description("show one approval request with its question, links and the answers to choose from")
+    .argument("<id>", "approval request id")
+    .addOption(outputOption())
+    .action(async (id: string, options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: id } } }).catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
       });
-  }
+      if (response.status === 404) throw new Error(`approval request ${id} not found`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatApprovalRequest));
+    });
+
+  approval
+    .command("answer")
+    .description("decide an approval request with one of its answers; the waiting run continues or stops by it")
+    .argument("<id>", "approval request id")
+    .argument("<answer>", "the label of one of the request's answers (tend approval get <id>)")
+    .action(async (id: string, answer: string, _options: unknown, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client
+        .POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { answer } })
+        .catch((cause: unknown) => {
+          throw new UnreachableError(baseUrl, cause);
+        });
+      if (response.status === 404) throw new Error(`approval request ${id} not found`);
+      if (!data) throw new AnswerError(response, error);
+      const outcome = data.answers.find((offered) => offered.label === data.answer)?.outcome;
+      io.stdout(`approval request ${data.id} answered "${data.answer ?? answer}"; the run ${outcome === "stop" ? "stops" : "continues"}\n`);
+    });
 
   const chat = program
     .command("chat")
@@ -997,10 +1010,29 @@ function formatNotificationList(list: NotificationList): string {
 
 function formatApprovalList(list: ApprovalRequestList): string {
   const rows = [
-    ["ID", "STATUS", "RUN", "CREATED", "QUESTION"],
-    ...list.items.map((request) => [request.id, request.status, request.runId, request.createdAt, request.question]),
+    ["ID", "STATUS", "RUN", "CREATED", "ANSWER", "QUESTION"],
+    ...list.items.map((request) => [request.id, request.status, request.runId, request.createdAt, request.answer ?? "-", request.question]),
   ];
   return table(rows);
+}
+
+function formatApprovalRequest(request: ApprovalRequest): string {
+  const fields = [
+    ["APPROVAL REQUEST", request.id],
+    ["RUN", request.runId],
+    ["WORKFLOW", request.workflow],
+    ["STEP", request.step],
+    ["ACTION", request.action],
+    ["POLICY", request.policy ?? "- (no policy applies, so the platform asks)"],
+    ["STATUS", request.status],
+    ["CREATED", request.createdAt],
+    ...(request.answer ? [["DECIDED", `${request.answer}${request.decidedAt ? ` (${request.decidedAt})` : ""}`]] : []),
+    ["QUESTION", request.question],
+  ];
+  const links = request.links.length > 0 ? `\n${table([["LINK", "URL"], ...request.links.map((link) => [link.title, link.url])])}` : "";
+  const answers = table([["ANSWER", "THEN"], ...request.answers.map((answer) => [answer.label, answer.outcome])]);
+  const hint = request.status === "pending" ? `\nAnswer with: tend approval answer ${request.id} "<answer>"\n` : "";
+  return `${table(fields)}${links}\n${answers}${hint}`;
 }
 
 /** Aligns cells in columns; the last column is not padded. */

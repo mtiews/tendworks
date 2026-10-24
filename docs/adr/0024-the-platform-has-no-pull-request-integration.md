@@ -7,7 +7,9 @@ For workflows that continue after a human action, a generic workflow step asks a
 - it creates an approval request with a free action name, a question, links and custom answers, e.g. "Merged – continue" or "Cancel", each mapped to continue or stop;
 - it then waits for the decision event.
 
-Policies (`kind: Policy`) decide per action name and workflow between `ask` and `allow`; with `allow` the step proceeds without a request. These are the autonomy levels of later milestones.
+Policies (`kind: Policy`) decide per action name and workflow between `ask` and `allow`; with `allow` the step proceeds without a request. The strictest applicable policy wins, and the platform asks when no policy names the action. These are the autonomy levels of later milestones.
+
+The step is a call kind of its own in the interpreter, `call: approval`, rather than `call: http` followed by `listen`: `listen` matches by event type only, so it could take the decision of another request of the same run. The step asks the control plane (`POST /approval-requests` with the run and its step reference; the policies are evaluated against the platform's record of the run), and waits for the `approval.decided` of exactly its request. A run has one request per step, so a retried or replayed step finds its request again, decided or not. `stop` ends the workflow and the run completes.
 
 ## Considered Options
 

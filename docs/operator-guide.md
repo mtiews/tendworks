@@ -181,7 +181,8 @@ Rules the loader enforces:
 
 | Kind | Where | Typical changes | Read by |
 | --- | --- | --- | --- |
-| Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>` | server |
+| Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>`; a human step `call: approval` (`action`, `question`, `links`, `answers` with `outcome: continue \| stop`) where a workflow waits for you | server |
+| `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows` (all workflows without it); the strictest applicable policy wins, and without one the step asks | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `Workspace` | `workspaces/*.yaml` | `spec.git.url` (any host; `https://` or `http://` without credentials in it) and `spec.git.defaultBranch`; `spec.credentials.secretRef` (an agent secret), `username` (default `x-access-token`) and `env` (e.g. `GH_TOKEN`: the session sees the credential under that name too) | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow`; `spec.input.workspace`: the workspace its runs work in | server |
@@ -198,7 +199,7 @@ All secrets live in `deploy/.env`. Configuration only references them (ADR 0008)
 
 | Secret | Purpose | Held by | Minimal scope | Generate | If it leaks |
 | --- | --- | --- | --- | --- | --- |
-| `TEND_API_TOKEN` | full access to the control plane API: start runs, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including deciding approvals |
+| `TEND_API_TOKEN` | full access to the control plane API: start runs, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` and `call: approval` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including deciding approvals |
 | `TEND_API_READ_TOKEN` | read-only API access (403 on writes); the platform MCP server reads with it | server, worker, and the Claude Code session of profiles with `mcp: [tendworks]` (as an MCP header, not as an environment variable); optionally you for a read-only UI | read only; must differ from `TEND_API_TOKEN` | `scripts/setup-env.sh`; at least 16 characters | all runs, transcripts, chats, triggers and agents can be read |
 | `TEND_POSTGRES_PASSWORD` | database password of user `tend`; no default, server and worker refuse to start without it | postgres, server, worker (which encode it into their connection) | — | `scripts/setup-env.sh` (or `openssl rand -hex 32`) | low while the store is not published; full read/write of all platform state for anyone who reaches it |
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
@@ -383,7 +384,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]` |
 | Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
-| Approvals | `tend approval list --pending`, `tend approval approve <id>`, `tend approval reject <id>` |
+| Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
 | Notifications, triggers, agents | `tend notification list`, `tend trigger list` (last check per binding), `tend agent list` (active sessions per profile) |
 | Chats | `tend chat <profile>`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
 | Live sandboxes | `docker ps --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox` |

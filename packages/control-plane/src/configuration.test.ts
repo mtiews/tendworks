@@ -104,7 +104,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, SandboxTemplate, TriggerBinding, Workspace)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, SandboxTemplate, TriggerBinding, Workspace)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -204,6 +204,37 @@ describe("loadConfiguration", () => {
       `triggers/github.yaml: /spec/source/github/token/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
       "workflows/build.sw.yaml: /do/0/implement calls agent://developer, but no agent profile 'developer' is configured",
     ]);
+  });
+
+  it("loads policies per action and rejects invalid ones and duplicates", () => {
+    const policy = (name: string, actions: string) => `apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: ${name} }\nspec: { actions: ${actions} }\n`;
+    const valid = folder({ "policies/trusted.yaml": policy("trusted", "{ deploy: allow }"), "policies/careful.yaml": policy("careful", "{ deploy: ask, merge-pull-request: ask }") });
+    expect(loadConfiguration(valid).policies.map((p) => [p.metadata.name, p.spec.actions])).toEqual([
+      ["careful", { deploy: "ask", "merge-pull-request": "ask" }],
+      ["trusted", { deploy: "allow" }],
+    ]);
+
+    const invalid = folder({
+      "policies/a.yaml": policy("trusted", "{ deploy: allow }"),
+      "policies/b.yaml": policy("trusted", "{ deploy: ask }"),
+      "policies/c.yaml": policy("sloppy", "{ deploy: always }"),
+      "policies/d.yaml": policy("empty", "{}"),
+    });
+    expect(issuesOf(invalid)).toEqual([
+      "policies/b.yaml: policy 'trusted' is already defined in policies/a.yaml",
+      "policies/c.yaml: /spec/actions/deploy: must be equal to one of the allowed values (allow, ask)",
+      "policies/d.yaml: /spec/actions: must NOT have fewer than 1 properties",
+    ]);
+  });
+
+  it("rejects a policy for a workflow that is not configured, so a typo cannot loosen a human step", () => {
+    const dir = folder({
+      "workflows/build.sw.yaml": workflow("build"),
+      "agents/developer.md": agent("developer"),
+      "policies/careful.yaml": "apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: careful }\nspec: { actions: { deploy: allow }, workflows: [build, biuld] }\n",
+    });
+
+    expect(issuesOf(dir)).toEqual(["policies/careful.yaml: policy 'careful' names workflow 'biuld', which is not configured (configured: build)"]);
   });
 
   it("accepts http calls in workflows without asking for agent profiles", () => {

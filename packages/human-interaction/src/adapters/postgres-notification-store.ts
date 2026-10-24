@@ -31,13 +31,17 @@ create table if not exists human_interaction.approval_requests (
   id           text primary key,
   run_id       text not null,
   workflow     text not null,
+  step         text not null,
   action       text not null,
-  policy       text not null,
+  policy       text,
   question     text not null,
+  links        jsonb not null,
+  answers      jsonb not null,
   status       text not null,
+  answer       text,
   created_at   timestamptz not null,
   decided_at   timestamptz,
-  unique (run_id, action)
+  unique (run_id, step)
 );
 alter table human_interaction.approval_requests add column if not exists traceparent text;
 `,
