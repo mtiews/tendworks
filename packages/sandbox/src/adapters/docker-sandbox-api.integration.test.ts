@@ -77,7 +77,12 @@ async function hostDirectory(): Promise<string> {
   chmodSync(join(bindDirectory, name), 0o777); // the sandbox user writes there
   return `${bindRoot}/${name}`;
 }
-afterAll(() => rmSync(bindDirectory, { recursive: true, force: true }));
+// Sandboxes write there as their own user, which the test's user may not delete on Linux,
+// so a root container empties the directory first.
+afterAll(async () => {
+  await docker("run", "--rm", "--user", "0", "-v", `${bindRoot}:/binds`, image, "sh", "-c", "rm -rf /binds/* /binds/.[!.]*");
+  rmSync(bindDirectory, { recursive: true, force: true });
+});
 
 const createApi = (name = installation, { sandboxNetwork = false } = {}) =>
   createDockerSandboxApi({
