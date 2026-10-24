@@ -5,7 +5,7 @@ import { client } from "./support/control-plane.js";
 type Run = ControlPlane.components["schemas"]["run"];
 type Notification = ControlPlane.components["schemas"]["notification"];
 
-const BINDING = "fake-issue-ready-to-merge"; // tests/fixtures/config/triggers, fake integration
+const BINDING = "fake-issue-to-pull-request"; // tests/fixtures/config/triggers, fake integration
 
 async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, timeoutMs = 60_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
@@ -18,11 +18,10 @@ async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, tim
 }
 
 // The automated path of the walking skeleton with fakes only: a time trigger finds an
-// issue in the fake issue tracker, the fake agent reports a pull request, the merge step
-// merges it through the configured fake pull request integration under merge: auto, the
-// run completes and a notification is recorded.
+// issue in the fake issue tracker, the fake agent reports a pull request, the run
+// completes with it after the agent step and a notification is recorded.
 describe("the automated chain on the compose stack, with fakes", () => {
-  it("goes from a matching issue to a merged pull request, a completed run and a notification", { timeout: 120_000 }, async () => {
+  it("goes from a matching issue to a run that completes with the reported pull request, and a notification", { timeout: 120_000 }, async () => {
     const run = await waitFor<Run>("a completed run started by the trigger", async () => {
       const { data } = await client.GET("/runs");
       const found = data?.items.find((item) => item.startedBy?.kind === "trigger" && item.startedBy.binding === BINDING);
@@ -30,16 +29,20 @@ describe("the automated chain on the compose stack, with fakes", () => {
     });
 
     expect(run).toMatchObject({
-      workflow: "fake-develop-and-merge",
+      workflow: "fake-develop-issue",
       status: "completed",
       startedBy: { kind: "trigger", binding: BINDING, issue: { repository: "chain/playground", number: 201 } },
       steps: [
-        { name: "implement", status: "completed", workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } },
-        { name: "merge", status: "completed" },
-        { name: "merged", status: "completed" },
+        {
+          name: "implement",
+          status: "completed",
+          workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" },
+          artifacts: [{ name: "pull-request", url: "https://git.example/example/playground/pull/1" }],
+        },
       ],
-      output: { pullRequest: "https://git.example/example/playground/pull/1", merged: true, decision: "allow" },
+      output: { pullRequest: "https://git.example/example/playground/pull/1" },
     });
+    expect(run.steps).toHaveLength(1);
     expect(run.traceparent).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
 
     const notification = await waitFor<Notification>("the run's notification", async () => {

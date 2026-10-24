@@ -1,4 +1,4 @@
-import { createInMemoryAgentRuntime, type Configuration } from "@tendworks/control-plane";
+import { createInMemoryAgentRuntime, emptyConfiguration, type Configuration } from "@tendworks/control-plane";
 import { fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
@@ -16,14 +16,9 @@ const profile = (name: string, spec: Partial<AgentProfile["spec"]> = {}): AgentP
 /** A platform with two chat-enabled profiles (`assistant`, `reviewer`) and one without chats (`developer`). */
 function platform() {
   const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant", "reviewer"] });
-  const configuration = {
-    workflowNames: [],
-    workflow: () => undefined,
+  const configuration = emptyConfiguration({
     agentProfiles: [profile("assistant", { chat: { idleMinutes: 5 }, mcp: ["tendworks"] }), profile("developer"), profile("reviewer", { chat: {} })],
-    triggerBindings: [],
-    policies: [],
-    pullRequestIntegrations: [],
-  };
+  });
   return { agentRuntime, configuration };
 }
 

@@ -46,5 +46,3 @@ $defs:
         $ref: '../schemas/approval-request.schema.yaml#/$defs/approvalDecision'
       action:
         $ref: '../schemas/approval-request.schema.yaml#/$defs/gatedAction'
-      pullRequest:
-        type: string

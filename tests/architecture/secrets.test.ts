@@ -28,7 +28,7 @@ const withEnvFile = Object.entries(compose.services)
 /** Every variable an operator may set in deploy/.env (deploy/.env.example). */
 const operatorVariables = Object.fromEntries([...read(".env.example").matchAll(/^#? ?([A-Z][A-Z0-9_]*)=/gm)].map((match) => [match[1], "value"]));
 
-it("never gives the platform's repository token to the worker, which starts the sandboxes", () => {
+it("never gives the platform's issue tracker token to the worker, which starts the sandboxes", () => {
   expect(environment("worker")).not.toContain("TENDWORKS_PLATFORM_GITHUB_TOKEN");
 });
 
@@ -58,7 +58,7 @@ it("lets agent profiles reference only the agent secrets of deploy/.env", () => 
 });
 
 it("never lets an agent profile hand the worker's API token into a sandbox", () => {
-  // The worker holds the token for the merge step; a sandbox only gets the harness
+  // The worker holds the token for its `call: http` tasks; a sandbox only gets the harness
   // credential and what agent profiles reference, which resolves to agent secrets only.
   expect(environment("worker")).toContain("TEND_API_TOKEN");
   const worker = Object.fromEntries(environment("worker").map((name) => [name, "value"]));

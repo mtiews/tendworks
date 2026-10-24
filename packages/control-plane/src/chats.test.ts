@@ -1,11 +1,11 @@
 import { readServerSentEvents } from "@tendworks/platform";
 import { describe, expect, it } from "vitest";
-import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type AgentRuntimePort, type Chat, type TranscriptEntry } from "./index.js";
+import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration, type AgentRuntimePort, type Chat, type TranscriptEntry } from "./index.js";
 
 function setup(agentRuntime: AgentRuntimePort | "none" = createInMemoryAgentRuntime({ chatAgents: ["assistant"] })) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs: createInMemoryRuns(),
     ...(agentRuntime === "none" ? {} : { agentRuntime }),
     apiToken: "test-token",

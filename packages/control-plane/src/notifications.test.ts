@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, type Notification, type NotificationsPort } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type Notification, type NotificationsPort } from "./index.js";
 
 const delivered: Notification = {
   id: "n-1",
@@ -13,7 +13,7 @@ const delivered: Notification = {
 async function list(notifications?: NotificationsPort) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
     ...(notifications ? { notifications } : {}),

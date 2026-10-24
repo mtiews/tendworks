@@ -440,8 +440,8 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 | label `ready-for-agent` | filter in the TriggerBinding (`triggers/issue-ready-for-agent.yaml`) | unchanged |
 | skills (Matt Pocock) | unchanged as `SKILL.md` under `skills/`, referenced in the developer profile | part of the factory blueprint |
 | container with Claude Code | sandbox from a SandboxTemplate (isolation class `container`; `gvisor` verified on a Linux host), controlled via ACP | further harnesses through the same port |
-| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; harness credentials from the operator's own subscription (long-lived OAuth token) or an API key, selected by configuration (third-party or shared use requires an API key under the vendor's terms), and a fine-grained agent token limited to the playground repo; a separate platform token (polling, merge) never enters the sandbox | injection via egress proxy, sandbox only sees placeholders; GitHub App installation token per repo and run |
-| commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), merge as a platform workflow step behind a gate (`merge: auto \| ask` in the policy); accepted risk: without repository rulesets (private repo on the free plan) the agent token could technically merge (what one account on the free plan can and cannot enforce: [GitHub access for agents](github-agent-access.md)) | merge depends on the evidence bundle; external actions through the Action Gateway with action journal (milestone 3) |
+| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; harness credentials from the operator's own subscription (long-lived OAuth token) or an API key, selected by configuration (third-party or shared use requires an API key under the vendor's terms), and a fine-grained agent token limited to the playground repo; a separate platform token that only reads issues never enters the sandbox | injection via egress proxy, sandbox only sees placeholders; GitHub App installation token per repo and run |
+| commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), reported as the run's artifact; the run ends with it and the human merges in the forge, the platform performs no forge action (ADR 0024 (the-platform-has-no-pull-request-integration)); accepted risk: without repository rulesets (private repo on the free plan) the agent token could technically merge (what one account on the free plan can and cannot enforce: [GitHub access for agents](github-agent-access.md)) | deeper forge integration builds on artifacts, notifications and the generic human step; external actions through the Action Gateway with action journal |
 | — | notifications and approval requests are persisted first, then delivered through the notification port (fake adapter that only logs) | ntfy, Web Push |
 
 **Success criterion (milestone 1):** An issue labeled `ready-for-agent` leads to a merged pull request without manual intervention; run status, transcript and cost are visible through the API and `tend run get`; restarting the platform mid-run resumes the run.
@@ -474,7 +474,7 @@ The former roadmap steps 2–6 move back by one.
 **Success criterion (milestone 2):** Following only the operator guide, a fresh installation on Ubuntu:
 
 - runs `hello-developer`;
-- runs `develop-issue` with `merge: ask` on a private repository with the narrowed agent token;
+- runs `develop-issue` on a private repository with the narrowed agent token, ending with the agent's pull request;
 - answers an `assistant` chat from live state;
 - serves the web UI to the operator's phone over HTTPS;
 - continues a run across a host reboot;
@@ -499,7 +499,7 @@ The platform has no pull request integration. Agents open pull requests themselv
 - A scheduled workflow runs over the workspace.
 - A workspace assistant with `write: false` answers about the repository and cannot push.
 
-1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
+1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR reported as an artifact → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
 2. **Clean single-host deployment on Linux (milestone 2).** As refined below: tagged releases, secure defaults, schema migrations, backup and restore, sandbox clean-up, the platform MCP server on Linux, access from the operator's devices through a TLS layer.
 3. **Generic platform: workspaces, triggers, notifications (milestone 3).** As refined below: named workspaces (git, directory) with their own credentials, trigger bindings over workspaces with pluggable sources, no pull request integration, a generic human step, notification channels with Pushover, workspace assistants.
 4. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.

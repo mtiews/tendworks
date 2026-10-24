@@ -135,7 +135,7 @@ Two places, strictly separated:
 
 | | `deploy/.env` | configuration directory |
 | --- | --- | --- |
-| Holds | secrets, ports, the installation name, the path of the configuration directory | workflows, agent profiles, trigger bindings, policies, sandbox templates, skills, integrations |
+| Holds | secrets, ports, the installation name, the path of the configuration directory | workflows, agent profiles, trigger bindings, sandbox templates, skills |
 | In Git | never (`.gitignore`, `.dockerignore`) | yes, in a repository of its own |
 | Read by | compose, into the services' environment | server and worker at startup, mounted read-only at `/config` |
 | Apply a change | `docker compose -f deploy/compose.yaml up -d --wait` (recreates the services whose environment changed; `restart` keeps the old environment) | `docker compose -f deploy/compose.yaml restart server worker` |
@@ -163,9 +163,9 @@ Running runs resume after either, and the worker takes up open chats again.
 
 - agents `developer` and `assistant`, sandbox template `claude-code`, skill `tdd`;
 - workflows `develop-issue`, `hello-developer`, `restart-developer`;
-- trigger binding `playground-ready-for-agent`, suspended;
-- the GitHub pull request integration;
-- policies `merge-gate` (`auto`) and `ask-before-merge` (`ask` for `develop-issue`, so you approve every merge).
+- trigger binding `playground-ready-for-agent`, suspended.
+
+The platform performs no GitHub action besides reading issues: the developer agent opens the pull request itself and reports it, the run ends with it, and you review and merge it in GitHub (ADR 0024).
 
 Copy it into a repository of your own (the planned `tendworks-config`), point `TEND_CONFIG_PATH` at the checkout ([Install](#install), step 4) and change it there; a platform update never touches it. Compare with the new `examples/config` when release notes name configuration changes.
 
@@ -184,10 +184,8 @@ Rules the loader enforces:
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | `develop-issue`: the prompt text; new workflows calling `agent://<profile>` | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false` | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.suspend: true/false`; `spec.schedule.every` (`days`, `hours`, `minutes`, `seconds`); `spec.source.issues.repository` (`<owner>/<name>`), `labels`, `state`; `spec.workflow` | server |
-| `Policy` | `policies/*.yaml` | `spec.merge: auto \| ask`; `spec.workflows` (omitted: applies to all). The strictest applicable policy wins: remove `develop-issue` from `ask-before-merge` to let `merge-gate` merge automatically | server |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
 | Skills | `skills/<name>/SKILL.md` plus files | pinned by copying; profiles list them in `spec.skills` | worker |
-| `PullRequestIntegration` | `integrations/pull-requests/*.yaml` | one per host; `github` on `github.com` with the platform token | server |
 
 **Target repository.** The starter targets `mtiews/tendworks-playground`. For your own repository, change `spec.source.issues.repository` in `triggers/playground-ready-for-agent.yaml` and scope both GitHub tokens to it. The workflow derives the clone URL from the issue (`https://github.com/<repository>.git`). The smoke scripts take `TEND_PLAYGROUND=<owner>/<name>`.
 
@@ -199,14 +197,14 @@ All secrets live in `deploy/.env`. Configuration only references them (ADR 0008)
 
 | Secret | Purpose | Held by | Minimal scope | Generate | If it leaks |
 | --- | --- | --- | --- | --- | --- |
-| `TEND_API_TOKEN` | full access to the control plane API: start runs, merge, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including approving merges |
+| `TEND_API_TOKEN` | full access to the control plane API: start runs, decide approvals, chat; every read except `GET /status` | server, worker (for workflow `call: http` to the API), you (`tend`, UI, scripts). Never a sandbox | one shared token, no scopes (ADR 0014) | `scripts/setup-env.sh`; at least 16 characters | anyone who reaches the API can do everything you can, including deciding approvals |
 | `TEND_API_READ_TOKEN` | read-only API access (403 on writes); the platform MCP server reads with it | server, worker, and the Claude Code session of profiles with `mcp: [tendworks]` (as an MCP header, not as an environment variable); optionally you for a read-only UI | read only; must differ from `TEND_API_TOKEN` | `scripts/setup-env.sh`; at least 16 characters | all runs, transcripts, chats, triggers and agents can be read |
 | `TEND_POSTGRES_PASSWORD` | database password of user `tend`; no default, server and worker refuse to start without it | postgres, server, worker (which encode it into their connection) | — | `scripts/setup-env.sh` (or `openssl rand -hex 32`) | low while the store is not published; full read/write of all platform state for anyone who reaches it |
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with your subscription | worker → every Claude Code sandbox, in the agent process's environment | — | `claude setup-token` | model usage on your subscription |
 | `ANTHROPIC_API_KEY` | Claude Code with an API key, billed per use | worker → every Claude Code sandbox, as above | a key for this purpose only; spend limits in the Anthropic Console | Anthropic Console | spend on your API account |
 | `TENDWORKS_AGENT_GITHUB_TOKEN` | the `developer` agent pushes its branch and opens the pull request (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of profiles that reference it | [GitHub access](#before-the-first-real-run-github-access) | fine-grained token | push to any branch and open, edit or merge pull requests in its repositories |
-| `TENDWORKS_PLATFORM_GITHUB_TOKEN` | the trigger reads issues; the merge gate merges pull requests | server only, never a sandbox | as above | fine-grained token | read issues, push and merge in its repositories |
+| `TENDWORKS_PLATFORM_GITHUB_TOKEN` | the trigger reads issues | server only, never a sandbox | as above | fine-grained token, issues read only | read issues in its repositories |
 
 Notes:
 
@@ -221,7 +219,7 @@ Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`, resol
 | Who references | May resolve | Example |
 | --- | --- | --- |
 | agent profiles (`spec.env`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }` |
-| trigger bindings, pull request integrations | only `TENDWORKS_PLATFORM_*` | `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }` |
+| trigger bindings | only `TENDWORKS_PLATFORM_*` | `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }` |
 
 A reference outside its prefix is a configuration error at startup. `TEND_API_TOKEN`, `TEND_API_READ_TOKEN` and the database URL can never be referenced.
 
@@ -256,7 +254,7 @@ Rotate the API token at once when a device that was signed in is lost.
 - **Agent secrets on a volume.** The `TENDWORKS_AGENT_*` values sit in plain text as a file (mode 600) on the volume `<installation>_agent-secrets` until `down -v` removes it; each `up` rewrites it. A line you delete from `deploy/.env` is gone from the file after the next `up -d`; the old file content stays readable to anyone with Docker access until then.
 - **Sandboxes and the API port.** On a Linux engine, sandboxes don't reach the port compose publishes on `127.0.0.1` (checked by `tests/e2e/sandbox-access.test.ts`). On Docker Desktop they reach it through `host.docker.internal`, and only the tokens guard the API. Sandboxes still reach everything else the bridge routes to, including your LAN and the internet.
 - **MCP sandboxes reach each other.** Sandboxes of profiles with `mcp: [tendworks]` share the gateway's network and can reach each other on it (ADR 0019). Other sandboxes stay apart. Through the gateway, sandboxes reach only `/mcp`, read-only.
-- **The agent token can merge** on repositories without rulesets ([GitHub access](#before-the-first-real-run-github-access)); the merge gate governs only what the platform does.
+- **The agent token can merge** on repositories without rulesets ([GitHub access](#before-the-first-real-run-github-access)); only its role description tells the agent not to.
 - **Token in the browser.** The web UI keeps the token in `sessionStorage`, or in `localStorage` with "Stay signed in on this device" (ADR 0018). Don't tick that on a shared browser.
 - **Socket proxy.** It filters paths, not request bodies: whoever reaches it can create a privileged container, i.e. become root on the host. Only the worker reaches it (ADR 0001).
 - **Isolation class `container`** shares the host kernel. Put an outer boundary around it (dedicated VM) when agents process untrusted content such as public issues, or verify [gVisor](#optional-gvisor).
@@ -275,7 +273,7 @@ Every check must pass before you remove `suspend: true` from a binding. Later, `
 
 ## Access from your devices
 
-The server binds to `127.0.0.1` only. Reach the UI, API and `tend` from other devices **only through a TLS layer in front of that port on the same host** (ADR 0020). Never publish the port as plain HTTP on the network (`0.0.0.0:8080` in compose, a proxy without TLS, a router port forward): the API token in every request is all that guards full control of agents, merges and approvals. The token stays the sign-in until OIDC.
+The server binds to `127.0.0.1` only. Reach the UI, API and `tend` from other devices **only through a TLS layer in front of that port on the same host** (ADR 0020). Never publish the port as plain HTTP on the network (`0.0.0.0:8080` in compose, a proxy without TLS, a router port forward): the API token in every request is all that guards full control of agents and approvals. The token stays the sign-in until OIDC.
 
 ### Recommended: Tailscale
 
@@ -322,9 +320,8 @@ docker compose -f deploy/compose.yaml stop temporal-ui
 | Area | State |
 | --- | --- |
 | Stack, sandboxes, MCP gateway, token checks, clean-up, installation names, backup and restore | covered by the end-to-end tests on Ubuntu CI (`.github/workflows/ci.yml`, scripted agent in real sandboxes) |
-| Real Claude Code, pull request, merge, approval, `assistant` chat on a Linux host | documented smoke tests; recorded on Linux with the milestone 2 [acceptance](#acceptance-checklist) |
+| Real Claude Code, pull request, `assistant` chat on a Linux host | documented smoke tests; recorded on Linux with the milestone 2 [acceptance](#acceptance-checklist) |
 | `gvisor` isolation class | not verified yet (issue #17); [optional step](#optional-gvisor) |
-| Approvals vs. pull requests changed on GitHub | a pull request merged or closed on GitHub while its run waits is not reflected on the approval request; reject then ends the run with `merged: false` although the code is merged (issue #51) |
 | Background work of agents | an agent can end its turn with a command still running in the background; the work is lost when the sandbox goes (issue #23) |
 | Retention | nothing ages out: store, transcripts and the volumes of chats nobody ends grow forever (follow-up of issue #48). Watch the disk (`docker system df -v`) |
 | Notifications | delivered to the server log only |
@@ -365,10 +362,9 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | --- | --- | --- | --- |
 | 1 | Claude Code answers in a sandbox, cost and transcript visible | `scripts/smoke/hello-developer.sh` | sandbox image, Claude credential, agent token |
 | 2 | Restart mid-run resumes the agent session | `scripts/smoke/restart-developer.sh` | as 1 |
-| 3 | Labelled issue → pull request → merged with `merge: auto` | `scripts/smoke/pull-request-auto.sh <issue>` | platform token; `suspend: true` removed from the binding; `develop-issue` removed from `ask-before-merge`; server restarted |
-| 4 | Same with `merge: ask`, across a restart, approve or reject | `scripts/smoke/pull-request-ask.sh <issue> [approve\|reject]` | as 3, with `develop-issue` in `ask-before-merge` (the starter) |
-| 5 | `assistant` chat answers from the live state | `tend chat assistant` or the UI; the full script `scripts/smoke/chat-assistant.sh` needs the fixture configuration (implementation doc, step 16) | read token |
-| 6 | Web UI with live run, chat, approval, phone width | by hand in the browser (implementation doc, steps 19–23) | as 4 and 5 |
+| 3 | Labelled issue → the agent opens a pull request → the run completes with it; the pull request stays open for you | `scripts/smoke/pull-request.sh <issue>` | platform token (issues read), agent token; `suspend: true` removed from the binding; server restarted |
+| 4 | `assistant` chat answers from the live state | `tend chat assistant` or the UI; the full script `scripts/smoke/chat-assistant.sh` needs the fixture configuration (implementation doc, step 16) | read token |
+| 5 | Web UI with live run, chat, phone width | by hand in the browser (implementation doc, steps 19–23) | as 3 and 4 |
 
 - **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; start it again by hand with `POST /runs` (implementation doc, "Triggers: one firing per issue").
 - Revert configuration changes after the tests, or keep them deliberately.
@@ -531,7 +527,7 @@ docker network rm tendworks-sandboxes
 | `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the token did not reach the server; set it, `up -d --wait` (`restart` keeps the old environment) |
 | binding never checks | `tend trigger list` | `spec.suspend: true`; remove it and restart the server |
 | issue labelled but no new run | | each issue fires once per binding, also after a failed run (ADR 0006); start it by hand with `POST /runs` |
-| run fails at `/do/1/merge`: `No pull request to merge`, `Repository unavailable: GitHub answered 401: Bad credentials ...` | `tend run get` | the agent reported no pull request, or the platform token is invalid or lacks scope |
+| run completes without `pullRequest` in its output | `tend run get`, `tend run logs <id>` | the agent opened or reported no pull request, e.g. the agent token lacks Contents or Pull requests write access |
 | `cannot create a sandbox from template claude-code: image tendworks/sandbox-claude-code:<tag> is not on the sandbox host` | run or chat | build the sandbox image (`--profile sandbox-images build`) |
 | `isolation class gvisor needs the runsc runtime on the sandbox host` | run or chat | [install gVisor](#optional-gvisor) or use isolation class `container` |
 | `agent profile assistant lists the platform MCP server, but none is configured: ...` | chat or run | the worker lacks the read token; set `TEND_API_READ_TOKEN`, `up -d --wait` |
@@ -554,7 +550,7 @@ Milestone 2 is accepted on the operator's Ubuntu host by following only this gui
 | # | Check | How | Passes when |
 | --- | --- | --- | --- |
 | 1 | Fresh installation | [Install](#install) from the release candidate tag, with `scripts/setup-env.sh` and your own configuration directory | `tend status` healthy; `scripts/smoke/hello-developer.sh` PASS |
-| 2 | GitHub access, then `develop-issue` with `merge: ask` on a private repository | [GitHub access](#before-the-first-real-run-github-access), then `scripts/smoke/pull-request-ask.sh <issue>` or the binding with the issue labelled | the check script passes for the narrowed agent token; the run waits, you approve in the UI, the pull request is merged |
+| 2 | GitHub access, then `develop-issue` on a private repository | [GitHub access](#before-the-first-real-run-github-access), then `scripts/smoke/pull-request.sh <issue>` or the binding with the issue labelled | the check script passes for the narrowed agent token; the run completes with the pull request the agent opened, and the pull request is open for you to merge |
 | 3 | `assistant` chat from live state | `tend chat assistant` or the UI, while a run works: "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?" | each answer comes with a `tendworks` tool call and matches `tend run list`, `tend agent list`, `tend trigger list` |
 | 4 | Web UI on the phone over HTTPS | [Tailscale](#recommended-tailscale) | sign-in, status, a run's live transcript and a chat work at phone width; `http://` is never used |
 | 5 | Host reboot during a run | start `restart-developer`, `sudo reboot` while it works | the stack comes back by itself and the run completes with `resumed: 1` |

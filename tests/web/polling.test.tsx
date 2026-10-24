@@ -1,4 +1,4 @@
-import { createInMemoryAgentRuntime, type Notification } from "@tendworks/control-plane";
+import { createInMemoryAgentRuntime, emptyConfiguration, type Notification } from "@tendworks/control-plane";
 import type { AgentProfile } from "@tendworks/shared";
 import { act, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -63,7 +63,7 @@ describe("polling", () => {
     const developer: AgentProfile.AgentProfile = { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "developer" }, spec: { harness: "fake" } };
     open("/ui/", {
       agentRuntime,
-      configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [developer], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+      configuration: emptyConfiguration({ agentProfiles: [developer] }),
     });
     const agents = await screen.findByRole("region", { name: "Agents" });
     expect(await within(agents).findByText("No agent works right now.")).toBeTruthy();

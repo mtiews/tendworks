@@ -106,8 +106,8 @@ services:
       TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_WORKER_URL: http://worker:8081
       TEND_CONFIG_DIR: /config
-      # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
-      # merge gate merges pull requests on github.com with it. Never in a sandbox.
+      # Platform token: trigger bindings reference it (secretRef) to read GitHub issues.
+      # Read access only; never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
       # API token: every operation but GET /status needs a token, operations that change
       # state need this one (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
@@ -162,7 +162,7 @@ services:
       TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_CONFIG_DIR: /config
       TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
-      # Workflows reach the control plane API (and only it) from here, e.g. the merge step,
+      # Workflows reach the control plane API (and only it) from here with `call: http`,
       # with the API token. The token is no agent secret, so it never enters a sandbox.
       TEND_CONTROL_PLANE_URL: http://server:8080
       TEND_API_TOKEN: ${TEND_API_TOKEN:-}

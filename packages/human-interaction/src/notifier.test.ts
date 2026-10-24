@@ -87,11 +87,10 @@ describe("notifier", () => {
     const request = {
       id: "approval-1",
       runId: "run-1",
-      workflow: "develop-issue",
-      action: "merge" as const,
-      pullRequest: "https://git.example/acme/app/pull/7",
+      workflow: "release-app",
+      action: "deploy",
       policy: "careful",
-      question: "Merge https://git.example/acme/app/pull/7 for run run-1 of develop-issue?",
+      question: "Deploy release 1.4 for run run-1 of release-app?",
       status: "pending" as const,
       createdAt: "2026-10-18T10:00:02.000Z",
     };
@@ -102,7 +101,7 @@ describe("notifier", () => {
       expect.objectContaining({
         kind: "approval.requested",
         runId: "run-1",
-        title: "Approval needed: Merge https://git.example/acme/app/pull/7 for run run-1 of develop-issue?",
+        title: "Approval needed: Deploy release 1.4 for run run-1 of release-app?",
         detail: "Answer with: tend approval approve approval-1 (or reject approval-1)",
         delivery: expect.objectContaining({ status: "delivered" }),
       }),

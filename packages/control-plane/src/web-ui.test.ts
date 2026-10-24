@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, type ControlPlaneApiOptions } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type ControlPlaneApiOptions } from "./index.js";
 
 const ENTRY = '<!doctype html><html><head><script type="module" src="/ui/assets/index-abc123.js"></script></head><body><div id="root"></div></body></html>';
 const SCRIPT = "console.log('tend');";
@@ -21,7 +21,7 @@ function webBuild(): string {
 function setup(options: Partial<ControlPlaneApiOptions> = { webUi: { root: webBuild() } }) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs: createInMemoryRuns(),
     apiToken: "s3cret-api-token",
     ...options,

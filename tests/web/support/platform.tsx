@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryRuns, type ControlPlaneApiOptions } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
 import { render } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { App } from "@tendworks/web";
@@ -23,7 +23,7 @@ export function signedIn(token: string = API_TOKEN): void {
 function controlPlane(options: PlatformOptions) {
   return createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs: createInMemoryRuns(),
     apiToken: API_TOKEN,
     readToken: READ_TOKEN,

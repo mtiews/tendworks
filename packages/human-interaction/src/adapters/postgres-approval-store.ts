@@ -11,7 +11,6 @@ interface ApprovalRow {
   run_id: string;
   workflow: string;
   action: ApprovalRequest["action"];
-  pull_request: string;
   policy: string;
   question: string;
   status: ApprovalRequest["status"];
@@ -54,10 +53,10 @@ export function createPostgresApprovalStore({ pool, publisher }: PostgresApprova
     async open(request, event) {
       return transaction(async (tx) => {
         const inserted = await tx.query(
-          `insert into human_interaction.approval_requests (id, run_id, workflow, action, pull_request, policy, question, status, traceparent, created_at)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) on conflict (run_id, action, pull_request) do nothing`,
+          `insert into human_interaction.approval_requests (id, run_id, workflow, action, policy, question, status, traceparent, created_at)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9) on conflict (run_id, action) do nothing`,
           [
-            request.id, request.runId, request.workflow, request.action, request.pullRequest ?? "", request.policy, request.question, request.status,
+            request.id, request.runId, request.workflow, request.action, request.policy, request.question, request.status,
             request.traceparent ?? null, request.createdAt,
           ],
         );
@@ -65,7 +64,7 @@ export function createPostgresApprovalStore({ pool, publisher }: PostgresApprova
           await publisher.publish(tx, event(request));
           return structuredClone(request);
         }
-        return (await one(tx, "run_id = $1 and action = $2 and pull_request = $3", [request.runId, request.action, request.pullRequest ?? ""]))!;
+        return (await one(tx, "run_id = $1 and action = $2", [request.runId, request.action]))!;
       });
     },
     async decide(id, status, decidedAt, event) {
@@ -80,7 +79,6 @@ export function createPostgresApprovalStore({ pool, publisher }: PostgresApprova
       });
     },
     get: (id) => one(pool, "id = $1", [id]),
-    find: ({ runId, action, pullRequest }) => one(pool, "run_id = $1 and action = $2 and pull_request = $3", [runId, action, pullRequest]),
     async list({ status, limit = 100 } = {}) {
       const { rows } = await pool.query<ApprovalRow>(
         `select * from human_interaction.approval_requests where ($1::text is null or status = $1) order by position desc limit $2`,
@@ -97,7 +95,6 @@ function toRequest(row: ApprovalRow): ApprovalRequest {
     runId: row.run_id,
     workflow: row.workflow,
     action: row.action,
-    ...(row.pull_request === "" ? {} : { pullRequest: row.pull_request }),
     policy: row.policy,
     question: row.question,
     status: row.status,

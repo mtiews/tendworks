@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryRuns } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration } from "@tendworks/control-plane";
 import { approvalRequested, createApprovals, createInMemoryApprovalStore, type ApprovalRequest } from "@tendworks/human-interaction";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
@@ -9,8 +9,7 @@ const pending: ApprovalRequest = {
   runId: "0b6c4c1e-run",
   workflow: "develop-issue",
   action: "merge",
-  pullRequest: "https://github.com/acme/playground/pull/13",
-  policy: "ask-before-merge",
+  policy: "careful",
   question: "Merge https://github.com/acme/playground/pull/13 for run 0b6c4c1e-run of develop-issue?",
   status: "pending",
   createdAt: "2026-10-19T10:00:00.000Z",
@@ -21,7 +20,7 @@ async function setup() {
   await store.open(pending, (request) => approvalRequested(request, request.createdAt));
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     readToken: "test-read-token",
     runs: createInMemoryRuns(),

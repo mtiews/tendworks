@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type Run, type TranscriptEntry } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration, type Run, type TranscriptEntry } from "@tendworks/control-plane";
 import { describe, expect, it, vi } from "vitest";
 import { parse, parseAllDocuments } from "yaml";
 import { runTend } from "./tend.js";
@@ -100,7 +100,7 @@ async function tend(args: string[], extra: Run[] = [], transcriptsOf: Record<str
   const api = createControlPlaneApi({
     agentRuntime,
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     readToken: "test-read-token",
     runs,
@@ -314,7 +314,7 @@ describe("tend run logs --follow", () => {
     const api = createControlPlaneApi({
       agentRuntime,
       probes: [],
-      configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+      configuration: emptyConfiguration(),
       apiToken: "test-token",
       readToken: "test-read-token",
       runs,

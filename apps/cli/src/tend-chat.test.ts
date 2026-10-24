@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration } from "@tendworks/control-plane";
 import { describe, expect, it, vi } from "vitest";
 import { runTend } from "./tend.js";
 
@@ -46,7 +46,7 @@ function platform(answers: string[] | "never" = []) {
   const api = createControlPlaneApi({
     agentRuntime,
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
   });

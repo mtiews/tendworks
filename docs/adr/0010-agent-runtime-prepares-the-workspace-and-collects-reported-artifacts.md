@@ -12,7 +12,7 @@ Results come back as A2A artifacts: the agent writes a JSON array of `{ name, ur
 ## Considered Options
 
 - **The agent clones the repository itself, told by the prompt**: no platform code, but the checkout and the branch rule would depend on the model following instructions, and a retry could start a second branch.
-- **The platform opens the pull request after the session (push and API call with the agent token)**: deterministic, but puts a GitHub-specific step into the agent runtime; the spec has the agent open it (`git push`, `gh pr create`), and the merge stays a platform step behind the gate.
+- **The platform opens the pull request after the session (push and API call with the agent token)**: deterministic, but puts a GitHub-specific step into the agent runtime; the spec has the agent open it (`git push`, `gh pr create`), and the human merges in the forge (ADR 0024 (the-platform-has-no-pull-request-integration)).
 - **Parse the pull request URL out of the agent's final answer** (jq `capture` in `output.as`): no platform code, but the final answer is free text; the artifacts file is structured, harness-neutral and reusable for other results.
 - **Pass the platform's whole environment to secret references**: simpler, but a profile could name the platform token or the database URL; the prefix makes "only agent secrets enter a sandbox" a property of the code, not of review.
 
@@ -20,5 +20,5 @@ Results come back as A2A artifacts: the agent writes a JSON array of `{ name, ur
 
 - The agent token can still merge (accepted risk until a GitHub App token per run, see #2); the role description tells the agent never to merge. How far token permissions and a ruleset reduce this before then: [GitHub access for agents](../github-agent-access.md).
 - `gh` is pinned with its checksum in the sandbox image (`images/sandbox-claude-code`); the image tag gained a revision suffix (`0.85.1-1`), so the image must be rebuilt.
-- Reporting a result depends on the agent writing the file; a run whose agent reported no pull request completes with `pullRequest: null`. The merge step (#14) should treat that as a failure, or look the pull request up by the branch, which is in the run's output too.
+- Reporting a result depends on the agent writing the file; a run whose agent reported no pull request completes with `pullRequest: null`; the branch is in the run's output too.
 - Every profile that lists a secret needs it set, also for unrelated smoke tests (`hello-developer` now needs `TENDWORKS_AGENT_GITHUB_TOKEN`).

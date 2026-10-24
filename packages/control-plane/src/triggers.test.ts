@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, createTriggerGatewayClient, type Trigger } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, createTriggerGatewayClient, emptyConfiguration, type Trigger } from "./index.js";
 
 const trigger: Trigger = {
   name: "ready-issues",
@@ -11,7 +11,7 @@ const trigger: Trigger = {
 function api(gateway: (request: Request) => Promise<Response>) {
   return createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
     triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: gateway }),

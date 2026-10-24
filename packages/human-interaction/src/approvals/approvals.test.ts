@@ -6,11 +6,10 @@ import { createApprovals } from "./approvals.js";
 const pending: ApprovalRequest = {
   id: "approval-1",
   runId: "run-1",
-  workflow: "develop-issue",
-  action: "merge",
-  pullRequest: "https://git.example/acme/app/pull/7",
+  workflow: "release-app",
+  action: "deploy",
   policy: "careful",
-  question: "Merge it?",
+  question: "Deploy it?",
   status: "pending",
   createdAt: "2026-10-19T10:00:00.000Z",
 };
@@ -33,7 +32,7 @@ describe("approvals", () => {
       type: "dev.tendworks.approval.decided",
       source: "/tendworks/human-interaction",
       runid: "run-1",
-      data: { approvalRequest: "approval-1", decision: "approve", action: "merge", pullRequest: pending.pullRequest },
+      data: { approvalRequest: "approval-1", decision: "approve", action: "deploy" },
     });
   });
 

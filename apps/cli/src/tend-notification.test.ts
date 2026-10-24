@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryRuns, type Notification } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type Notification } from "@tendworks/control-plane";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { runTend } from "./tend.js";
@@ -25,7 +25,7 @@ const delivered: Notification = {
 async function tend(args: string[]) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
     notifications: { list: async () => [failed, delivered] },

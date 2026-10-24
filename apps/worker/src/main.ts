@@ -156,8 +156,7 @@ const engine = await createTemporalRunEngine({ address: engineAddress });
 const runEventForwarder = createRunEventForwarder(engine);
 bus.subscribe("orchestration.run-events", runEventForwarder.handle.bind(runEventForwarder));
 // `call: http` tasks may only reach the control plane API; workflows find it as
-// `$runtime.metadata.controlPlaneUrl`. The merge step goes there, because the platform's
-// repository token lives in the server bundle, never in this one.
+// `$runtime.metadata.controlPlaneUrl`.
 // They authenticate with the platform's API token, which the executor adds; it never
 // reaches a workflow definition or a sandbox.
 const controlPlaneUrl = env("TEND_CONTROL_PLANE_URL");

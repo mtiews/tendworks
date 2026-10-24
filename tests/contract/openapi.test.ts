@@ -10,15 +10,12 @@ import {
 } from "@tendworks/control-plane";
 import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import {
+  approvalRequested,
   createApprovals,
-  createFakePullRequests,
   createInMemoryApprovalStore,
   createInMemoryNotificationChannel,
   createInMemoryNotificationStore,
-  createMergeGate,
   createNotifier,
-  type GatedRun,
-  type PullRequests,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
 import { readServerSentEvents } from "@tendworks/platform";
@@ -58,7 +55,6 @@ afterAll(() => {
 });
 
 const configuration = loadConfiguration(fixtureConfiguration());
-const PR = "https://git.example/example/playground/pull/1";
 const API_TOKEN = "contract-test-token";
 const READ_TOKEN = "contract-test-read-token";
 const healthy = createStaticHealthProbe("store", { status: "healthy" });
@@ -155,7 +151,6 @@ describe("control plane: a stopped platform", () => {
     ["GET", "/agents", read],
     ["GET", "/triggers", read],
     ["GET", "/notifications", read],
-    ["POST", "/pull-requests/merge", json({ run: "r-1", pullRequest: PR })],
     ["GET", "/approval-requests", read],
     ["POST", "/approval-requests/a-1/decision", json({ decision: "approve" })],
   ];
@@ -538,28 +533,26 @@ describe("control plane: the API token", () => {
     const client = controlPlane({}, { token: "wrong-token" });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
+    expect([started, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
     const client = controlPlane({}, { token: READ_TOKEN });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
     const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
+    expect([started, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {
@@ -642,7 +635,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-ready-to-merge", "issue-ready-for-agent", "playground-ready-for-agent"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-ready-for-agent"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 
@@ -679,63 +672,44 @@ describe("control plane: notifications", () => {
   });
 });
 
-describe("control plane: merges behind the gate, and approval requests", () => {
-  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/fake", state: "open" }])) {
+describe("control plane: approval requests", () => {
+  async function withPendingRequest() {
     const store = createInMemoryApprovalStore();
-    const runs = async (runId: string): Promise<GatedRun | undefined> =>
-      runId === "r-1" ? { id: "r-1", workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR, workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } }], ...run } : undefined;
-    return controlPlane({
-      merges: createMergeGate({ policies: configuration.policies, runs, pullRequests: () => pullRequests, approvals: store }),
-      approvals: createApprovals({ store }),
-    });
+    const request = {
+      id: "a-1",
+      runId: "r-1",
+      workflow: "release-app",
+      action: "deploy",
+      policy: "careful",
+      question: "Deploy release 1.4 for run r-1 of release-app?",
+      status: "pending" as const,
+      createdAt: "2026-10-19T10:00:00.000Z",
+    };
+    await store.open(request, (opened) => approvalRequested(opened, opened.createdAt));
+    return controlPlane({ approvals: createApprovals({ store }) });
   }
-  const merge = (client: ReturnType<typeof controlPlane>, pullRequest: string | null = PR) => client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest } });
   const decide = (client: ReturnType<typeof controlPlane>, id: string, decision: "approve" | "reject") =>
     client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { decision } });
 
-  it("merges right away when the policy allows it", async () => {
-    const { data, response } = await merge(gated({ workflow: "fake-develop-and-merge" }));
+  it("lists the pending approval request and decides it", async () => {
+    const client = await withPendingRequest();
 
-    expect(response.status).toBe(200);
-    expect(data).toMatchObject({ merged: true, decision: "allow" });
-  });
-
-  it("asks first, lists the pending approval request and merges once it is approved", async () => {
-    const client = gated();
-
-    const asked = await merge(client);
     const pending = await client.GET("/approval-requests", { params: { query: { status: "pending" } } });
-    const approved = await decide(client, asked.data!.approvalRequest!.id, "approve");
-    const merged = await merge(client);
+    const approved = await decide(client, "a-1", "approve");
 
-    expect(asked.response.status).toBe(202);
-    expect(pending.data?.items.map((item) => item.id)).toEqual([asked.data!.approvalRequest!.id]);
+    expect(pending.data?.items.map((item) => item.id)).toEqual(["a-1"]);
     expect(approved.data?.status).toBe("approved");
-    expect(merged.response.status).toBe(200);
   });
 
-  it("refuses the merge once the approval request is rejected, and a decision the other way", async () => {
-    const client = gated();
-    const id = (await merge(client)).data!.approvalRequest!.id;
-    await decide(client, id, "reject");
+  it("refuses a decision the other way once the approval request is decided", async () => {
+    const client = await withPendingRequest();
+    await decide(client, "a-1", "reject");
 
-    expect((await merge(client)).response.status).toBe(403);
-    expect((await decide(client, id, "approve")).response.status).toBe(409);
-  });
-
-  it("refuses an invalid merge request, a run that is not running and a repository that cannot be reached", async () => {
-    const unreachableRepository: PullRequests = {
-      merge: async () => Promise.reject(new Error("connection refused")),
-      describe: async () => Promise.reject(new Error("connection refused")),
-    };
-
-    expect((await merge(gated(), null)).response.status).toBe(400);
-    expect((await merge(gated({ status: "completed" }))).response.status).toBe(409);
-    expect((await merge(gated({ workflow: "fake-develop-and-merge" }, unreachableRepository))).response.status).toBe(502);
+    expect((await decide(client, "a-1", "approve")).response.status).toBe(409);
   });
 
   it("refuses an invalid decision and an unknown approval request", async () => {
-    const client = gated();
+    const client = await withPendingRequest();
 
     const invalid = await client.POST("/approval-requests/{approvalRequestId}/decision", {
       params: { path: { approvalRequestId: "a-1" } },
@@ -747,15 +721,14 @@ describe("control plane: merges behind the gate, and approval requests", () => {
   });
 
   it("refuses a status filter that is not an approval status", async () => {
-    const { response } = await gated().GET("/approval-requests", { params: { query: { status: "maybe" as "pending" } } });
+    const { response } = await (await withPendingRequest()).GET("/approval-requests", { params: { query: { status: "maybe" as "pending" } } });
 
     expect(response.status).toBe(400);
   });
 
-  it("answers 503 without a merge gate and without approval requests", async () => {
+  it("answers 503 without approval requests", async () => {
     const client = controlPlane();
 
-    expect((await merge(client)).response.status).toBe(503);
     expect((await client.GET("/approval-requests")).response.status).toBe(503);
     expect((await decide(client, "a-1", "approve")).response.status).toBe(503);
   });

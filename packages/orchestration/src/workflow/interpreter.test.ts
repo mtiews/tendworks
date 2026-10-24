@@ -424,10 +424,10 @@ do:
       call: http
       with:
         method: post
-        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/deployments" }'
         body:
           pullRequest: '\${ .pullRequest }'
-          policy: merge-gate
+          policy: careful
       output:
         as: '\${ { merged: .merged, pullRequest: $input.pullRequest } }'
 `);
@@ -447,9 +447,9 @@ do:
       expect(http.requests).toEqual([
         {
           method: "POST",
-          endpoint: "http://control-plane:8080/pull-requests/merge",
+          endpoint: "http://control-plane:8080/deployments",
           headers: {},
-          body: { pullRequest: "https://git.example/acme/app/pull/7", policy: "merge-gate" },
+          body: { pullRequest: "https://git.example/acme/app/pull/7", policy: "careful" },
         },
       ]);
       expect(run).toEqual({

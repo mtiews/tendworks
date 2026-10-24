@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryApprovals, createInMemoryRuns, type ApprovalRequest, type ApprovalsPort, type HealthProbe } from "./index.js";
+import { createControlPlaneApi, createInMemoryApprovals, createInMemoryRuns, emptyConfiguration, type ApprovalRequest, type ApprovalsPort, type HealthProbe } from "./index.js";
 
 const pending: ApprovalRequest = {
   id: "approval-1",
   runId: "run-1",
   workflow: "develop-issue",
   action: "merge",
-  pullRequest: "https://git.example/acme/app/pull/7",
   policy: "careful",
   question: "Merge https://git.example/acme/app/pull/7 for run run-1 of develop-issue?",
   status: "pending",
@@ -16,7 +15,7 @@ const pending: ApprovalRequest = {
 function api(approvals?: ApprovalsPort, probes: HealthProbe[] = []) {
   return createControlPlaneApi({
     probes,
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
     ...(approvals ? { approvals } : {}),

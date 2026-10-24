@@ -17,10 +17,7 @@ import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import {
   createApprovals,
   createLoggingNotificationChannel,
-  createMergeGate,
   createPostgresApprovalStore,
-  toGatedRun,
-  createPullRequestIntegrations,
   createPostgresNotificationStore,
   createNotifier,
   migrateHumanInteractionStore,
@@ -56,8 +53,8 @@ try {
 console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
 console.log(`configuration: trigger bindings ${configuration.triggerBindings.map((binding) => binding.metadata.name).join(", ") || "none"}`);
 
-// Secret references of the platform's integrations (trigger bindings, merging pull
-// requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
+// Secret references of the platform's integrations (trigger bindings): only
+// TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
 // Every operation but GET /status needs a token: the API token for anything, the
@@ -116,26 +113,10 @@ const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
 // The agent runtime runs in the worker too; transcripts are read through its internal API.
 const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
-// Human interaction: the merge gate. It decides by orchestration's record of the run and
-// the policies of its workflow, never by what the caller claims; with `ask` it opens an
-// approval request (approval.requested goes onto the bus with it) and merges only once
-// that is approved. Merges go through the pull request integration configured for the
-// pull request's host, with the platform token only this bundle holds (ADR 0008).
+// Human interaction: approval requests; approval.requested and approval.decided go onto
+// the bus with each write.
 const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
-const merges = createMergeGate({
-  policies: configuration.policies,
-  runs: async (runId) => {
-    const run = await orchestration.get(runId);
-    return run && toGatedRun(run);
-  },
-  pullRequests: createPullRequestIntegrations({ integrations: configuration.pullRequestIntegrations, secrets: platformSecrets }),
-  approvals: approvalStore,
-});
 const approvals = createApprovals({ store: approvalStore });
-console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
-console.log(
-  `configuration: pull request integrations ${configuration.pullRequestIntegrations.map(({ metadata, spec }) => `${metadata.name} (${spec.integration} on ${spec.host})`).join(", ") || "none"}`,
-);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control
@@ -159,7 +140,6 @@ const api = createControlPlaneApi({
   runs: orchestration,
   agentRuntime,
   notifications,
-  merges,
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,

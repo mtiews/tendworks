@@ -95,7 +95,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, Policy, PullRequestIntegration, SandboxTemplate, TriggerBinding)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, SandboxTemplate, TriggerBinding)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -197,72 +197,18 @@ describe("loadConfiguration", () => {
     ]);
   });
 
-  it("loads pull request integrations and rejects a second one for the same host", () => {
-    const integration = (name: string, host: string, spec: string) =>
-      `apiVersion: tendworks.dev/v1\nkind: PullRequestIntegration\nmetadata: { name: ${name} }\nspec: { host: ${host}, ${spec} }\n`;
-    const github = "integration: github, github: { token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }";
-    const fake = "integration: fake, fake: { pullRequests: [{ url: 'https://git.example/acme/app/pull/1', headBranch: main }] }";
-    const valid = folder({
-      "integrations/pull-requests/github.yaml": integration("github", "github.com", github),
-      "integrations/pull-requests/fake.yaml": integration("fake", "git.example", fake),
-    });
-    expect(loadConfiguration(valid).pullRequestIntegrations.map(({ metadata, spec }) => [metadata.name, spec.host, spec.integration])).toEqual([
-      ["fake", "git.example", "fake"],
-      ["github", "github.com", "github"],
-    ]);
-
-    const invalid = folder({
-      "integrations/a.yaml": integration("a", "github.com", github),
-      "integrations/b.yaml": integration("b", "github.com", fake),
-      "integrations/c.yaml": integration("c", "git.example", "integration: github"),
-    });
-    expect(issuesOf(invalid)).toEqual([
-      "integrations/b.yaml: pull request integration 'b' serves host github.com, which integrations/a.yaml already serves",
-      "integrations/c.yaml: /spec: must have required property 'github'",
-    ]);
-  });
-
-  it("loads policies and rejects invalid ones and duplicates", () => {
-    const policy = (name: string, merge: string) => `apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: ${name} }\nspec: { merge: ${merge} }\n`;
-    const valid = folder({ "policies/auto.yaml": policy("merge-gate", "auto"), "policies/ask.yaml": policy("careful", "ask") });
-    expect(loadConfiguration(valid).policies.map((p) => [p.metadata.name, p.spec.merge])).toEqual([
-      ["careful", "ask"],
-      ["merge-gate", "auto"],
-    ]);
-
-    const invalid = folder({
-      "policies/a.yaml": policy("merge-gate", "auto"),
-      "policies/b.yaml": policy("merge-gate", "ask"),
-      "policies/c.yaml": policy("sloppy", "always"),
-    });
-    expect(issuesOf(invalid)).toEqual([
-      "policies/b.yaml: policy 'merge-gate' is already defined in policies/a.yaml",
-      "policies/c.yaml: /spec/merge: must be equal to one of the allowed values (auto, ask)",
-    ]);
-  });
-
-  it("rejects a policy for a workflow that is not configured, so a typo cannot loosen a gate", () => {
-    const dir = folder({
-      "workflows/build.sw.yaml": workflow("build"),
-      "agents/developer.md": agent("developer"),
-      "policies/careful.yaml": "apiVersion: tendworks.dev/v1\nkind: Policy\nmetadata: { name: careful }\nspec: { merge: ask, workflows: [build, biuld] }\n",
-    });
-
-    expect(issuesOf(dir)).toEqual(["policies/careful.yaml: policy 'careful' names workflow 'biuld', which is not configured (configured: build)"]);
-  });
-
   it("accepts http calls in workflows without asking for agent profiles", () => {
     const dir = folder({
-      "workflows/merge.sw.yaml": `
-document: { dsl: '1.0.3', namespace: test, name: merge, version: '0.1.0' }
+      "workflows/notify.sw.yaml": `
+document: { dsl: '1.0.3', namespace: test, name: notify, version: '0.1.0' }
 do:
-  - merge:
+  - notify:
       call: http
-      with: { method: post, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }' }
+      with: { method: get, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/status" }' }
 `,
     });
 
-    expect(loadConfiguration(dir).workflowNames).toEqual(["merge"]);
+    expect(loadConfiguration(dir).workflowNames).toEqual(["notify"]);
   });
 
   it("rejects a folder that does not exist", () => {
@@ -290,11 +236,6 @@ do:
       ["developer", "claude-code"],
     ]);
     expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([["playground-ready-for-agent", true]]);
-    expect(starter.pullRequestIntegrations.map((integration) => integration.metadata.name)).toEqual(["github"]);
-    expect(starter.policies.map((policy) => [policy.metadata.name, policy.spec.workflows, policy.spec.merge])).toEqual([
-      ["ask-before-merge", ["develop-issue"], "ask"],
-      ["merge-gate", undefined, "auto"],
-    ]);
   });
 
   it("gives the platform MCP server only to the example assistant, never to an agent with push rights", () => {

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentProfile, Policy, PullRequestIntegration, TriggerBinding, Workflow } from "@tendworks/shared";
+import type { AgentProfile, TriggerBinding, Workflow } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 
@@ -13,8 +13,6 @@ const schemas = new URL("../../../contracts/schemas/", import.meta.url);
 /** Schemas of the `kind`s in the apiVersion/kind/metadata/spec envelope. */
 const KINDS: Record<string, string> = {
   AgentProfile: "agent-profile.schema.yaml",
-  Policy: "policy.schema.yaml",
-  PullRequestIntegration: "pull-request-integration.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
   TriggerBinding: "trigger-binding.schema.yaml",
 };
@@ -35,10 +33,11 @@ export interface Configuration {
   agentProfiles: AgentProfile.AgentProfile[];
   /** Trigger bindings, ordered by name; each starts a configured workflow. */
   triggerBindings: TriggerBinding.TriggerBinding[];
-  /** Policies, ordered by name; workflows name them when they ask for a gated action. */
-  policies: Policy.Policy[];
-  /** How the platform reaches pull requests, at most one integration per host, ordered by name. */
-  pullRequestIntegrations: PullRequestIntegration.PullRequestIntegration[];
+}
+
+/** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
+export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
+  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], ...overrides };
 }
 
 let ajv: Ajv2020 | undefined;
@@ -71,8 +70,6 @@ export function loadConfiguration(dir: string): Configuration {
   const workflows = new Map<string, { file: string; definition: Workflow.Workflow }>();
   const profiles = new Map<string, { file: string; profile: AgentProfile.AgentProfile }>();
   const bindings = new Map<string, { file: string; binding: TriggerBinding.TriggerBinding }>();
-  const policies = new Map<string, { file: string; policy: Policy.Policy }>();
-  const pullRequestIntegrations = new Map<string, { file: string; integration: PullRequestIntegration.PullRequestIntegration }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -117,25 +114,6 @@ export function loadConfiguration(dir: string): Configuration {
       continue;
     }
     if (!check(file, schemaFile, document)) continue;
-    if (kind === "Policy") {
-      const policy = document as unknown as Policy.Policy;
-      const existing = policies.get(policy.metadata.name);
-      if (existing) issues.push(`${file}: policy '${policy.metadata.name}' is already defined in ${existing.file}`);
-      else policies.set(policy.metadata.name, { file, policy });
-      continue;
-    }
-    if (kind === "PullRequestIntegration") {
-      const integration = document as unknown as PullRequestIntegration.PullRequestIntegration;
-      const existing = [...pullRequestIntegrations.values()].find(
-        (known) => known.integration.metadata.name === integration.metadata.name || known.integration.spec.host === integration.spec.host,
-      );
-      if (existing?.integration.metadata.name === integration.metadata.name) {
-        issues.push(`${file}: pull request integration '${integration.metadata.name}' is already defined in ${existing.file}`);
-      } else if (existing) {
-        issues.push(`${file}: pull request integration '${integration.metadata.name}' serves host ${integration.spec.host}, which ${existing.file} already serves`);
-      } else pullRequestIntegrations.set(integration.metadata.name, { file, integration });
-      continue;
-    }
     if (kind !== "TriggerBinding") continue;
     const binding = document as unknown as TriggerBinding.TriggerBinding;
     const existing = bindings.get(binding.metadata.name);
@@ -156,26 +134,12 @@ export function loadConfiguration(dir: string): Configuration {
     }
   }
 
-  // A policy for a misspelt workflow would silently never apply, leaving a laxer one in charge.
-  for (const { file, policy } of policies.values()) {
-    for (const workflow of policy.spec.workflows ?? []) {
-      if (!workflows.has(workflow)) {
-        const configured = [...workflows.keys()].sort().join(", ") || "none";
-        issues.push(`${file}: policy '${policy.metadata.name}' names workflow '${workflow}', which is not configured (configured: ${configured})`);
-      }
-    }
-  }
-
   if (issues.length > 0) throw new ConfigurationError(issues);
   return {
     workflowNames: [...workflows.keys()].sort(),
     workflow: (name) => workflows.get(name)?.definition,
     agentProfiles: [...profiles.values()].map(({ profile }) => profile),
     triggerBindings: [...bindings.values()].map(({ binding }) => binding).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-    policies: [...policies.values()].map(({ policy }) => policy).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-    pullRequestIntegrations: [...pullRequestIntegrations.values()]
-      .map(({ integration }) => integration)
-      .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 

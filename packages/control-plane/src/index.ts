@@ -13,8 +13,7 @@ export {
 } from "./agent-runtime.js";
 export { apiTokenProblems, createControlPlaneApi, type ControlPlaneApiOptions } from "./api.js";
 export { createInMemoryApprovals, type ApprovalDecision, type ApprovalRequest, type ApprovalsPort, type ApprovalStatus } from "./approvals.js";
-export { ConfigurationError, loadConfiguration, type Configuration } from "./configuration.js";
-export { createFakeMerges, type MergeOutcome, type MergeRefusal, type MergeRequest, type MergesPort, type PullRequestMerge } from "./merges.js";
+export { ConfigurationError, emptyConfiguration, loadConfiguration, type Configuration } from "./configuration.js";
 export type { Notification, NotificationsPort } from "./notifications.js";
 export {
   createInMemoryRuns,

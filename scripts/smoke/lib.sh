@@ -184,15 +184,6 @@ wait_triggered_run() {
   echo "$id"
 }
 
-# Prints a field of pull request $1 (URL) from GitHub, e.g. `pr_field <url> state`.
-pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
-
-# True when the policy ask-before-merge lists develop-issue under spec.workflows (comments
-# in the file do not count).
-asks_for_develop_issue() {
-  grep -E '^[[:space:]]*workflows:' "$CONFIG/policies/ask-before-merge.yaml" | grep -q 'develop-issue'
-}
-
 # Fails early with a hint when the control plane does not answer, e.g. because server or
 # worker refused an invalid configuration (images older than the contracts need a rebuild).
 if ! curl -fsS -o /dev/null "$URL/status" 2>/dev/null && [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/status")" != 503 ]; then

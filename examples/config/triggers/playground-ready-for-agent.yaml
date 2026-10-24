@@ -1,11 +1,10 @@
 # The automated path against the real playground repository: every minute, each open
 # issue of mtiews/tendworks-playground labelled ready-for-agent starts one develop-issue
-# run (the developer agent implements it and opens a pull request, the platform merges
-# it behind the policies). Suspended, because it needs the platform token
-# TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env (issues read; the merge also needs
-# contents and pull requests read/write) and the agent's harness credential. To use it,
-# set those and remove `suspend: true` (docs/platform-implementation.md, pull request
-# smoke test). An issue fires once per binding, also after a failed run; retry with
+# run (the developer agent implements it, opens a pull request and reports it; the run
+# ends with it). Suspended, because it needs the platform token
+# TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env (issues read only) and the agent's
+# harness credential. To use it, set those and remove `suspend: true`
+# (docs/platform-implementation.md, pull request smoke test). An issue fires once per binding, also after a failed run; retry with
 # POST /runs (ADR 0006).
 apiVersion: tendworks.dev/v1
 kind: TriggerBinding

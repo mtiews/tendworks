@@ -12,8 +12,7 @@ const pending: ApprovalRequest = {
   runId: "0b6c4c1e-run",
   workflow: "develop-issue",
   action: "merge",
-  pullRequest: PULL_REQUEST,
-  policy: "ask-before-merge",
+  policy: "careful",
   question: "Merge https://github.com/acme/playground/pull/13 for run 0b6c4c1e-run of develop-issue?",
   status: "pending",
   createdAt: "2026-10-19T10:00:00.000Z",
@@ -23,7 +22,6 @@ const approved: ApprovalRequest = {
   ...pending,
   id: "3c2a-approval-approved",
   runId: "9a8b-run",
-  pullRequest: "https://github.com/acme/playground/pull/12",
   question: "Merge https://github.com/acme/playground/pull/12 for run 9a8b-run of develop-issue?",
   status: "approved",
   createdAt: "2026-10-19T11:00:00.000Z",
@@ -49,8 +47,8 @@ describe("approval requests page", () => {
     const table = await screen.findByRole("table", { name: "Approval requests" });
     expect(rows(table)).toEqual([
       ["Status", "Question", "Run", "Requested", "Decided", "Actions"],
-      ["pending", `${pending.question}merge · ask-before-merge`, "0b6c4c1e-run", pending.createdAt, "", "ApproveReject"],
-      ["approved", `${approved.question}merge · ask-before-merge`, "9a8b-run", approved.createdAt, approved.decidedAt, ""],
+      ["pending", `${pending.question}merge · careful`, "0b6c4c1e-run", pending.createdAt, "", "ApproveReject"],
+      ["approved", `${approved.question}merge · careful`, "9a8b-run", approved.createdAt, approved.decidedAt, ""],
     ]);
     expect(screen.getByRole("link", { name: "0b6c4c1e-run" }).getAttribute("href")).toBe("/ui/runs/0b6c4c1e-run");
   });
@@ -150,7 +148,7 @@ describe("approval requests page", () => {
       .filter((link) => link.getAttribute("target") === "_blank");
     expect(links.map((link) => link.getAttribute("href"))).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
     expect(links.map((link) => link.textContent)).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
-    expect(rows(table)[1]?.[1]).toBe(`${question}merge · ask-before-merge`);
+    expect(rows(table)[1]?.[1]).toBe(`${question}merge · careful`);
   });
 
   it("offers no actions in read-only mode", async () => {

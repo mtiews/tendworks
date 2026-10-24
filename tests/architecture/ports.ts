@@ -19,13 +19,11 @@ import {
   createInMemoryApprovals,
   createInMemoryRuns,
   createInMemoryTriggers,
-  createFakeMerges,
   createOrchestrationClient,
   createStoreProbe,
   createTriggerGatewayClient,
   type AgentRuntimePort,
   type ApprovalsPort,
-  type MergesPort,
   type NotificationsPort,
   type RunsPort,
   type TriggersPort,
@@ -34,20 +32,16 @@ import { createInMemoryEventBus, createPostgresEventBus, type EventBus } from "@
 import { createStaticHealthProbe, type HealthProbe } from "@tendworks/health";
 import {
   createApprovals,
-  createFakePullRequests,
-  createGithubPullRequests,
   createInMemoryApprovalStore,
   createInMemoryNotificationChannel,
   createInMemoryNotificationStore,
   createLoggingNotificationChannel,
-  createMergeGate,
   createPostgresApprovalStore,
   createPostgresNotificationStore,
   type ApprovalEventPublisher,
   type ApprovalStore,
   type NotificationChannel,
   type NotificationStore,
-  type PullRequests,
 } from "@tendworks/human-interaction";
 import {
   createExecutionEngineProbe,
@@ -119,7 +113,6 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "human-interaction/ApprovalStore": port<ApprovalStore>({ postgres: createPostgresApprovalStore, "in-memory": createInMemoryApprovalStore }),
   "human-interaction/NotificationStore": port<NotificationStore>({ postgres: createPostgresNotificationStore, "in-memory": createInMemoryNotificationStore }),
   "human-interaction/NotificationChannel": port<NotificationChannel>({ logging: createLoggingNotificationChannel, "in-memory": createInMemoryNotificationChannel }),
-  "human-interaction/PullRequests": port<PullRequests>({ github: createGithubPullRequests, fake: createFakePullRequests }),
 
   "event-bus/EventBus": port<EventBus<never>>({ postgres: createPostgresEventBus, "in-memory": createInMemoryEventBus }),
 
@@ -128,7 +121,6 @@ export const PORTS: Record<string, Record<string, unknown>> = {
   "control-plane/TriggersPort": port<TriggersPort>({ "trigger-gateway": createTriggerGatewayClient, "in-memory": createInMemoryTriggers }),
   "control-plane/ApprovalsPort": port<ApprovalsPort>({ "human-interaction": createApprovals, "in-memory": createInMemoryApprovals }),
   "control-plane/NotificationsPort": port<NotificationsPort>({ "human-interaction": createPostgresNotificationStore, "in-memory": createInMemoryNotificationStore }),
-  "control-plane/MergesPort": port<MergesPort>({ "human-interaction": createMergeGate, fake: createFakeMerges }),
 
   "health/HealthProbe": port<HealthProbe>({
     store: createStoreProbe,

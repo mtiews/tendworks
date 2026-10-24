@@ -8,7 +8,7 @@ The walking skeleton is done up to milestone 1c, and milestone 2 is implemented 
 
 | Milestone | What works |
 | --- | --- |
-| 1: automated path | GitHub issue labelled `ready-for-agent` → time trigger → workflow → `developer` agent (Claude Code via ACP in a Docker sandbox) → pull request → merge behind a policy gate (`auto` or `ask`) → notification; runs resume after a platform restart |
+| 1: automated path | GitHub issue labelled `ready-for-agent` → time trigger → workflow → `developer` agent (Claude Code via ACP in a Docker sandbox) → the agent opens a pull request and reports it, the run ends with it → notification; runs resume after a platform restart |
 | 1b: chat path | chats with an agent through the API and `tend chat`, with a read-only MCP server on the platform for chat agents |
 | 1c: web UI | single-page app under `/ui/`: status, runs with live transcripts, approvals, notifications, chats; localhost only, signed in with an API token |
 | 2: single-host deployment on Linux | install from a release tag on Ubuntu 24.04 with Docker Engine: no default tokens, restart after reboot, schema migrations, backup and restore scripts, sandboxes per installation with orphan clean-up, the platform MCP server through an MCP-only gateway, access from your devices through a TLS layer such as Tailscale ([release notes](docs/releases/v0.2.0.md)) |

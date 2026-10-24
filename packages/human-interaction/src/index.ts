@@ -22,26 +22,3 @@ export {
 } from "./notification-channel.js";
 export { createInMemoryNotificationStore, type Delivery, type NotificationStore } from "./notification-store.js";
 export { createNotifier, type NotifierOptions } from "./notifier.js";
-export {
-  createMergeGate,
-  toGatedRun,
-  PULL_REQUEST_ARTIFACT,
-  type GatedRun,
-  type MergeGate,
-  type MergeGateOptions,
-  type MergeOutcome,
-  type MergeRefusal,
-  type MergeRequest,
-  type PullRequestMerge,
-} from "./merge-gate.js";
-export { decide, decideFor, type GatedAction, type Policy, type PolicyDecision } from "./policy.js";
-export { createGithubPullRequests, type GithubPullRequestsOptions } from "./pull-requests/github/github-pull-requests.js";
-export { createPullRequestIntegrations, type PullRequestIntegrationsOptions } from "./pull-requests/pull-requests-for.js";
-export {
-  createFakePullRequests,
-  MergeRefusedError,
-  type FakePullRequest,
-  type MergeResult,
-  type PullRequestDetails,
-  type PullRequests,
-} from "./pull-requests/pull-requests.js";

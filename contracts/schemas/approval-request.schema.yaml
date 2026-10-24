@@ -2,12 +2,12 @@ $id: https://tendworks.dev/schemas/v1/schemas/approval-request.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: ApprovalRequests
 description: >-
-  Approval requests human interaction records when a policy decides that a gated action
-  needs the human's decision first. The run waits until the request is decided.
+  Approval requests human interaction records when a run needs the human's decision
+  before it continues. The run waits until the request is decided.
 $defs:
   approvalRequest:
     title: ApprovalRequest
-    description: A question to the human about one gated action of one run.
+    description: A question to the human about one action of one run.
     type: object
     additionalProperties: false
     required: [id, runId, workflow, action, policy, question, status, createdAt]
@@ -23,15 +23,12 @@ $defs:
         description: Workflow the run executes.
       action:
         $ref: '#/$defs/gatedAction'
-      pullRequest:
-        type: string
-        description: For `merge`, the web URL of the pull request to merge.
       policy:
         type: string
         description: Name of the policy that asked for the approval.
       question:
         type: string
-        description: The question in one line, e.g. "Merge https://…/pull/7 for run 1f3c… of develop-issue?".
+        description: The question in one line, e.g. "Deploy release 1.4 of run 1f3c… of release-app?".
       status:
         $ref: '#/$defs/approvalStatus'
       traceparent:
@@ -47,9 +44,11 @@ $defs:
         description: When the request was approved or rejected.
   gatedAction:
     title: GatedAction
-    description: The action the approval request is about. For now only merging a pull request.
+    description: >-
+      Name of the action the approval request is about, chosen by the workflow, e.g.
+      `deploy`.
     type: string
-    enum: [merge]
+    minLength: 1
   approvalStatus:
     title: ApprovalStatus
     description: >-

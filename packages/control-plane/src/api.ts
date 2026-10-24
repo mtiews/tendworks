@@ -5,7 +5,6 @@ import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
 import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
-import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
@@ -32,8 +31,6 @@ export interface ControlPlaneApiOptions {
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
   notifications?: NotificationsPort;
-  /** Human interaction's merge gate; `POST /pull-requests/merge` answers 503 without it. */
-  merges?: MergesPort;
   /** Human interaction's approval requests; their endpoints answer 503 without it. */
   approvals?: ApprovalsPort;
   /**
@@ -82,7 +79,6 @@ export function createControlPlaneApi({
   agentRuntime,
   triggers = createInMemoryTriggers(),
   notifications,
-  merges,
   approvals,
   apiToken,
   readToken,
@@ -363,29 +359,6 @@ export function createControlPlaneApi({
     } catch (error) {
       return problem(503, "Notifications unavailable", error instanceof Error ? error.message : String(error));
     }
-  });
-
-  app.post("/pull-requests/merge", authenticated, async (c) => {
-    const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
-    // Only these two fields: what the gate decides by comes from the platform's records.
-    const valid =
-      body !== undefined &&
-      typeof body.run === "string" &&
-      (typeof body.pullRequest === "string" || body.pullRequest === null) &&
-      Object.keys(body).every((key) => key === "run" || key === "pullRequest");
-    if (!valid) {
-      return problem(
-        400,
-        "Invalid request",
-        "the body must be { run, pullRequest } with the id of a running run and the URL of its pull request (or null); the policy comes from the platform's configuration",
-      );
-    }
-    if (!merges) return problem(503, "Merging unavailable", "no merge gate is configured");
-    const outcome = await merges.merge({ run: body.run as string, pullRequest: body.pullRequest as string | null });
-    if ("merged" in outcome) return c.json(outcome.merged satisfies Schemas["PullRequestMerge"], 200);
-    if ("pending" in outcome) return c.json(outcome.pending satisfies Schemas["PullRequestMerge"], 202);
-    const { reason, title, detail } = outcome.refused;
-    return problem(REFUSAL_STATUS[reason], title, detail);
   });
 
   const STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected"];

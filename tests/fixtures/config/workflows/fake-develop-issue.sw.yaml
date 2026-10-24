@@ -1,0 +1,28 @@
+# The shape of develop-issue with fakes: the fake agent reports a pull request on the
+# reserved git.example host, and the run ends with it. Runs without a model or a repository.
+# Start it with: POST /runs {"workflow": "fake-develop-issue", "input": {"issue": {"number": 1, "title": "Say hello"}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: fake-develop-issue
+  version: '0.1.0'
+  summary: A fake agent opens a pull request and reports it.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-pr-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.issue.number // 0): \(.issue.title // "untitled")" }'
+            # The workspace the run hands to the agent; the fake agent checks nothing out.
+            metadata:
+              dev.tendworks/workspace:
+                repository: https://git.example/example/playground.git
+                branch: tendworks/fake
+      output:
+        as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]) } }'

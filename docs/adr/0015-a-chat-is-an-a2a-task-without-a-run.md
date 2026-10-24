@@ -13,7 +13,7 @@ Only agent profiles with `spec.chat` can be chatted with. What a chat can do fol
 - **A run of a built-in chat workflow** with a `listen` loop: chats would appear among runs and orchestration would sit between human and agent for no gain; every message would become a workflow event.
 - **A run without a workflow**: a second kind of run for one use case.
 - **A task per turn in the same A2A context**: every turn would be a new agent session, losing the harness's own conversation state.
-- **A chat with any profile**: anyone with API access could steer an agent holding push rights directly and bypass workflow and merge gate.
+- **A chat with any profile**: anyone with API access could steer an agent holding push rights directly and bypass its workflow.
 
 ## Consequences
 

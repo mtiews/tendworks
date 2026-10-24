@@ -1,4 +1,4 @@
-import { createAgentRuntimeClient, createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, type HealthProbe, type Trigger } from "@tendworks/control-plane";
+import { createAgentRuntimeClient, createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, emptyConfiguration, type HealthProbe, type Trigger } from "@tendworks/control-plane";
 import type { AgentProfile } from "@tendworks/shared";
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -23,7 +23,7 @@ const approval = {
   runId: "r-1",
   workflow: "develop-issue",
   action: "merge" as const,
-  policy: "merge-gate",
+  policy: "careful",
   question: "Merge https://github.com/example/playground/pull/7 for run r-1 of develop-issue?",
   createdAt: "2026-10-18T09:00:00.000Z",
 };
@@ -70,14 +70,7 @@ const profile = (name: string, spec: Partial<AgentProfile.AgentProfile["spec"]> 
   spec: { harness: "fake", ...spec },
 });
 
-const configuration = (agentProfiles: AgentProfile.AgentProfile[]) => ({
-  workflowNames: [],
-  workflow: () => undefined,
-  agentProfiles,
-  triggerBindings: [],
-  policies: [],
-  pullRequestIntegrations: [],
-});
+const configuration = (agentProfiles: AgentProfile.AgentProfile[]) => emptyConfiguration({ agentProfiles });
 
 describe("status page: agents", () => {
   it("shows each agent profile with its active agent sessions of run steps and chats", async () => {

@@ -4,13 +4,6 @@ export type ApprovalRequest = ApprovalRequestSchema.ApprovalRequest;
 export type ApprovalStatus = ApprovalRequestSchema.ApprovalStatus;
 export type ApprovalEvent = ApprovalEvents.ApprovalRequestedEvent | ApprovalEvents.ApprovalDecidedEvent;
 
-/** What identifies an approval request: one per run, action and pull request. */
-export interface ApprovalSubject {
-  runId: string;
-  action: ApprovalRequest["action"];
-  pullRequest: string;
-}
-
 /**
  * Port through which human interaction emits its events. `tx` is the transaction that
  * writes the approval request, so state and event commit together (outbox).
@@ -31,8 +24,8 @@ export type DecideOutcome = { decided: ApprovalRequest } | { conflict: ApprovalR
 export interface ApprovalStore {
   /**
    * Records a pending approval request and publishes `event(request)` with it. When the
-   * run already has a request for the same action and pull request, returns that one
-   * and publishes nothing.
+   * run already has a request for the same action, returns that one and publishes
+   * nothing.
    */
   open(request: ApprovalRequest, event: (request: ApprovalRequest) => ApprovalEvent): Promise<ApprovalRequest>;
   /**
@@ -47,7 +40,6 @@ export interface ApprovalStore {
     event: (request: ApprovalRequest) => ApprovalEvent,
   ): Promise<DecideOutcome | undefined>;
   get(id: string): Promise<ApprovalRequest | undefined>;
-  find(subject: ApprovalSubject): Promise<ApprovalRequest | undefined>;
   /** Requests, newest first. */
   list(options?: { status?: ApprovalStatus; limit?: number }): Promise<ApprovalRequest[]>;
 }
@@ -57,13 +49,11 @@ export function createInMemoryApprovalStore(): ApprovalStore & { published: Appr
   const requests: ApprovalRequest[] = [];
   const published: ApprovalEvent[] = [];
   const clone = <T>(value: T): T => structuredClone(value);
-  const same = (request: ApprovalRequest, { runId, action, pullRequest }: ApprovalSubject) =>
-    request.runId === runId && request.action === action && request.pullRequest === pullRequest;
 
   return {
     published,
     async open(request, event) {
-      const existing = requests.find((known) => same(known, { runId: request.runId, action: request.action, pullRequest: request.pullRequest ?? "" }));
+      const existing = requests.find((known) => known.runId === request.runId && known.action === request.action);
       if (existing) return clone(existing);
       requests.push(clone(request));
       published.push(clone(event(request)));
@@ -81,10 +71,6 @@ export function createInMemoryApprovalStore(): ApprovalStore & { published: Appr
     },
     async get(id) {
       const request = requests.find((known) => known.id === id);
-      return request && clone(request);
-    },
-    async find(subject) {
-      const request = requests.find((known) => same(known, subject));
       return request && clone(request);
     },
     async list({ status, limit = 100 } = {}) {

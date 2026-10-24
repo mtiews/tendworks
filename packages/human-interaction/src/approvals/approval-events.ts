@@ -31,7 +31,6 @@ export function approvalDecided(request: ApprovalRequest, time: string): Approva
       approvalRequest: request.id,
       decision: request.status === "approved" ? "approve" : "reject",
       action: request.action,
-      ...(request.pullRequest === undefined ? {} : { pullRequest: request.pullRequest }),
     },
   };
 }

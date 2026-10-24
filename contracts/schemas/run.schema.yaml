@@ -132,8 +132,7 @@ $defs:
         type: array
         description: >-
           Links the step's agent reported as results of its task (A2A artifacts with a
-          URL), e.g. the pull request it opened. The merge gate only merges a pull request
-          the run reported this way, from the step's workspace.
+          URL), e.g. the pull request it opened.
         items:
           $ref: '#/$defs/stepArtifact'
       error:
@@ -148,8 +147,7 @@ $defs:
     title: StepWorkspace
     description: >-
       The workspace the step handed to its agent (the run's workflow set it, not the
-      agent): the repository checked out and the branch the agent works on. The merge
-      gate only merges a pull request of this repository from this branch.
+      agent): the repository checked out and the branch the agent works on.
     type: object
     additionalProperties: false
     required: [repository, branch]

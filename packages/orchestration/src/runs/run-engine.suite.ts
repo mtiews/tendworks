@@ -150,7 +150,7 @@ do:
       call: http
       with:
         method: post
-        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/deployments" }'
         body: { goal: '\${ .goal }' }
 `),
       );
@@ -163,7 +163,7 @@ do:
 
       expect(run).toMatchObject({ status: "completed", output: { merged: true }, steps: [{ name: "merge", status: "completed" }] });
       expect(http.requests).toEqual([
-        { method: "POST", endpoint: "http://control-plane.test/pull-requests/merge", headers: {}, body: { goal: "ship" } },
+        { method: "POST", endpoint: "http://control-plane.test/deployments", headers: {}, body: { goal: "ship" } },
       ]);
     });
 

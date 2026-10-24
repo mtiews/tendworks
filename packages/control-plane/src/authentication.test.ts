@@ -1,17 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { apiTokenProblems, createControlPlaneApi, createFakeMerges, createInMemoryApprovals, createInMemoryRuns } from "./index.js";
+import { apiTokenProblems, createControlPlaneApi, createInMemoryApprovals, createInMemoryRuns, emptyConfiguration } from "./index.js";
 
 const TOKEN = "s3cret-api-token";
 const READ_TOKEN = "s3cret-read-token";
 
 function setup({ readToken = READ_TOKEN }: { readToken?: string | undefined } = {}) {
   const runs = createInMemoryRuns();
-  const merges = createFakeMerges({ refused: { reason: "invalid", title: "Unknown run", detail: "no run 'r-1' exists" } });
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs,
-    merges,
     approvals: createInMemoryApprovals(),
     apiToken: TOKEN,
     ...(readToken === undefined ? {} : { readToken }),
@@ -26,12 +24,11 @@ function setup({ readToken = READ_TOKEN }: { readToken?: string | undefined } = 
     );
     return { status: response.status, challenge: response.headers.get("www-authenticate"), body: method === "HEAD" ? undefined : await response.json() };
   };
-  return { request, runs, merges };
+  return { request, runs };
 }
 
 const mutating: [string, string, unknown][] = [
   ["POST", "/runs", { workflow: "build" }],
-  ["POST", "/pull-requests/merge", { run: "r-1", pullRequest: null }],
   ["POST", "/approval-requests/a-1/decision", { decision: "approve" }],
   ["POST", "/chats", { agent: "assistant", text: "Hello" }],
   ["POST", "/chats/c-1/messages", { text: "Hello" }],
@@ -44,7 +41,7 @@ const wrong = [undefined, "Bearer wrong-token", `Basic ${TOKEN}`, TOKEN, `Bearer
 
 describe("API token", () => {
   it.each(mutating)("refuses %s %s without the API token, before looking at the request", async (method, path, body) => {
-    const { request, runs, merges } = setup();
+    const { request, runs } = setup();
 
     for (const authorization of wrong) {
       const answer = await request(method, path, authorization, body);
@@ -52,7 +49,6 @@ describe("API token", () => {
       expect(answer).toEqual({ status: 401, challenge: "Bearer", body: { title: "Unauthorized", status: 401, detail: "this operation needs the platform's API token as a bearer token" } });
     }
     expect(runs.started).toEqual([]);
-    expect(merges.requests).toEqual([]);
   });
 
   it.each(mutating)("lets %s %s through with the API token", async (method, path, body) => {
@@ -64,13 +60,12 @@ describe("API token", () => {
   });
 
   it.each(mutating)("refuses %s %s with the read-only token, before looking at the request", async (method, path, body) => {
-    const { request, runs, merges } = setup();
+    const { request, runs } = setup();
 
     const answer = await request(method, path, `Bearer ${READ_TOKEN}`, body);
 
     expect(answer).toEqual({ status: 403, challenge: null, body: { title: "Forbidden", status: 403, detail: "the read-only token cannot change state; this operation needs the platform's API token" } });
     expect(runs.started).toEqual([]);
-    expect(merges.requests).toEqual([]);
   });
 });
 

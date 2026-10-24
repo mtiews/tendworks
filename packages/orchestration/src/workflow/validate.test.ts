@@ -56,9 +56,9 @@ do:
       call: http
       with:
         method: post
-        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/deployments" }'
         headers: { x-request: '\${ .id }' }
-        body: { pullRequest: '\${ .pullRequest }', policy: merge-gate }
+        body: { pullRequest: '\${ .pullRequest }', policy: careful }
   - ping:
       call: http
       with: { method: get, endpoint: https://example.com/ping }

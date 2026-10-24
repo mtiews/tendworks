@@ -22,11 +22,10 @@ export function describeApprovalStore(name: string, setup: () => Promise<Approva
     const request = (overrides: Partial<ApprovalRequest> = {}): ApprovalRequest => ({
       id: crypto.randomUUID(),
       runId: crypto.randomUUID(),
-      workflow: "develop-issue",
-      action: "merge",
-      pullRequest: `https://git.example/acme/app/pull/${Math.floor(Math.random() * 1e6)}`,
+      workflow: "release-app",
+      action: "deploy",
       policy: "careful",
-      question: "Merge it?",
+      question: "Deploy it?",
       status: "pending",
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       createdAt: "2026-10-19T10:00:00.000Z",
@@ -58,7 +57,7 @@ export function describeApprovalStore(name: string, setup: () => Promise<Approva
       expect(await ofRun(first.runId)).toEqual(["dev.tendworks.approval.requested"]);
     });
 
-    it("returns the existing request for the same run, action and pull request, without a second event", async () => {
+    it("returns the existing request for the same run and action, without a second event", async () => {
       const first = request();
       await context.store.open(first, requested);
 
@@ -94,14 +93,6 @@ export function describeApprovalStore(name: string, setup: () => Promise<Approva
     it("knows no decision for an unknown request", async () => {
       expect(await context.store.decide(crypto.randomUUID(), "approved", "2026-10-19T10:05:00.000Z", decided)).toBeUndefined();
       expect(await context.store.get(crypto.randomUUID())).toBeUndefined();
-    });
-
-    it("finds the request of a run's action on a pull request", async () => {
-      const first = request();
-      await context.store.open(first, requested);
-
-      expect(await context.store.find({ runId: first.runId, action: "merge", pullRequest: first.pullRequest! })).toEqual(first);
-      expect(await context.store.find({ runId: first.runId, action: "merge", pullRequest: "https://git.example/other" })).toBeUndefined();
     });
 
     it("lists requests newest first, optionally only those with a status", async () => {

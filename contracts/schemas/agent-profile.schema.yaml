@@ -100,8 +100,7 @@ $defs:
     description: >-
       Allows chats with the profile (ADR 0015): a human can start an agent session with it
       directly and lead it turn by turn. Without it the profile only takes tasks from
-      workflows, so nobody can steer an agent with push rights past workflow and merge
-      gate. Give it only to profiles whose credentials keep a chat inside its workspace.
+      workflows, so nobody can steer an agent with push rights past its workflow. Give it only to profiles whose credentials keep a chat inside its workspace.
     type: object
     additionalProperties: false
     properties:

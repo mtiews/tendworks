@@ -1,11 +1,11 @@
 # GitHub access for agents
 
-How to give coding agents just enough GitHub access to develop: push branches and open pull requests. It works with **one GitHub account on the Free plan**, for **public and private** repositories. It reduces the risk of agent changes reaching production; it does not rule it out. The remaining risks are listed below.
+How to give coding agents just enough GitHub access to develop: push branches and open pull requests. The platform itself performs no GitHub action besides reading issues (ADR 0024 (the-platform-has-no-pull-request-integration)); you review and merge pull requests in GitHub. It works with **one GitHub account on the Free plan**, for **public and private** repositories. It reduces the risk of agent changes reaching production; it does not rule it out. The remaining risks are listed below.
 
 ## What one account on Free can and cannot enforce
 
 - A token's **permissions** can be narrowed per repository and per capability (fine-grained personal access token). That is the main lever.
-- **Rules** on `main` (rulesets, branch protection) exist on Free only for **public** repositories. And since both tokens belong to you, a rule cannot tell the agent from the platform.
+- **Rules** on `main` (rulesets, branch protection) exist on Free only for **public** repositories. And since the agent token belongs to you, a rule cannot tell the agent from you.
 - Pushing implies merging: `git push` and merging a pull request both need **Contents: write** ([permissions per endpoint](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)). On a private Free repository the agent token can therefore push to `main` and merge.
 
 So the setup keeps production **out of the agent token's reach**: no access to workflows, Actions, secrets or settings, and releases that only you can start.
@@ -27,7 +27,7 @@ GitHub → Settings → Developer settings → Fine-grained tokens → Generate 
 
 ### 2. Platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
 
-A second fine-grained token, used only by the server (trigger polling and merge gate), never in a sandbox: same repositories, **Contents** read/write, **Pull requests** read/write, **Issues** read, everything else no access.
+A second fine-grained token, used only by the server to read issues for trigger bindings, never in a sandbox: same repositories, **Issues** read, **Metadata** read (set automatically), everything else no access. It cannot write anything.
 
 Put both in `deploy/.env` (`chmod 600`) and recreate the stack with `docker compose -f deploy/compose.yaml up -d`; `restart` does not reload `.env`.
 
@@ -44,15 +44,15 @@ Whatever the agent can push may end up on `main`, so nothing that reaches produc
 Settings → Rules → Rulesets → New branch ruleset, target the default branch, **no bypass list**:
 
 - Restrict deletions, Block force pushes
-- Require a pull request before merging (0 approvals: you cannot approve your own pull requests, and both tokens are you)
+- Require a pull request before merging (0 approvals: you cannot approve your own pull requests, and the agent token is you)
 
-This stops direct and force pushes to `main` by either token. The platform still merges through pull requests. The agent token could merge too.
+This stops direct and force pushes to `main` by the agent token. You merge through pull requests. The agent token could merge too.
 
 ## Remaining risks
 
 | Risk | Private Free | Public + ruleset | Reduced by |
 | --- | --- | --- | --- |
-| Agent pushes or force-pushes to `main` | possible | blocked | merge gate (agents push their run branch), `--audit`, keep a clone as a backup |
+| Agent pushes or force-pushes to `main` | possible | blocked | role description says push only the run branch, `--audit`, keep a clone as a backup |
 | Agent merges its own pull request | possible | possible | role description says never merge; `--audit`; manual releases |
 | Agent changes CI workflows | blocked | blocked | no Workflows permission |
 | Agent starts a release or reads secrets | blocked | blocked | no Actions or Secrets permission, releases only manual |
@@ -60,7 +60,7 @@ This stops direct and force pushes to `main` by either token. The platform still
 | Leaked agent token | the selected repositories, until it expires | same | short expiry, few repositories |
 | Commits and pull requests show your name | always | always | the branch name `tendworks/issue-…` marks agent work |
 
-Closing the merge gap fully needs a second identity (a machine user with a classic token, or a GitHub App token per run, see the roadmap) plus rules, which on private repositories need GitHub Pro.
+Closing the gap fully needs a second identity (a machine user with a classic token, or a GitHub App token per run, see the roadmap) plus rules, which on private repositories need GitHub Pro.
 
 ## Verify
 

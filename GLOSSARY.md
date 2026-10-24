@@ -41,7 +41,7 @@ A message to the human that needs no decision, e.g. that a run finished. It is r
 _Avoid_: alert, task, message (that is an agent's output)
 
 **Policy**:
-A declarative rule (`kind: Policy`) that decides whether a gated action, such as merging a pull request, is performed right away (`allow`) or only after an approval request (`ask`). It applies to the workflows it lists (or all); the strictest applicable policy wins. A run never picks its policy.
+A declarative rule (`kind: Policy`) that decides per action name and workflow whether a workflow's human step proceeds right away (`allow`) or only after an approval request (`ask`) (ADR 0024). A run never picks its policy.
 _Avoid_: rule, gate setting, permission
 
 **Approval request**:

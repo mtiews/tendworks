@@ -76,7 +76,7 @@ Domain logic lives in `packages/`; `apps/` only wire packages together.
 
 ## Walking skeleton
 
-1. **Milestone 1 – automated:** GitHub issue labeled `ready-for-agent` (playground repo) → time trigger → workflow → `developer` agent (Claude Code via ACP in a sandbox) → PR → merge via gate → notification. Restarting the platform mid-run must resume the run. Clients: API and `tend` only.
+1. **Milestone 1 – automated:** GitHub issue labeled `ready-for-agent` (playground repo) → time trigger → workflow → `developer` agent (Claude Code via ACP in a sandbox) → the agent opens a PR and reports it as an artifact → notification. Restarting the platform mid-run must resume the run. Clients: API and `tend` only.
 2. **Milestone 1b – chat path:** a chat (API and `tend chat`) starts an agent session without a run (workspace only, no push/PR), with a read-only MCP server on the control plane API (`list_runs`, `get_run`, `list_triggers`, `list_agents`); agent output followed live (ADR 0015–0017).
 3. **Milestone 1c – web UI:** React + Vite SPA under `/ui/` of the server, signed in with an API token until OIDC (ADR 0018): status, runs with live transcripts, approvals, notifications, chats; localhost only.
 
