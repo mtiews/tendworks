@@ -51,7 +51,7 @@ it("adopts a store created before versioned migrations, with its firings", async
   try {
     // Before versioned migrations, the store ran today's schema (migration 1) on every start.
     await adopted.query(triggerGatewayMigrations[0]!.sql);
-    const key = { binding: "ready-issues", item: "acme/app#7" };
+    const key = { binding: "ready-issues", workspace: "app", item: "acme/app#7" };
     const evaluation = { at: "2026-10-18T10:00:00.000Z", status: "succeeded" as const, startedRuns: 1 };
     const before = createPostgresFiringStore({ pool: adopted, publisher: createPostgresOutbox(adopted) });
     expect(await before.claim(key)).toBe(true);

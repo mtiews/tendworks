@@ -22,7 +22,7 @@ const triggeredRun: Run = {
   workflow: "develop-issue",
   status: "running",
   input: {},
-  startedBy: { kind: "trigger", binding: "playground", issue: { repository: "acme/playground", number: 7, url: "https://github.com/acme/playground/issues/7" } },
+  startedBy: { kind: "trigger", binding: "playground", workspace: "playground", item: { key: "acme/playground#7", title: "Fix the login", url: "https://github.com/acme/playground/issues/7" } },
   steps: [],
   createdAt: time,
 };
@@ -49,7 +49,7 @@ describe("run list", () => {
 
     expect(rows("Runs")).toEqual([
       ["Run", "Workflow", "Status", "Started by", "Created", "Finished"],
-      ["run-2", "develop-issue", "running", "trigger playground: acme/playground#7", time, ""],
+      ["run-2", "develop-issue", "running", "trigger playground in playground: acme/playground#7", time, ""],
       ["run-1", "hello-agent", "completed", "manual", "2026-10-19T09:00:00.000Z", "2026-10-19T09:05:00.000Z"],
     ]);
     expect(screen.getByRole("link", { name: "run-1" }).getAttribute("href")).toBe("/ui/runs/run-1");

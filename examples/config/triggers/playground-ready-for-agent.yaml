@@ -1,30 +1,24 @@
 # The automated path against the real playground repository: every minute, each open
-# issue of mtiews/tendworks-playground labelled ready-for-agent starts one develop-issue
-# run (the developer agent implements it, opens a pull request and reports it; the run
-# ends with it). Suspended, because it needs the platform token
-# TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env (issues read only), the agent token of
-# the playground workspace (TENDWORKS_AGENT_GITHUB_TOKEN, workspaces/playground.yaml) and
-# the agent's harness credential. To use it, set those and remove `suspend: true`
-# (docs/platform-implementation.md, pull request smoke test). An issue fires once per
-# binding, also after a failed run; retry with POST /runs (ADR 0006).
+# issue labelled ready-for-agent in the repository of each listed workspace starts one
+# develop-issue run in that workspace (the developer agent implements it, opens a pull
+# request and reports it; the run ends with it). Suspended, because it needs the
+# platform token TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env (issues read only), the
+# agent token of the playground workspace (TENDWORKS_AGENT_GITHUB_TOKEN,
+# workspaces/playground.yaml) and the agent's harness credential. To use it, set those
+# and remove `suspend: true` (docs/platform-implementation.md, pull request smoke test).
+# An issue fires once per binding and workspace, also after a failed run; retry with
+# POST /runs (ADR 0006). Add a repository by adding its workspace to `workspaces`.
 apiVersion: tendworks.dev/v1
 kind: TriggerBinding
 metadata:
   name: playground-ready-for-agent
 spec:
   suspend: true
-  schedule:
-    every: { minutes: 1 }
-  source:
-    integration: github
-    issues:
-      repository: mtiews/tendworks-playground
+  workflow: develop-issue
+  workspaces: [playground]
+  trigger:
+    github-issues:
       labels: [ready-for-agent]
       state: open
-    github:
+      every: { minutes: 1 }
       token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }
-  workflow: develop-issue
-  # The runs work in the playground workspace, on the issue's repository.
-  input:
-    workspace: playground
-    issue: '${ .issue }'

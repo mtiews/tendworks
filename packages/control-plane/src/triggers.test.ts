@@ -4,6 +4,8 @@ import { createControlPlaneApi, createInMemoryRuns, createTriggerGatewayClient, 
 const trigger: Trigger = {
   name: "ready-issues",
   workflow: "implement-issue",
+  kind: "schedule",
+  workspaces: ["app"],
   schedule: { every: { minutes: 5 } },
   nextExecutionAt: "2026-10-18T10:05:00.000Z",
 };

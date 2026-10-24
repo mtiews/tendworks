@@ -30,19 +30,15 @@ do:
 const agent = (name: string, spec = "harness: fake") =>
   `---\napiVersion: tendworks.dev/v1\nkind: AgentProfile\nmetadata:\n  name: ${name}\nspec:\n  ${spec}\n---\nRole description.\n`;
 
-const trigger = (name: string, workflowName: string) => `
+const trigger = (name: string, workflowName: string, kind = "schedule: { every: { minutes: 5 } }", extra = "") => `
 apiVersion: tendworks.dev/v1
 kind: TriggerBinding
 metadata: { name: ${name} }
 spec:
-  schedule:
-    every: { minutes: 5 }
-  source:
-    integration: fake
-    issues: { repository: acme/playground, labels: [ready-for-agent], state: open }
   workflow: ${workflowName}
-  input:
-    issue: '\${ .issue }'
+  trigger:
+    ${kind}
+  ${extra}
 `;
 
 const workspace = (name: string, extra = "") => `
@@ -129,6 +125,8 @@ describe("loadConfiguration", () => {
       "workflows/build.sw.yaml": workflow("build"),
       "agents/developer.md": agent("developer"),
       "triggers/ready.yaml": trigger("ready", "build"),
+      "triggers/nightly.yaml": trigger("nightly", "build", "schedule: { cron: '0 2 * * *' }", "workspaces: [app]"),
+      "workspaces/app.yaml": workspace("app"),
     });
 
     const configuration = loadConfiguration(dir);
@@ -137,13 +135,14 @@ describe("loadConfiguration", () => {
       {
         apiVersion: "tendworks.dev/v1",
         kind: "TriggerBinding",
+        metadata: { name: "nightly" },
+        spec: { workflow: "build", trigger: { schedule: { cron: "0 2 * * *" } }, workspaces: ["app"] },
+      },
+      {
+        apiVersion: "tendworks.dev/v1",
+        kind: "TriggerBinding",
         metadata: { name: "ready" },
-        spec: {
-          schedule: { every: { minutes: 5 } },
-          source: { integration: "fake", issues: { repository: "acme/playground", labels: ["ready-for-agent"], state: "open" } },
-          workflow: "build",
-          input: { issue: "${ .issue }" },
-        },
+        spec: { workflow: "build", trigger: { schedule: { every: { minutes: 5 } } } },
       },
     ]);
   });
@@ -155,44 +154,49 @@ describe("loadConfiguration", () => {
       "triggers/a.yaml": trigger("ready", "build"),
       "triggers/b.yaml": trigger("ready", "build"),
       "triggers/c.yaml": trigger("ghostly", "ghost"),
-      "triggers/d.yaml": trigger("broken", "build").replace("minutes: 5", "fortnights: 1"),
+      "triggers/d.yaml": trigger("broken", "build", "fake: { every: { fortnights: 1 } }"),
+      "triggers/e.yaml": trigger("twice", "build", "schedule: { every: { minutes: 5 } }\n    fake: { every: { minutes: 5 } }"),
+      "triggers/f.yaml": trigger("unknown", "build", "webhook: { path: /hook }"),
     });
 
     expect(issuesOf(dir)).toEqual([
       "triggers/b.yaml: trigger binding 'ready' is already defined in triggers/a.yaml",
-      "triggers/d.yaml: /spec/schedule/every: unsupported property 'fortnights'",
+      "triggers/d.yaml: /spec/trigger/fake/every: unsupported property 'fortnights'",
+      "triggers/e.yaml: /spec/trigger: must NOT have more than 1 properties",
+      "triggers/f.yaml: /spec/trigger: unsupported property 'webhook'",
       "triggers/c.yaml: trigger binding 'ghostly' starts workflow 'ghost', but no workflow 'ghost' is configured",
     ]);
   });
 
-  it("accepts a GitHub source only with its token as a secret reference", () => {
-    const github = (settings: string) =>
-      trigger("github", "build").replace("integration: fake", `integration: github${settings}`);
+  it("accepts a github-issues trigger only with its token as a secret reference", () => {
+    const github = (name: string, token: string) =>
+      trigger(name, "build", `github-issues: { labels: [ready-for-agent], every: { minutes: 1 }${token} }`, "workspaces: [app]");
     const valid = folder({
       "workflows/build.sw.yaml": workflow("build"),
       "agents/developer.md": agent("developer"),
-      "triggers/github.yaml": github("\n    github: { token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
+      "triggers/github.yaml": github("github", ", token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }"),
+      "workspaces/app.yaml": workspace("app"),
     });
-    expect(loadConfiguration(valid).triggerBindings[0]?.spec.source).toMatchObject({
-      integration: "github",
-      github: { token: { secretRef: { name: "TENDWORKS_PLATFORM_GITHUB_TOKEN" } } },
+    expect(loadConfiguration(valid).triggerBindings[0]?.spec.trigger).toEqual({
+      "github-issues": { labels: ["ready-for-agent"], every: { minutes: 1 }, token: { secretRef: { name: "TENDWORKS_PLATFORM_GITHUB_TOKEN" } } },
     });
 
     const invalid = folder({
       "workflows/build.sw.yaml": workflow("build"),
       "agents/developer.md": agent("developer"),
-      "triggers/a.yaml": github("").replace("name: github", "name: a"),
-      "triggers/b.yaml": github("\n    github: { token: github_pat_plaintext }").replace("name: github", "name: b"),
+      "triggers/a.yaml": github("a", ""),
+      "triggers/b.yaml": github("b", ", token: github_pat_plaintext"),
+      "workspaces/app.yaml": workspace("app"),
     });
     expect(issuesOf(invalid)).toEqual([
-      "triggers/a.yaml: /spec/source: must have required property 'github'",
-      "triggers/b.yaml: /spec/source/github/token: must be object",
+      "triggers/a.yaml: /spec/trigger/github-issues: must have required property 'token'",
+      "triggers/b.yaml: /spec/trigger/github-issues/token: must be object",
     ]);
   });
 
   it("lets agent profiles reference only agent secrets and trigger bindings only platform secrets", () => {
     const github = (secret: string) =>
-      trigger("github", "build").replace("integration: fake", `integration: github\n    github: { token: { secretRef: { name: ${secret} } } }`);
+      trigger("github", "build", `github-issues: { every: { minutes: 1 }, token: { secretRef: { name: ${secret} } } }`);
     const dir = folder({
       "workflows/build.sw.yaml": workflow("build"),
       "agents/developer.md": agent("developer", "harness: fake\n  env: { GH_TOKEN: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
@@ -201,7 +205,7 @@ describe("loadConfiguration", () => {
 
     expect(issuesOf(dir)).toEqual([
       `agents/developer.md: /spec/env/GH_TOKEN/secretRef/name: must match pattern "^TENDWORKS_AGENT_[A-Z0-9_]+$"`,
-      `triggers/github.yaml: /spec/source/github/token/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
+      `triggers/github.yaml: /spec/trigger/github-issues/token/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
       "workflows/build.sw.yaml: /do/0/implement calls agent://developer, but no agent profile 'developer' is configured",
     ]);
   });
@@ -288,14 +292,14 @@ do:
       "workflows/build.sw.yaml": workflow("build").replace("parts: [{ kind: text, text: build it }]", "parts: [{ kind: text, text: build it }]\n            metadata: { dev.tendworks/workspace: { name: ghost } }"),
       "workflows/scan.sw.yaml": workflow("scan").replace("parts: [{ kind: text, text: build it }]", "parts: [{ kind: text, text: scan it }]\n            metadata: { dev.tendworks/workspace: { name: '${ .workspace }' } }"),
       "agents/developer.md": agent("developer"),
-      "triggers/scan.yaml": trigger("scan", "scan").replace("issue: '${ .issue }'", "issue: '${ .issue }'\n    workspace: phantom"),
-      "triggers/app.yaml": trigger("app", "scan").replace("issue: '${ .issue }'", "issue: '${ .issue }'\n    workspace: app"),
+      "triggers/scan.yaml": trigger("scan", "scan", undefined, "workspaces: [app, phantom]"),
+      "triggers/app.yaml": trigger("app", "scan", undefined, "workspaces: [app]"),
       "workspaces/app.yaml": workspace("app"),
     });
 
     expect(issuesOf(dir)).toEqual([
       "workflows/build.sw.yaml: /do/0/implement works in workspace 'ghost', but no workspace 'ghost' is configured",
-      "triggers/scan.yaml: trigger binding 'scan' starts its runs in workspace 'phantom', but no workspace 'phantom' is configured",
+      "triggers/scan.yaml: trigger binding 'scan' starts runs in workspace 'phantom', but no workspace 'phantom' is configured",
     ]);
   });
 

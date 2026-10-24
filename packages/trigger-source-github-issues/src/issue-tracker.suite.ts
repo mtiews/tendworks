@@ -22,8 +22,8 @@ const FIXTURES: IssueFixture[] = [
 ];
 
 /**
- * The behaviour every issue tracker adapter must show. Runs against the real adapter
- * and the fake, so the fake stays a faithful stand-in.
+ * The behaviour the GitHub issue client must show. Runs against a stub of the REST API
+ * and, opt-in, against a real repository, so the stub stays a faithful stand-in.
  */
 export function describeIssueTracker(name: string, setup: (fixtures: IssueFixture[]) => Promise<IssueTrackerSuiteContext>) {
   describe(`issue tracker: ${name}`, () => {

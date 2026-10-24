@@ -3,7 +3,7 @@ export { createSecretResolver, SECRET_PREFIXES, type SecretConsumer, type Secret
 export { readServerSentEvents, serverSentEventStream, type ServerSentEvent, type ServerSentEventStreamOptions } from "./server-sent-events.js";
 export { listsPlatformMcpServer, PLATFORM_MCP_SERVER } from "./platform-mcp.js";
 export { DEFAULT_CHAT_IDLE_MINUTES } from "./agent-profile.js";
-export { formatCost, formatOrigin, totalCost, type Cost, type RunOrigin } from "./format.js";
+export { formatCost, formatOrigin, formatSchedule, totalCost, type Cost, type RunOrigin, type Schedule } from "./format.js";
 export {
   followTranscript,
   TranscriptStreamRefusedError,

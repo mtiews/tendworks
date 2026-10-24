@@ -6,8 +6,19 @@ module.exports = {
       comment:
         "A domain package may not import another domain package. Use the published API or events; shared types come from @tendworks/shared, which is generated from contracts/. @tendworks/health and @tendworks/platform are platform libraries, not domains.",
       severity: "error",
-      from: { path: "^packages/([^/]+)/", pathNot: "^packages/(health|platform)/" },
+      from: { path: "^packages/([^/]+)/", pathNot: "^packages/(health|platform|trigger-source-[^/]+)/" },
       to: { path: "^packages/", pathNot: ["^packages/$1/", "^packages/shared/", "^packages/health/", "^packages/platform/"] },
+    },
+    {
+      name: "trigger-sources-use-only-the-port",
+      comment:
+        "Trigger source packages (packages/trigger-source-*) are not domains: they implement the trigger gateway's source port (ADR 0023) and may import only that port (@tendworks/trigger-gateway/source), generated types and the platform libraries. No domain imports them, the trigger gateway included; the server bundle hands them to the gateway as its registry.",
+      severity: "error",
+      from: { path: "^packages/(trigger-source-[^/]+)/" },
+      to: {
+        path: "^(packages|apps)/",
+        pathNot: ["^packages/$1/", "^packages/shared/", "^packages/health/", "^packages/platform/", "^packages/trigger-gateway/src/sources/trigger-source\\.ts$"],
+      },
     },
     {
       name: "platform-libraries-are-leaves",

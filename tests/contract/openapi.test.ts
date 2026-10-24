@@ -24,6 +24,7 @@ import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerG
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
 import { readContract } from "./support/contracts.js";
+import { TRIGGER_SOURCES } from "./support/trigger-sources.js";
 import { openApiContract } from "./support/openapi-contract.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
@@ -213,7 +214,7 @@ describe("control plane: runs, through orchestration", () => {
   it("starts, lists and reads a run of a configured workflow", async () => {
     const client = controlPlane();
 
-    const started = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    const started = await client.POST("/runs", { body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } } });
     const listed = await client.GET("/runs");
     const read = await client.GET("/runs/{runId}", { params: { path: { runId: started.data!.id } } });
 
@@ -240,7 +241,7 @@ describe("control plane: runs, through orchestration", () => {
 
 describe("control plane: transcripts of run steps, through orchestration and the agent runtime", () => {
   async function finishedRun(client: ReturnType<typeof controlPlane>) {
-    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } } });
     for (let attempt = 0; attempt < 100; attempt++) {
       const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
       if (run?.status === "completed" || run?.status === "failed") return run;
@@ -636,6 +637,8 @@ describe("control plane: triggers, through the trigger gateway", () => {
   it("lists the configured trigger bindings", async () => {
     const gateway = createTriggerGateway({
       bindings: configuration.triggerBindings,
+      workspaces: configuration.workspaces,
+      sources: TRIGGER_SOURCES,
       store: createInMemoryFiringStore(),
       runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", apiToken: API_TOKEN, fetch: unreachable }),
       now: () => new Date("2026-10-19T10:00:00.000Z"),
@@ -647,7 +650,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-ready-for-agent"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-ready-for-agent", "schedule-over-two-workspaces"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 

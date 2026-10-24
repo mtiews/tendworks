@@ -2,6 +2,7 @@ import {
   followTranscript as followPlatformTranscript,
   formatCost,
   formatOrigin,
+  formatSchedule,
   totalCost,
   TranscriptStreamRefusedError,
   TranscriptStreamUnreachableError,
@@ -19,7 +20,6 @@ type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
-type Duration = ControlPlane.components["schemas"]["duration"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
 type ApprovalRequest = ControlPlane.components["schemas"]["approvalRequest"];
@@ -430,8 +430,16 @@ function formatChat(chat: Chat): string {
 
 function formatTriggerList(list: TriggerList): string {
   const rows = [
-    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION", "LAST CHECK"],
-    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.suspended ? "suspended" : trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
+    ["NAME", "WORKFLOW", "TRIGGER", "WORKSPACES", "SCHEDULE", "NEXT EXECUTION", "LAST CHECK"],
+    ...list.items.map((trigger) => [
+      trigger.name,
+      trigger.workflow,
+      trigger.kind,
+      trigger.workspaces.join(",") || "-",
+      formatSchedule(trigger.schedule),
+      trigger.suspended ? "suspended" : trigger.nextExecutionAt,
+      formatEvaluation(trigger.lastEvaluation),
+    ]),
   ];
   return table(rows);
 }
@@ -441,12 +449,6 @@ function formatEvaluation(evaluation: TriggerList["items"][number]["lastEvaluati
   if (!evaluation) return "";
   if (evaluation.status === "failed") return `failed ${evaluation.at}${evaluation.message ? `: ${evaluation.message}` : ""}`;
   return `succeeded ${evaluation.at}, ${evaluation.startedRuns} ${evaluation.startedRuns === 1 ? "run" : "runs"} started`;
-}
-
-/** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
-function formatDuration(duration: Duration): string {
-  const units = [["days", "d"], ["hours", "h"], ["minutes", "m"], ["seconds", "s"]] as const;
-  return units.map(([unit, suffix]) => (duration[unit] ? `${duration[unit]}${suffix}` : "")).join("") || "0s";
 }
 
 function formatRun(run: Run): string {

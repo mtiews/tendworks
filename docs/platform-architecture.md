@@ -102,7 +102,7 @@ From the start, the model is built as "steps that consume and produce artifacts,
 | Object | Owning domain | Content |
 | --- | --- | --- |
 | `WorkflowDefinition` | Orchestration | Serverless Workflow YAML; steps call agents via A2A, wait for events or approvals |
-| `TriggerBinding` | Trigger | CloudEvents filter (type, source, attributes) → workflow + input mapping |
+| `TriggerBinding` | Trigger | workflow, workspaces and one trigger kind (`schedule`, `github-issues`); one run per workspace and item, input `{ workspace, item }` (ADR 0023) |
 | `AgentProfile` | Agent Runtime | role, harness, model, skills, MCP servers, sandbox template, budget; published as an A2A Agent Card |
 | `SandboxTemplate` | Sandbox | OCI image, isolation class (container, gvisor, microvm), CPU/RAM, egress allowlist |
 | `Policy` | Human Interaction | when a gate applies: risk class, budget, paths, target environment |

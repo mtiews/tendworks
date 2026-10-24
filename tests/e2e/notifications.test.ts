@@ -17,7 +17,7 @@ async function waitFor<T>(what: string, probe: () => Promise<T | undefined>, tim
 describe("notifications on the compose stack", () => {
   it("records and delivers a notification when a run completes", { timeout: 60_000 }, async () => {
     const { data: started } = await client.POST("/runs", {
-      body: { workflow: "hello-agent", input: { issue: { number: 9, title: "Notify me" } } },
+      body: { workflow: "hello-agent", input: { item: { key: "notify", title: "Notify me", number: 9 } } },
     });
     expect(started).toBeDefined();
 

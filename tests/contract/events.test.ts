@@ -6,6 +6,7 @@ import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationAp
 import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "@tendworks/trigger-gateway";
 import { afterAll, describe, expect, it } from "vitest";
 import { contractFiles, contractSchema, describeErrors, readContract } from "./support/contracts.js";
+import { TRIGGER_SOURCES } from "./support/trigger-sources.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
@@ -94,7 +95,7 @@ describe("events the domains emit", () => {
 
   it("trigger gateway: trigger.fired for each matching issue", async () => {
     const store = createInMemoryFiringStore();
-    const gateway = createTriggerGateway({ bindings: configuration.triggerBindings, store, runs: createInMemoryRunStarter(), log: () => {} });
+    const gateway = createTriggerGateway({ bindings: configuration.triggerBindings, workspaces: configuration.workspaces, sources: TRIGGER_SOURCES, store, runs: createInMemoryRunStarter(), log: () => {} });
 
     await gateway.check("issue-ready-for-agent");
 

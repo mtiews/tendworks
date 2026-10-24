@@ -1,3 +1,4 @@
+import { formatSchedule } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { useCallback, useId, type ReactNode } from "react";
 import { answer, UNREACHABLE } from "./answers.js";
@@ -117,7 +118,9 @@ function Triggers() {
             <tr>
               <th>Name</th>
               <th>Workflow</th>
-              <th>Every</th>
+              <th>Trigger</th>
+              <th>Workspaces</th>
+              <th>Schedule</th>
               <th>Next check</th>
               <th>Last check</th>
             </tr>
@@ -127,7 +130,9 @@ function Triggers() {
               <tr key={trigger.name}>
                 <td>{trigger.name}</td>
                 <td>{trigger.workflow}</td>
-                <td>{formatDuration(trigger.schedule.every)}</td>
+                <td>{trigger.kind}</td>
+                <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
+                <td>{formatSchedule(trigger.schedule)}</td>
                 <td>{trigger.suspended ? <span className="muted">suspended</span> : <Time value={trigger.nextExecutionAt} />}</td>
                 <td>
                   <Evaluation evaluation={trigger.lastEvaluation} />
@@ -157,17 +162,6 @@ function Evaluation({ evaluation }: { evaluation: Trigger["lastEvaluation"] }) {
       succeeded <Time value={evaluation.at} />, {count(evaluation.startedRuns, "run")} started
     </>
   );
-}
-
-/** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
-function formatDuration(duration: Trigger["schedule"]["every"]): string {
-  const units = [
-    ["days", "d"],
-    ["hours", "h"],
-    ["minutes", "m"],
-    ["seconds", "s"],
-  ] as const;
-  return units.map(([unit, suffix]) => (duration[unit] ? `${duration[unit]}${suffix}` : "")).join("") || "0s";
 }
 
 type Agent = ControlPlane.components["schemas"]["AgentList"]["items"][number];

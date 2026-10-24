@@ -66,8 +66,7 @@ import {
 import { createDockerSandboxApi, createFakeSandboxApi, createSandboxBackendProbe, type SandboxApi } from "@tendworks/sandbox";
 import {
   createControlPlaneRunStarter,
-  createFakeIssueTracker,
-  createGithubIssueTracker,
+  createFakeTriggerSource,
   createInMemoryFiringStore,
   createInMemoryRunStarter,
   createPostgresFiringStore,
@@ -75,9 +74,11 @@ import {
   InMemoryEventPublisher as InMemoryTriggerEventPublisher,
   type EventPublisher as TriggerEventPublisher,
   type FiringStore,
-  type IssueTracker,
   type RunStarter,
+  type TriggerSource,
 } from "@tendworks/trigger-gateway";
+import { createGithubIssuesSource } from "@tendworks/trigger-source-github-issues";
+import { createScheduleSource } from "@tendworks/trigger-source-schedule";
 
 /*
  * Every port (an interface tagged `@port`) with its implementations, keyed by
@@ -110,7 +111,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
 
   "trigger-gateway/EventPublisher": port<TriggerEventPublisher<never>>({ outbox: createTriggerOutbox, "in-memory": InMemoryTriggerEventPublisher }),
   "trigger-gateway/FiringStore": port<FiringStore>({ postgres: createPostgresFiringStore, "in-memory": createInMemoryFiringStore }),
-  "trigger-gateway/IssueTracker": port<IssueTracker>({ github: createGithubIssueTracker, fake: createFakeIssueTracker }),
+  "trigger-gateway/TriggerSource": port<TriggerSource>({ schedule: createScheduleSource, "github-issues": createGithubIssuesSource, fake: createFakeTriggerSource }),
   "trigger-gateway/RunStarter": port<RunStarter>({ "control-plane": createControlPlaneRunStarter, "in-memory": createInMemoryRunStarter }),
 
   "human-interaction/ApprovalEventPublisher": port<ApprovalEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),

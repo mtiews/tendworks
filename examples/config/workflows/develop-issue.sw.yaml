@@ -1,7 +1,6 @@
 # Automated path: the developer agent implements an issue and opens a pull request.
-# Input: { workspace: <name>, issue: { number, title, body, url } }: the workspace the
-# issue belongs to by name (kind Workspace) and the issue, as a trigger binding passes
-# them. The agent works on a checkout of the workspace on a branch fixed by the run, so a
+# Input: { workspace: <name>, item: { number, title, body, url, … } }: the workspace by
+# name (kind Workspace) and the issue, as a github-issues trigger binding passes them. The agent works on a checkout of the workspace on a branch fixed by the run, so a
 # retry updates the same branch and pull request. The agent opens the pull request itself
 # with the workspace's credential and reports it as its `pull-request` artifact; the run
 # ends with it. A human reviews and merges in the forge.
@@ -12,7 +11,7 @@ document:
   version: '0.1.0'
   summary: Hands an issue to the developer agent, which opens a pull request for it.
 input:
-  from: '${ . + { branch: "tendworks/issue-\(.issue.number)-\($workflow.id[0:8])" } }'
+  from: '${ . + { branch: "tendworks/issue-\(.item.number)-\($workflow.id[0:8])" } }'
 do:
   - implement:
       call: a2a
@@ -25,10 +24,10 @@ do:
             parts:
               - kind: text
                 text: >-
-                  ${ "Implement issue #\(.issue.number): \(.issue.title)\n\n"
-                  + (.issue.body // "(no description)")
-                  + "\n\nIssue: \(.issue.url)\n"
-                  + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.issue.number)." }
+                  ${ "Implement issue #\(.item.number): \(.item.title)\n\n"
+                  + (.item.body // "(no description)")
+                  + "\n\nIssue: \(.item.url)\n"
+                  + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.item.number)." }
             metadata:
               dev.tendworks/workspace:
                 name: '${ .workspace }'
@@ -37,7 +36,7 @@ do:
         as: >-
           ${ {
             workspace: $input.workspace,
-            issue: $input.issue.number,
+            issue: $input.item.number,
             branch: $input.branch,
             taskId: .id,
             pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])

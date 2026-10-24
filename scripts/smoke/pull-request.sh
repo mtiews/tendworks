@@ -33,7 +33,7 @@ echo "Output:       $OUTPUT"
 echo "Pull request: ${PR:-<none>}"
 echo
 check "run completed" test "$STATUS" = completed
-check "run was started by the trigger for #$ISSUE" test "$(field 'r.startedBy?.issue?.number' <<<"$RUN")" = "$ISSUE"
+check "run was started by the trigger for #$ISSUE" test "$(field 'r.startedBy?.item?.key' <<<"$RUN")" = "$PLAYGROUND#$ISSUE"
 check "agent reported a pull request" test -n "$PR"
 check "the run ends after the agent step" test "$(field 'r.steps.length' <<<"$RUN")" = 1
 check "the pull request is the step's artifact" test "$ARTIFACT" = "$PR"

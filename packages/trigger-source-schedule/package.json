@@ -1,0 +1,18 @@
+{
+  "name": "@tendworks/trigger-source-schedule",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Trigger source of kind schedule (not a domain): fires at every execution of a cron expression or an interval, with the tick as the item. Imports only the trigger source port and platform libraries.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@tendworks/shared": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*"
+  }
+}
