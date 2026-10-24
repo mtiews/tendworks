@@ -1,0 +1,18 @@
+# A schedule over workspaces: every night at 02:00 UTC, one check-workspace run per listed
+# workspace (the developer agent builds and tests its default branch and reports; it
+# changes nothing). The tick is the item, so each execution starts one run per workspace,
+# once. Suspended, because every run is a paid agent session; it needs the agent token of
+# the playground workspace (TENDWORKS_AGENT_GITHUB_TOKEN, workspaces/playground.yaml) and
+# the agent's harness credential. Remove `suspend: true` and restart the server to use it.
+# `every: { hours: 6 }` instead of `cron` runs at a fixed interval.
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: playground-nightly-check
+spec:
+  suspend: true
+  workflow: check-workspace
+  workspaces: [playground]
+  trigger:
+    schedule:
+      cron: '0 2 * * *'

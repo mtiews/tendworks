@@ -39,7 +39,9 @@ tendworks/
     schemas/                 # JSON Schemas per kind (Workflow, AgentProfile, ...)
   packages/
     control-plane/           # API, reads configuration from Git or a folder
-    trigger-gateway/         # time triggers, webhooks later
+    trigger-gateway/         # trigger bindings over workspaces, the trigger source port; webhooks later
+    trigger-source-schedule/ # trigger source: cron or interval (not a domain, implements the port)
+    trigger-source-github-issues/ # trigger source: labelled issues of the workspaces' repositories
     orchestration/           # Serverless Workflow interpreter on Temporal
     agent-runtime/           # A2A task model, ACP adapter, action journal
     sandbox/                 # sandbox API, backend Docker (runc, optionally gVisor)
@@ -197,7 +199,7 @@ The pull request scripts label the issue `ready-for-agent` themselves and refuse
 The `develop-issue` workflow hands an issue to the `developer` agent. The runtime checks the workspace the input names (`playground`, ADR 0022) out on a branch fixed by the run, with the workspace's credential through the image's credential helper, copies the profile's skills into the sandbox, gives the session the credential as `GH_TOKEN` (the workspace's `credentials.env`) and appends the role description to the harness's system prompt; the agent pushes the branch, opens the pull request and records it, so the run's output shows it (ADR 0010 (agent-runtime-prepares-the-workspace-and-collects-reported-artifacts)). The regular suites cover this with the scripted agent and a local bare repository; against the playground repository, after steps 1–3:
 
 8. Open an issue in `mtiews/tendworks-playground` with a small, clear change, e.g. "Add a file GREETING.md that says hello".
-9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"workspace":"playground","issue":{"repository":"mtiews/tendworks-playground","number":<n>,"title":"<title>","body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the time trigger find it: the binding `examples/config/triggers/playground-ready-for-agent.yaml` is shipped suspended; set `TENDWORKS_PLATFORM_GITHUB_TOKEN`, remove `suspend: true`, restart the server and label the issue `ready-for-agent`. `tend trigger list` shows its last check; `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` means the token did not reach the server. The run's `STARTED BY` names the binding and the issue.
+9. Start a run for it by hand: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"workspace":"playground","item":{"key":"mtiews/tendworks-playground#<n>","title":"<title>","number":<n>,"body":"<body>","url":"https://github.com/mtiews/tendworks-playground/issues/<n>"}}}'`. Or let the `github-issues` trigger find it: the binding `examples/config/triggers/playground-ready-for-agent.yaml` is shipped suspended; set the issues token `TENDWORKS_PLATFORM_GITHUB_TOKEN`, remove `suspend: true`, restart the server and label the issue `ready-for-agent`. `tend trigger list` shows its last check; `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` means the token did not reach the server. The run's `STARTED BY` names the binding and the issue.
 
 10. `tend run get <id>` shows the run completed, with `pullRequest` and `branch` (`tendworks/issue-<n>-<first 8 characters of the run id>`) under OUTPUT. The pull request on GitHub comes from that branch, describes the change and references the issue. The transcript has a `workspace-checkout` entry with exit code 0 and an `artifacts` entry; no token appears in the transcript or the run.
 11. Retry: restart the worker while the agent works (step 6). The resumed session continues on the same branch, and no second pull request appears.
@@ -206,7 +208,7 @@ The run ends after the agent step (ADR 0024 (the-platform-has-no-pull-request-in
 
 12. In step 10, `tend run get <id>` lists one step, `implement`, with the pull request as its `pull-request` artifact. On GitHub the pull request is open and waits for you; merge it there.
 13. Failure: run `develop-issue` for an issue the agent cannot finish. The agent pushes what is useful and explains what is missing; the run shows it in the transcript and nothing is merged.
-14. Notification: `tend notification list` shows the run's `run.completed` (or `run.failed`) notification with the pull request as its link and the delivery status per channel; with a Pushover channel the message on your phone opens the pull request.
+14. Notification: `tend notification list` shows the run's `run.completed` (or `run.failed`) notification with the pull request as its link and the delivery status per channel; with a Pushover channel (operator guide, "Pushover on your phone") the message on your phone opens the pull request.
 
 ### Chat smoke test
 
@@ -229,7 +231,7 @@ The web UI with the real harness in a browser (ADR 0018). The regular suites cov
 
 ## Starter and fixture configuration
 
-- **Starter** (`examples/config`, the compose default of `TEND_CONFIG_PATH`): real profiles only (`assistant`, `developer`), the `claude-code` sandbox, `develop-issue`, `hello-developer`, `restart-developer`, the suspended binding `playground-ready-for-agent`. A fresh stack on it starts no run. `packages/control-plane/src/configuration.test.ts` pins its contents.
+- **Starter** (`examples/config`, the compose default of `TEND_CONFIG_PATH`): real profiles only (`assistant`, `developer`, `workspace-assistant`), the `claude-code` sandbox, the git workspace `playground` with a read-only assistant, the workflows `develop-issue`, `check-workspace`, `hello-developer`, `restart-developer`, the suspended bindings `playground-ready-for-agent` (`github-issues`) and `playground-nightly-check` (`schedule`), and the Pushover channel template `notifications/phone.yaml.example`, which the loader does not read until it is renamed. No policy and no notification channel. A fresh stack on it starts no run. `packages/control-plane/src/configuration.test.ts` pins its contents and loads the renamed template; `packages/orchestration/src/workflow/develop-issue.test.ts` and `check-workspace.test.ts` run its workflows in the interpreter.
 - **Fixtures** (`tests/fixtures/config`): fake and scripted agents, the `scripted-acp` sandbox, the fake bindings and the test workflows.
 - **Fixture configuration = starter + fixtures**, assembled by `tests/fixtures/fixture-configuration.ts`, so the real profiles have one source and the suites always run what an operator starts from. A fixture file may only add files; one that would replace a starter file fails the assembly. In-process tests (`tests/contract`) call `fixtureConfiguration()` (assembled once per test process into a temp directory). `pnpm e2e` runs `node tests/fixtures/fixture-configuration.ts pnpm e2e:stack`: it assembles into `tests/fixtures/assembled-config` (git-ignored) and sets `TEND_CONFIG_PATH=../tests/fixtures/assembled-config` for the whole run, so the compose calls of the e2e tests (restarts, `up`) keep the fixture configuration. To run one e2e file against a running stack: `node tests/fixtures/fixture-configuration.ts pnpm vitest run --project e2e <file>`.
 - **Hidden directories** (`.git`, `.github`) are skipped by the configuration loaders of the control plane and the sandbox domain, so a configuration repository can carry its own CI.
@@ -241,7 +243,7 @@ Every domain owns a Postgres schema (`orchestration`, `agent_runtime`, `event_bu
 
 - **Version table:** each schema has its own `<schema>.schema_migrations` (version, name, applied at). No domain reads another's.
 - **On start:** each bundle migrates the domains it runs (worker: orchestration, agent runtime, event bus; server: event bus, human interaction, trigger gateway; the event bus is migrated by both, which the lock makes safe). Under the domain's advisory lock (`hashtext('<schema>.migrate')`), every migration above the recorded version runs in its own transaction together with its row in the version table, so concurrent starts migrate once.
-- **Migration 1** is the schema as the stores created it before versioned migrations, with its `create … if not exists` and `alter … add column if not exists` statements. It adopts such a store with its data.
+- **Migration 1** creates the domain's schema. `v0.3.0` needs a fresh installation, so every domain starts there; later releases add migrations.
 - **Failure** (ADR 0021 (a-failed-migration-stops-the-bundle-not-the-process)): a failed migration is rolled back, so the store stays at the version before it. The bundle logs `schema <schema>: migration <n> (<name>) failed: <error>` and stops working instead of exiting (`migrateOrStop` in `@tendworks/platform/migrations`, used by both bundles): the server answers only `GET /status`, the worker only `GET /health`, and every other request gets 503 with a generic detail (`Platform stopped`, from `createStoppedControlPlaneApi`; `Worker stopped`, from `createStoppedBundleApi` in `@tendworks/health`). The control plane, orchestration and agent runtime contracts document that 503 on every operation, and `tests/contract/openapi.test.ts` produces it. Both report the component `<schema>-schema` (e.g. `orchestration-schema`) as unhealthy, with the error, so `GET /status` shows it either way. A store at a newer version than the release knows fails the same way (no downgrades). The next start tries again.
 - **Lock:** if releasing the advisory lock fails, the connection is closed instead of returned to the pool, so no pooled connection keeps holding the lock.
 - **Store password:** `TEND_POSTGRES_PASSWORD` has no default; server and worker refuse to start without it and percent-encode it into the connection string themselves (`@tendworks/platform/store-connection`), so `TEND_DATABASE_URL` carries no password.
@@ -250,12 +252,12 @@ To add a migration to a domain:
 
 1. Append an entry to the domain's list in its Postgres adapter (e.g. `orchestrationMigrations` in `packages/orchestration/src/adapters/postgres-run-store.ts`) with the next `version`, a short stable `name` and its `sql`. Never edit or reorder a released migration; versions count up from 1 without gaps.
 2. Write the SQL for the store at the previous version. It need not be idempotent (the version table guards it), and it may use the domain's own tables only.
-3. Extend the adapter's integration test (`*.integration.test.ts`), which migrates a fresh store and adopts one created by migration 1 with its data; add data the new migration must carry over.
+3. Extend the adapter's integration test (`*.integration.test.ts`), which migrates a fresh store; add a store at the previous version with data the new migration must carry over.
 4. Name the migration in the release notes (`docs/releases/<tag>.md`).
 
 ## Single-host deployment (milestone 2)
 
-Implemented (spec #54); acceptance on the operator's Ubuntu host (#66) is pending, then `v0.2.0` is tagged with `docs/releases/v0.2.0.md`. What it consists of, and where:
+Implemented (spec #54), accepted on the operator's Ubuntu host (#66) and released as `v0.2.0` (`docs/releases/v0.2.0.md`). What it consists of, and where:
 
 | Part | Where |
 | --- | --- |
@@ -273,6 +275,22 @@ Accepted as they are after the milestone 2 review:
 
 - The Docker adapter's option `sandboxNetwork: false` puts sandboxes on Docker's default bridge. Only tests use it (starting a sandbox is several times faster there); the worker never sets it.
 - The socket proxy allows `NETWORKS` with writes, so the worker could create, join or remove any network through it, not only the sandbox network. The adapter needs it to create the sandbox network and to attach sandboxes to the gateway's network; the proxy filters paths, not bodies, and only the worker reaches it (ADR 0001).
+
+## Generic platform (milestone 3)
+
+Implemented (spec #71, tickets #73–#81); acceptance on the operator's host (#82) is pending, then `v0.3.0` is tagged with `docs/releases/v0.3.0.md`. What it consists of, and where:
+
+| Part | Where |
+| --- | --- |
+| Workspaces (ADR 0022) | kind `Workspace` (`contracts/schemas/workspace.schema.yaml`), loaded by the control plane and, for the worker, `loadWorkspaces` (`packages/agent-runtime/src/workspaces.ts`); workspace port `packages/agent-runtime/src/workspace.ts` (git, directory, empty); root check `@tendworks/platform/workspace-roots`; bind mounts in the sandbox contract (`binds`); credential helper `git-credential-tendworks` in `images/sandbox-claude-code` |
+| Trigger bindings and sources (ADR 0023) | [Triggers: one firing per issue](#triggers-one-firing-per-issue); `packages/trigger-source-schedule`, `packages/trigger-source-github-issues`, registry `apps/server/src/trigger-sources.ts` |
+| No pull request integration, human step, policies (ADR 0024) | artifacts reported by the agent (ADR 0010); `call: approval` in the interpreter; `POST /approval-requests`; kind `Policy`, `decideFor` in `packages/human-interaction/src/policy.ts` |
+| Notification channels (ADR 0025) | kind `NotificationChannel`; port `NotificationDelivery` (`packages/human-interaction/src/notification-delivery.ts`; fake and `pushover/`); run events carry the artifacts |
+| Chats with the platform assistant or a workspace's assistant | [Chat CLI](#chat-cli); `GET /workspaces`; the web UI's new chat dialog |
+| Starter configuration | [Starter and fixture configuration](#starter-and-fixture-configuration) |
+| Operator docs | `docs/operator-guide.md` (Workspaces, Trigger bindings, Notifications with the Pushover setup, Waiting for a human, Chats and assistants, acceptance checklist), `docs/github-agent-access.md` (the two tokens) |
+
+The end-to-end suite covers a git workspace on a local bare repository, a directory workspace, a fake issue item through `fake-develop-issue` to an artifact and its notifications, a schedule binding over two workspaces, the human step across a restart and a read-only workspace chat that cannot push. Manual, on the operator's host: a real repository through the `github-issues` trigger, the Pushover message, a scheduled run of `check-workspace` and a read-only workspace assistant (operator guide, First test workloads 3–6).
 
 ## Quality gates
 
@@ -298,4 +316,6 @@ Accepted as they are after the milestone 2 review:
 - [x] Design review for milestone 1c (web UI) (ADR 0018)
 - [x] Linux: an address at which sandboxes reach the platform MCP server: the MCP-only gateway (ADR 0019, Platform MCP server)
 - [x] Milestone 2 implemented (spec #54, tickets #57–#65)
-- [ ] Milestone 2 accepted on the operator's Ubuntu host (#66), then tag `v0.2.0`
+- [x] Milestone 2 accepted on the operator's Ubuntu host (#66), tagged `v0.2.0`
+- [x] Milestone 3 implemented (spec #71, tickets #73–#81)
+- [ ] Milestone 3 accepted on the operator's host (#82), then tag `v0.3.0`

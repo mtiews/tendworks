@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -434,14 +434,40 @@ do:
   it("loads the starter configuration with real profiles only and no binding that fires by itself", () => {
     const starter = loadConfiguration(fileURLToPath(new URL("../../../examples/config", import.meta.url)));
 
-    expect(starter.workflowNames).toEqual(["develop-issue", "hello-developer", "restart-developer"]);
+    expect(starter.workflowNames).toEqual(["check-workspace", "develop-issue", "hello-developer", "restart-developer"]);
     expect(starter.agentProfiles.map((profile) => [profile.metadata.name, profile.spec.harness]).sort()).toEqual([
       ["assistant", "claude-code"],
       ["developer", "claude-code"],
       ["workspace-assistant", "claude-code"],
     ]);
-    expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([["playground-ready-for-agent", true]]);
+    expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([
+      ["playground-nightly-check", true],
+      ["playground-ready-for-agent", true],
+    ]);
+    expect(starter.triggerBindings.map((binding) => [binding.metadata.name, Object.keys(binding.spec.trigger), binding.spec.workspaces])).toEqual([
+      ["playground-nightly-check", ["schedule"], ["playground"]],
+      ["playground-ready-for-agent", ["github-issues"], ["playground"]],
+    ]);
+    expect(starter.notificationChannels).toEqual([]);
+    expect(starter.policies).toEqual([]);
     expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_GITHUB_TOKEN"]]);
+  });
+
+  it("ships a Pushover channel template that loads once renamed, with both credentials as platform secrets", () => {
+    const examples = fileURLToPath(new URL("../../../examples/config", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "tend-config-"));
+    cpSync(examples, dir, { recursive: true });
+    copyFileSync(join(dir, "notifications", "phone.yaml.example"), join(dir, "notifications", "phone.yaml"));
+
+    const channels = loadConfiguration(dir).notificationChannels;
+
+    expect(channels.map((channel) => [channel.metadata.name, channel.spec.integration, channel.spec.events])).toEqual([
+      ["phone", "pushover", ["approval.requested", "run.failed", "run.completed"]],
+    ]);
+    expect(channels[0]?.spec.pushover).toEqual({
+      token: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_TOKEN" } },
+      user: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_USER" } },
+    });
   });
 
   it("ships a read-only workspace assistant: a chat profile without the platform MCP server, enabled on the playground without writing", () => {

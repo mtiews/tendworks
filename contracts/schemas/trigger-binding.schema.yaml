@@ -120,7 +120,7 @@ $defs:
     title: GithubIssuesTrigger
     description: >-
       Fires once per issue of each git workspace's repository that carries every label in
-      `labels` and is in `state`, asked `every` interval with `token`: a platform token
+      `labels` and is in `state`, asked `every` interval with `token`: the issues token, a platform secret
       that may read the issues of the workspaces' repositories, never a workspace's agent
       credential. Pull requests are never reported as issues. The item is the issue.
     type: object

@@ -85,7 +85,7 @@ Closing the gap fully needs a second identity (a machine user with a classic tok
 
 ## Verify
 
-`scripts/check-github-agent-access.sh` checks the agent token. Run it against a test repository first. It reads the token from `--env-file` or `TENDWORKS_AGENT_GITHUB_TOKEN` and never prints it.
+`scripts/check-github-agent-access.sh` checks an agent token. Run it against a test repository first. It reads `TENDWORKS_AGENT_GITHUB_TOKEN` from `--env-file` or from the environment and never prints it; for a workspace with another agent token, pass that one in the environment: `TENDWORKS_AGENT_GITHUB_TOKEN="$(grep '^TENDWORKS_AGENT_MYAPP_TOKEN=' deploy/.env | cut -d= -f2-)" scripts/check-github-agent-access.sh --repo OWNER/NAME`. The issues token needs no check: it can only read issues.
 
 ```bash
 scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env                # read-only checks

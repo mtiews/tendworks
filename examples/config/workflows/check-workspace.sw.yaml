@@ -1,0 +1,45 @@
+# Scheduled check: the developer agent builds and tests a workspace's default branch and
+# reports what it found; it changes nothing. Input: { workspace: <name>, item: <tick> }, as
+# a schedule trigger binding passes them (triggers/playground-nightly-check.yaml), or by
+# hand: POST /runs {"workflow": "check-workspace", "input": {"workspace": "playground"}}.
+# The agent works on a branch of its own, created from the default branch and fixed by the
+# run, so nothing it does can land on the default branch. The workspace's credential is in
+# the session like in every workflow task; only the task text keeps the agent from pushing.
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: check-workspace
+  version: '0.1.0'
+  summary: Asks the developer agent to build and test a workspace and report the result.
+input:
+  from: '${ . + { branch: "tendworks/check-\($workflow.id[0:8])" } }'
+do:
+  - check:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: >-
+                  This task is a check, not an issue. Build the repository checked out in
+                  your working directory and run its tests, the way its own instructions
+                  (README, CLAUDE.md, AGENTS.md) describe. Do not change, commit or push
+                  anything and open no pull request. Answer with a short report: the
+                  commands you ran, whether they passed, and for each failure the test or
+                  step and the likely cause.
+            metadata:
+              dev.tendworks/workspace:
+                name: '${ .workspace }'
+                branch: '${ .branch }'
+      output:
+        as: >-
+          ${ {
+            workspace: $input.workspace,
+            checkedAt: ($input.item.key // null),
+            taskId: .id,
+            report: .status.message.parts[0].text
+          } }
