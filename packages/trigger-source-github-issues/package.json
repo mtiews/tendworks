@@ -9,6 +9,11 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./stub": {
+      "source": "./src/github-api.stub.ts",
+      "types": "./dist/github-api.stub.d.ts",
+      "default": "./dist/github-api.stub.js"
     }
   },
   "dependencies": {

@@ -1,13 +1,17 @@
 import { createAgentRuntime } from "@tendworks/agent-runtime";
 import { createControlPlaneApi, createOrchestrationClient, createTriggerGatewayClient, loadConfiguration } from "@tendworks/control-plane";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
+import { createSecretResolver } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import {
   createControlPlaneRunStarter,
   createInMemoryFiringStore,
+  createInMemoryRunStarter,
   createTriggerGateway,
   createTriggerGatewayApi,
 } from "@tendworks/trigger-gateway";
+import { createGithubIssuesSource } from "@tendworks/trigger-source-github-issues";
+import { stubGithubApi } from "@tendworks/trigger-source-github-issues/stub";
 import createClient from "openapi-fetch";
 import { describe, expect, it } from "vitest";
 import { guardedContracts } from "./support/guarded-contracts.js";
@@ -103,5 +107,85 @@ describe("triggers through the control plane and the trigger gateway", () => {
       ["scheduled-noop", { workspace: "fake-playground", item: tick }, { kind: "trigger", binding: "schedule-over-two-workspaces", workspace: "fake-playground", item: { key: tick.key, title: tick.title } }],
       ["scheduled-noop", { workspace: "scripted-playground", item: tick }, { kind: "trigger", binding: "schedule-over-two-workspaces", workspace: "scripted-playground", item: { key: tick.key, title: tick.title } }],
     ]);
+  });
+});
+
+/*
+ * The starter's github-issues binding (examples/config/triggers/playground-ready-for-agent.yaml)
+ * against a stub of the GitHub REST API: the server's source registry, with the stub as
+ * the source's only way out.
+ */
+describe("the github-issues trigger source with the starter configuration", () => {
+  const PLATFORM_TOKEN = "stub-platform-token-0123456789"; // betterleaks:allow dummy token the stub accepts
+  const BINDING = "playground-ready-for-agent";
+
+  function gatewayWithStub(bindings?: (configuration: ReturnType<typeof loadConfiguration>) => ReturnType<typeof loadConfiguration>["triggerBindings"]) {
+    const configuration = loadConfiguration(fixtureConfiguration());
+    const methods: string[] = [];
+    const stub = stubGithubApi({
+      token: PLATFORM_TOKEN,
+      repositories: {
+        "mtiews/tendworks-playground": [
+          { number: 3, title: "Add a greeting", state: "open", labels: ["ready-for-agent"], body: "Print hello." },
+          { number: 4, title: "A pull request", state: "open", labels: ["ready-for-agent"], pullRequest: true },
+          { number: 5, title: "Not ready", state: "open", labels: [] },
+        ],
+      },
+    });
+    const fetch: typeof globalThis.fetch = async (input, init) => {
+      const request = new Request(input, init);
+      methods.push(request.method);
+      return stub(request);
+    };
+    const runs = createInMemoryRunStarter();
+    const gateway = createTriggerGateway({
+      bindings: bindings ? bindings(configuration) : configuration.triggerBindings,
+      workspaces: configuration.workspaces,
+      sources: { ...TRIGGER_SOURCES, "github-issues": (settings, context) => createGithubIssuesSource(settings, context, { fetch }) },
+      store: createInMemoryFiringStore(),
+      runs,
+      secrets: createSecretResolver("platform", { TENDWORKS_PLATFORM_GITHUB_TOKEN: PLATFORM_TOKEN }),
+      now: () => new Date("2026-10-18T10:00:05.000Z"),
+      log: () => {},
+    });
+    return { gateway, runs, methods };
+  }
+
+  it("starts develop-issue once per new issue, in the workspace whose repository has it, reading only", async () => {
+    const { gateway, runs, methods } = gatewayWithStub();
+
+    const first = await gateway.check(BINDING);
+    const second = await gateway.check(BINDING);
+
+    expect(first.failed).toEqual([]);
+    expect(first.fired).toEqual([{ workspace: "playground", item: "mtiews/tendworks-playground#3", runId: "run-1" }]);
+    expect(second).toEqual({ fired: [], failed: [] });
+    expect(runs.started).toHaveLength(1);
+    expect(runs.started[0]).toMatchObject({
+      workflow: "develop-issue",
+      input: {
+        workspace: "playground",
+        item: {
+          key: "mtiews/tendworks-playground#3",
+          title: "Add a greeting",
+          url: "https://github.com/mtiews/tendworks-playground/issues/3",
+          number: 3,
+          body: "Print hello.",
+        },
+      },
+      startedBy: { kind: "trigger", binding: BINDING, workspace: "playground", item: { key: "mtiews/tendworks-playground#3", title: "Add a greeting" } },
+    });
+    expect(methods.length).toBeGreaterThan(0);
+    expect(new Set(methods)).toEqual(new Set(["GET"]));
+  });
+
+  it("refuses the binding when it names a workspace that is not on github.com", () => {
+    expect(() =>
+      gatewayWithStub((configuration) =>
+        configuration.triggerBindings.map((binding) => (binding.metadata.name === BINDING ? { ...binding, spec: { ...binding.spec, workspaces: ["playground", "fake-playground"] } } : binding)),
+      ),
+    ).toThrow(
+      "trigger binding 'playground-ready-for-agent': workspace 'fake-playground' is not a repository on github.com (https://git.example/example/playground.git); github-issues reads issues on github.com only",
+    );
   });
 });

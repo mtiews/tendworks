@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { contractFiles, readContract } from "../contract/support/contracts.js";
 import { ADAPTER_SELECTORS, findProductNames, PRODUCTS } from "./product-names.js";
@@ -55,5 +58,24 @@ describe("contracts", () => {
 
   it("never let an event schema name a product: events select no adapter", () => {
     expect(ADAPTER_SELECTORS.filter((selector) => selector.file.startsWith("events/"))).toEqual([]);
+  });
+});
+
+describe("trigger sources", () => {
+  // Products a trigger kind selects (e.g. `github-issues`): only their source packages
+  // (packages/trigger-source-*) may name them, never the trigger gateway.
+  const products = [...new Set(ADAPTER_SELECTORS.filter((selector) => selector.file === "schemas/trigger-binding.schema.yaml").map((selector) => selector.product))];
+  const gateway = fileURLToPath(new URL("../../packages/trigger-gateway/src/", import.meta.url));
+  const code = readdirSync(gateway, { recursive: true, encoding: "utf8" })
+    .filter((file) => file.endsWith(".ts") && !/\.(test|suite)\.ts$/.test(file))
+    .map((file) => ({ file: file.split("\\").join("/"), text: readFileSync(join(gateway, file), "utf8").toLowerCase() }));
+
+  it("are named only by the trigger kind selector of the binding schema", () => {
+    expect(products).toEqual(["github"]);
+  });
+
+  it("are never named by the trigger gateway's code, which knows sources only through the port", () => {
+    expect(code.length).toBeGreaterThan(0);
+    expect(code.flatMap(({ file, text }) => products.filter((product) => text.includes(product)).map((product) => `${file}: ${product}`))).toEqual([]);
   });
 });

@@ -31,6 +31,7 @@ describe("the automated chain on the compose stack, with fakes", () => {
     expect(run).toMatchObject({
       workflow: "fake-develop-issue",
       status: "completed",
+      input: { workspace: "fake-playground", item: { key: "chain/playground#201", number: 201 } },
       startedBy: { kind: "trigger", binding: BINDING, workspace: "fake-playground", item: { key: "chain/playground#201", title: "Open a pull request" } },
       steps: [
         {
