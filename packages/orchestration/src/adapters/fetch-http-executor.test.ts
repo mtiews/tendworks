@@ -36,7 +36,7 @@ describe("fetch http executor", () => {
       },
     });
 
-    await executor.request({ method: "POST", endpoint: "http://server:8080/pull-requests/merge", headers: {}, body: {} });
+    await executor.request({ method: "POST", endpoint: "http://server:8080/deployments", headers: {}, body: {} });
     await executor.request({ method: "POST", endpoint: "http://server:8080/runs", headers: { Authorization: "Bearer chosen-by-workflow" }, body: {} });
 
     expect(sent).toEqual(["Bearer platform-api-token", "Bearer platform-api-token"]);

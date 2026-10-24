@@ -1,0 +1,116 @@
+$id: https://tendworks.dev/schemas/v1/schemas/notification-channel.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: NotificationChannel
+description: >-
+  A way notifications reach the operator (ADR 0025). Human interaction records every
+  notification first, then delivers it to each channel that selects its event and records
+  the delivery status per channel. The integration selects the adapter that delivers.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: NotificationChannel
+  metadata:
+    type: object
+    title: NotificationChannelMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name of the channel, e.g. in the delivery status of a notification.
+  spec:
+    title: NotificationChannelSpec
+    type: object
+    required: [integration, events]
+    additionalProperties: false
+    properties:
+      integration:
+        type: string
+        enum: [fake, pushover]
+        description: >-
+          Which adapter delivers. `fake` writes the notification to the platform's log, or
+          refuses it with `fake.refuse`, for tests and demos; `pushover` sends it as a
+          Pushover message with the settings under `pushover`.
+      events:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+          enum: [approval.requested, run.failed, run.completed]
+        description: >-
+          The notifications this channel receives, by kind (the notification schema's
+          `NotificationKind`), e.g. `[run.failed, approval.requested]`.
+      fake:
+        $ref: '#/$defs/fakeNotificationChannel'
+      pushover:
+        $ref: '#/$defs/pushoverNotificationChannel'
+    allOf:
+      - if:
+          properties:
+            integration:
+              const: pushover
+        then:
+          required: [pushover]
+          properties:
+            pushover: true
+$defs:
+  fakeNotificationChannel:
+    title: FakeNotificationChannel
+    description: Settings of the `fake` channel.
+    type: object
+    additionalProperties: false
+    properties:
+      refuse:
+        type: boolean
+        description: When true, every delivery fails, so a failed delivery can be seen. Defaults to false.
+  pushoverNotificationChannel:
+    title: PushoverNotificationChannel
+    description: >-
+      How the `pushover` channel reaches the operator's devices. A notification of a
+      finished run links its first artifact, e.g. the pull request, so a tap opens it.
+    type: object
+    required: [token, user]
+    additionalProperties: false
+    examples:
+      - token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
+        user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
+        priority: 1
+    properties:
+      token:
+        $ref: '#/$defs/secretRef'
+        description: The application's API token.
+      user:
+        $ref: '#/$defs/secretRef'
+        description: The user or group key the messages go to.
+      priority:
+        type: integer
+        minimum: -2
+        maximum: 1
+        description: >-
+          Message priority from -2 (no alert) to 1 (high, bypasses quiet hours). Defaults to
+          0. Emergency priority (2) needs acknowledgement and is not supported.
+  secretRef:
+    title: NotificationSecretRef
+    description: >-
+      Reference to a platform secret (`TENDWORKS_PLATFORM_*`), so the secret itself never
+      appears in configuration (ADR 0008). It is resolved at each delivery: a missing
+      secret fails that delivery, naming the secret, never a value.
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^TENDWORKS_PLATFORM_[A-Z0-9_]+$
+            description: Name of the secret, e.g. `TENDWORKS_PLATFORM_PUSHOVER_TOKEN`.

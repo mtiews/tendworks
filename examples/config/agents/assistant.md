@@ -6,8 +6,9 @@ metadata:
 spec:
   harness: claude-code
   sandbox: claude-code
-  # A human leads it directly in a chat (ADR 0015). It holds no repository credential:
-  # it can work in its workspace but cannot push, open pull requests or merge.
+  # The platform assistant: `tend chat` without arguments (ADR 0015). Its workspace starts
+  # empty and it holds no repository credential, so it cannot push, open pull requests or
+  # merge. Chats about a workspace's contents go to that workspace's assistant instead.
   chat:
     idleMinutes: 5
   # Read-only tools on the platform's runs, agents and trigger bindings (ADR 0016).
@@ -24,7 +25,8 @@ What you do:
   what you know and how you know it; when you cannot find something out, say so instead
   of guessing.
 - Work in your workspace when the operator asks you to: try things out, write or run
-  code, look at a repository checked out there. Explain what you did.
+  code. It starts empty; for questions about a workspace's code, point the operator to
+  that workspace's assistant (`tend chat --workspace <name>`). Explain what you did.
 - Keep answers short and direct; the operator reads them in a terminal.
 
 What you cannot do:

@@ -1,4 +1,4 @@
-import { createAgentRuntime, createAgentRuntimeApi } from "@tendworks/agent-runtime";
+import { createAgentRuntime, createAgentRuntimeApi, createWorkspaces, workspaceAssistants } from "@tendworks/agent-runtime";
 import {
   createAgentRuntimeClient,
   createControlPlaneApi,
@@ -11,22 +11,20 @@ import {
 import { createHealthApi, createStaticHealthProbe, createStoppedBundleApi } from "@tendworks/health";
 import {
   createApprovals,
-  createFakePullRequests,
   createInMemoryApprovalStore,
-  createInMemoryNotificationChannel,
+  createFakeNotificationDelivery,
   createInMemoryNotificationStore,
-  createMergeGate,
   createNotifier,
-  type GatedRun,
-  type PullRequests,
+  type Policy,
 } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
-import { readServerSentEvents } from "@tendworks/platform";
+import { createSecretResolver, readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
 import { readContract } from "./support/contracts.js";
+import { TRIGGER_SOURCES, withFakeBindings } from "./support/trigger-sources.js";
 import { openApiContract } from "./support/openapi-contract.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
@@ -58,7 +56,6 @@ afterAll(() => {
 });
 
 const configuration = loadConfiguration(fixtureConfiguration());
-const PR = "https://git.example/example/playground/pull/1";
 const API_TOKEN = "contract-test-token";
 const READ_TOKEN = "contract-test-read-token";
 const healthy = createStaticHealthProbe("store", { status: "healthy" });
@@ -69,7 +66,12 @@ const unreachable = async (): Promise<Response> => {
 
 /** The worker's internal APIs: orchestration and the agent runtime it hands tasks to. */
 function worker(engine?: (real: RunEngine) => RunEngine, sleep: (ms: number) => Promise<void> = async () => {}) {
-  const agents = createAgentRuntime({ profiles: configuration.agentProfiles, sleep });
+  const agents = createAgentRuntime({
+    profiles: configuration.agentProfiles,
+    sleep,
+    workspaces: createWorkspaces(configuration.workspaces, { secrets: createSecretResolver("agent", {}) }),
+    assistants: workspaceAssistants(configuration.workspaces),
+  });
   const store = createInMemoryRunStore();
   const real = createInProcessRunEngine(createRunActivities({ store, agents, http: new InMemoryHttpExecutor() }));
   const orchestration = createOrchestrationApi({ store, engine: engine ? engine(real) : real });
@@ -153,11 +155,13 @@ describe("control plane: a stopped platform", () => {
     ["GET", "/chats/c-1/transcript", read],
     ["GET", "/chats/c-1/transcript/stream", read],
     ["GET", "/agents", read],
+    ["GET", "/workspaces", read],
     ["GET", "/triggers", read],
     ["GET", "/notifications", read],
-    ["POST", "/pull-requests/merge", json({ run: "r-1", pullRequest: PR })],
     ["GET", "/approval-requests", read],
-    ["POST", "/approval-requests/a-1/decision", json({ decision: "approve" })],
+    ["GET", "/approval-requests/a-1", read],
+    ["POST", "/approval-requests", json({ run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] })],
+    ["POST", "/approval-requests/a-1/decision", json({ answer: "Deploy" })],
   ];
 
   it("still reports its status, naming the failed component", async () => {
@@ -216,7 +220,7 @@ describe("control plane: runs, through orchestration", () => {
   it("starts, lists and reads a run of a configured workflow", async () => {
     const client = controlPlane();
 
-    const started = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    const started = await client.POST("/runs", { body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } } });
     const listed = await client.GET("/runs");
     const read = await client.GET("/runs/{runId}", { params: { path: { runId: started.data!.id } } });
 
@@ -243,7 +247,7 @@ describe("control plane: runs, through orchestration", () => {
 
 describe("control plane: transcripts of run steps, through orchestration and the agent runtime", () => {
   async function finishedRun(client: ReturnType<typeof controlPlane>) {
-    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } } });
+    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } } });
     for (let attempt = 0; attempt < 100; attempt++) {
       const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
       if (run?.status === "completed" || run?.status === "failed") return run;
@@ -413,16 +417,30 @@ describe("control plane: chats, through the agent runtime", () => {
     ]);
   });
 
-  it("starts a chat with a repository as its workspace, and refuses a repository with credentials in its URL", async () => {
+  it("starts a chat with a workspace's assistant by the workspace's name, and refuses a workspace without one or not configured", async () => {
     const { client } = chatting();
 
-    const started = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://git.example/acme/app.git" } });
-    const refused = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello", repository: "https://user:token@git.example/acme/app.git" } });
+    const started = await client.POST("/chats", { body: { workspace: "fake-playground", text: "Hello" } });
+    const withoutAssistant = await client.POST("/chats", { body: { workspace: "playground-without-assistant", text: "Hello" } });
+    const unknown = await client.POST("/chats", { body: { workspace: "ghost", text: "Hello" } });
 
     expect(started.response.status).toBe(201);
-    expect(started.data).toMatchObject({ repository: "https://git.example/acme/app.git" });
-    expect(refused.response.status).toBe(400);
-    expect(refused.error).toMatchObject({ title: "Invalid repository" });
+    expect(started.data).toMatchObject({ agent: "fake-assistant", workspace: "fake-playground", write: false });
+    expect(withoutAssistant.response.status).toBe(400);
+    expect(withoutAssistant.error).toMatchObject({ title: "Chat not allowed" });
+    expect(unknown.error).toMatchObject({ title: "Unknown workspace" });
+  });
+
+  it("lists the workspaces with their assistants", async () => {
+    const { data, response } = await controlPlane({}, { token: READ_TOKEN }).GET("/workspaces");
+
+    expect(response.status).toBe(200);
+    expect(data?.items.map(({ name, assistant }) => [name, assistant?.profile])).toEqual([
+      ["fake-playground", "fake-assistant"],
+      ["playground", "workspace-assistant"],
+      ["playground-without-assistant", undefined],
+      ["scripted-playground", "scripted-assistant"],
+    ]);
   });
 
   it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
@@ -494,7 +512,10 @@ describe("control plane: agents", () => {
 
     expect(response.status).toBe(200);
     expect(data?.items.map((agent) => agent.name)).toEqual(configuration.agentProfiles.map((profile) => profile.metadata.name).sort());
-    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"], sessions: [] });
+    // No repository token in a profile: workspaces bring their own credentials (ADR 0022).
+    expect(data?.items.find((agent) => agent.name === "developer")).toMatchObject({ harness: "claude-code", sessions: [] });
+    expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("secrets");
+    expect(data?.items.find((agent) => agent.name === "scripted-secret-assistant")).toMatchObject({ secrets: ["TENDWORKS_AGENT_E2E_SECRET"] });
     expect(data?.items.find((agent) => agent.name === "developer")).not.toHaveProperty("chat");
     expect(data?.items.find((agent) => agent.name === "assistant")).toMatchObject({ chat: { idleMinutes: 5 }, mcp: ["tendworks"] });
   });
@@ -538,28 +559,32 @@ describe("control plane: the API token", () => {
     const client = controlPlane({}, { token: "wrong-token" });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
-    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { answer: "Deploy" } });
+    const asked = await client.POST("/approval-requests", {
+      body: { run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] },
+    });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
     const client = controlPlane({}, { token: READ_TOKEN });
 
     const started = await client.POST("/runs", { body: { workflow: "hello-agent" } });
-    const merged = await client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest: PR } });
-    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { decision: "approve" } });
+    const decided = await client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: "a-1" } }, body: { answer: "Deploy" } });
+    const asked = await client.POST("/approval-requests", {
+      body: { run: "r-1", step: "/do/0/confirm", action: "deploy", question: "Deploy?", answers: [{ label: "Deploy", outcome: "continue" }] },
+    });
     const chatted = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
 
-    expect([started, merged, decided, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {
@@ -571,9 +596,11 @@ describe("control plane: the API token", () => {
       client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/agents"),
+      client.GET("/workspaces"),
       client.GET("/triggers"),
       client.GET("/notifications"),
       client.GET("/approval-requests"),
+      client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "a-1" } } }),
       client.GET("/chats"),
       client.GET("/chats/{chatId}", { params: { path: { chatId: "c-1" } } }),
       client.GET("/chats/{chatId}/transcript", { params: { path: { chatId: "c-1" } } }),
@@ -582,7 +609,7 @@ describe("control plane: the API token", () => {
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {
@@ -630,7 +657,9 @@ describe("control plane: the API token", () => {
 describe("control plane: triggers, through the trigger gateway", () => {
   it("lists the configured trigger bindings", async () => {
     const gateway = createTriggerGateway({
-      bindings: configuration.triggerBindings,
+      bindings: withFakeBindings(configuration.triggerBindings),
+      workspaces: configuration.workspaces,
+      sources: TRIGGER_SOURCES,
       store: createInMemoryFiringStore(),
       runs: createControlPlaneRunStarter({ baseUrl: "http://tend.test", apiToken: API_TOKEN, fetch: unreachable }),
       now: () => new Date("2026-10-19T10:00:00.000Z"),
@@ -642,7 +671,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-ready-to-merge", "issue-ready-for-agent", "playground-ready-for-agent"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-nightly-check", "playground-ready-for-agent", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 
@@ -654,9 +683,15 @@ describe("control plane: triggers, through the trigger gateway", () => {
 });
 
 describe("control plane: notifications", () => {
-  it("lists the notifications human interaction recorded", async () => {
+  it("lists the notifications human interaction recorded, with the run's artifacts and the delivery status of each selecting channel", async () => {
     const store = createInMemoryNotificationStore();
-    await createNotifier({ store, channel: createInMemoryNotificationChannel() }).handle({
+    const fake = (refuse = false) => createFakeNotificationDelivery({ refuse, log: () => {} });
+    const channels = [
+      { name: "phone", events: ["run.completed", "run.failed"] as const, delivery: fake(true) },
+      { name: "log", events: ["run.completed"] as const, delivery: fake() },
+      { name: "pager", events: ["run.failed"] as const, delivery: fake() },
+    ];
+    await createNotifier({ store, channels, now: () => new Date("2026-10-19T10:00:01.000Z") }).handle({
       specversion: "1.0",
       id: "r-1:run.completed",
       source: "/tendworks/orchestration",
@@ -665,13 +700,22 @@ describe("control plane: notifications", () => {
       datacontenttype: "application/json",
       runid: "r-1",
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
-      data: { workflow: "hello-agent" },
+      data: { workflow: "develop-issue", artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }] },
     });
     const client = controlPlane({ notifications: store });
 
     const { data } = await client.GET("/notifications");
 
-    expect(data?.items).toHaveLength(1);
+    expect(data?.items).toEqual([
+      expect.objectContaining({
+        kind: "run.completed",
+        artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7" }],
+        deliveries: [
+          { channel: "log", status: "delivered", attemptedAt: "2026-10-19T10:00:01.000Z" },
+          { channel: "phone", status: "failed", attemptedAt: "2026-10-19T10:00:01.000Z", error: "the fake channel refuses every notification" },
+        ],
+      }),
+    ]);
   });
 
   it("answers 503 without a notification store", async () => {
@@ -679,85 +723,114 @@ describe("control plane: notifications", () => {
   });
 });
 
-describe("control plane: merges behind the gate, and approval requests", () => {
-  function gated(run: Partial<GatedRun> = {}, pullRequests: PullRequests = createFakePullRequests([{ url: PR, headBranch: "tendworks/fake", state: "open" }])) {
-    const store = createInMemoryApprovalStore();
-    const runs = async (runId: string): Promise<GatedRun | undefined> =>
-      runId === "r-1" ? { id: "r-1", workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR, workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } }], ...run } : undefined;
-    return controlPlane({
-      merges: createMergeGate({ policies: configuration.policies, runs, pullRequests: () => pullRequests, approvals: store }),
-      approvals: createApprovals({ store }),
-    });
+describe("control plane: approval requests", () => {
+  const TRACEPARENT = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01";
+  const question = {
+    run: "r-1",
+    step: "/do/1/confirm",
+    action: "deploy",
+    question: "Deploy release 1.4 for run r-1 of release-app?",
+    links: [{ title: "Release notes", url: "https://git.example/acme/app/releases/1.4" }],
+    answers: [
+      { label: "Deploy", outcome: "continue" as const },
+      { label: "Cancel", outcome: "stop" as const },
+    ],
+  };
+  const runs = [
+    { id: "r-1", workflow: "release-app", status: "running" as const, traceparent: TRACEPARENT },
+    { id: "r-done", workflow: "release-app", status: "completed" as const },
+  ];
+  function platform(policies: Policy[] = []) {
+    return controlPlane({ approvals: createApprovals({ store: createInMemoryApprovalStore(), policies, runs: async (id) => runs.find((run) => run.id === id) }) });
   }
-  const merge = (client: ReturnType<typeof controlPlane>, pullRequest: string | null = PR) => client.POST("/pull-requests/merge", { body: { run: "r-1", pullRequest } });
-  const decide = (client: ReturnType<typeof controlPlane>, id: string, decision: "approve" | "reject") =>
-    client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { decision } });
+  async function withPendingRequest() {
+    const client = platform();
+    const { data } = await client.POST("/approval-requests", { body: question });
+    return { client, id: data!.approvalRequest!.id };
+  }
+  const decide = (client: ReturnType<typeof controlPlane>, id: string, answer: string) =>
+    client.POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { answer } });
 
-  it("merges right away when the policy allows it", async () => {
-    const { data, response } = await merge(gated({ workflow: "fake-develop-and-merge" }));
+  it("asks on behalf of a human step: records the request with its question, links and answers", async () => {
+    const client = platform();
+
+    const { data, response } = await client.POST("/approval-requests", { body: question });
 
     expect(response.status).toBe(200);
-    expect(data).toMatchObject({ merged: true, decision: "allow" });
+    expect(data).toMatchObject({
+      decision: "ask",
+      approvalRequest: { runId: "r-1", workflow: "release-app", step: "/do/1/confirm", action: "deploy", links: question.links, answers: question.answers, status: "pending" },
+    });
+    const shown = await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: data!.approvalRequest!.id } } });
+    expect(shown.data).toEqual(data!.approvalRequest);
   });
 
-  it("asks first, lists the pending approval request and merges once it is approved", async () => {
-    const client = gated();
+  it("lets a human step proceed without a request when a policy allows its action", async () => {
+    const client = platform([{ apiVersion: "tendworks.dev/v1", kind: "Policy", metadata: { name: "trusted" }, spec: { actions: { deploy: "allow" } } }]);
 
-    const asked = await merge(client);
+    const { data } = await client.POST("/approval-requests", { body: question });
+
+    expect(data).toEqual({ decision: "allow", policy: "trusted" });
+    expect((await client.GET("/approval-requests")).data?.items).toEqual([]);
+  });
+
+  it("refuses to ask for an unknown run, a run that is not running, and an invalid question", async () => {
+    const client = platform();
+
+    const unknown = await client.POST("/approval-requests", { body: { ...question, run: "nope" } });
+    const finished = await client.POST("/approval-requests", { body: { ...question, run: "r-done" } });
+    const invalid = await client.POST("/approval-requests", { body: { ...question, answers: [] } });
+    const twice = await client.POST("/approval-requests", { body: { ...question, answers: [{ label: "Deploy", outcome: "continue" }, { label: "Deploy", outcome: "stop" }] } });
+
+    expect([unknown, finished, invalid, twice].map(({ response }) => response.status)).toEqual([404, 409, 400, 400]);
+  });
+
+  it("lists the pending approval request and decides it with one of its answers", async () => {
+    const { client, id } = await withPendingRequest();
+
     const pending = await client.GET("/approval-requests", { params: { query: { status: "pending" } } });
-    const approved = await decide(client, asked.data!.approvalRequest!.id, "approve");
-    const merged = await merge(client);
+    const decided = await decide(client, id, "Cancel");
 
-    expect(asked.response.status).toBe(202);
-    expect(pending.data?.items.map((item) => item.id)).toEqual([asked.data!.approvalRequest!.id]);
-    expect(approved.data?.status).toBe("approved");
-    expect(merged.response.status).toBe(200);
+    expect(pending.data?.items.map((item) => item.id)).toEqual([id]);
+    expect(decided.data).toMatchObject({ status: "decided", answer: "Cancel" });
   });
 
-  it("refuses the merge once the approval request is rejected, and a decision the other way", async () => {
-    const client = gated();
-    const id = (await merge(client)).data!.approvalRequest!.id;
-    await decide(client, id, "reject");
+  it("refuses another answer once the approval request is decided", async () => {
+    const { client, id } = await withPendingRequest();
+    await decide(client, id, "Cancel");
 
-    expect((await merge(client)).response.status).toBe(403);
-    expect((await decide(client, id, "approve")).response.status).toBe(409);
+    expect((await decide(client, id, "Deploy")).response.status).toBe(409);
   });
 
-  it("refuses an invalid merge request, a run that is not running and a repository that cannot be reached", async () => {
-    const unreachableRepository: PullRequests = {
-      merge: async () => Promise.reject(new Error("connection refused")),
-      describe: async () => Promise.reject(new Error("connection refused")),
-    };
+  it("refuses an answer the request does not offer, no answer and an unknown approval request", async () => {
+    const { client, id } = await withPendingRequest();
 
-    expect((await merge(gated(), null)).response.status).toBe(400);
-    expect((await merge(gated({ status: "completed" }))).response.status).toBe(409);
-    expect((await merge(gated({ workflow: "fake-develop-and-merge" }, unreachableRepository))).response.status).toBe(502);
-  });
-
-  it("refuses an invalid decision and an unknown approval request", async () => {
-    const client = gated();
-
+    const notOffered = await decide(client, id, "Maybe");
     const invalid = await client.POST("/approval-requests/{approvalRequestId}/decision", {
-      params: { path: { approvalRequestId: "a-1" } },
-      body: { decision: "maybe" as "approve" },
+      params: { path: { approvalRequestId: id } },
+      body: { decision: "approve" } as unknown as { answer: string },
     });
 
+    expect(notOffered.response.status).toBe(400);
     expect(invalid.response.status).toBe(400);
-    expect((await decide(client, "missing", "approve")).response.status).toBe(404);
+    expect((await decide(client, "missing", "Cancel")).response.status).toBe(404);
+    expect((await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "missing" } } })).response.status).toBe(404);
   });
 
   it("refuses a status filter that is not an approval status", async () => {
-    const { response } = await gated().GET("/approval-requests", { params: { query: { status: "maybe" as "pending" } } });
+    const { client } = await withPendingRequest();
+    const { response } = await client.GET("/approval-requests", { params: { query: { status: "approved" as "pending" } } });
 
     expect(response.status).toBe(400);
   });
 
-  it("answers 503 without a merge gate and without approval requests", async () => {
+  it("answers 503 without approval requests", async () => {
     const client = controlPlane();
 
-    expect((await merge(client)).response.status).toBe(503);
     expect((await client.GET("/approval-requests")).response.status).toBe(503);
-    expect((await decide(client, "a-1", "approve")).response.status).toBe(503);
+    expect((await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: "a-1" } } })).response.status).toBe(503);
+    expect((await client.POST("/approval-requests", { body: question })).response.status).toBe(503);
+    expect((await decide(client, "a-1", "Cancel")).response.status).toBe(503);
   });
 });
 

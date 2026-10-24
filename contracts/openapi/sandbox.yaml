@@ -262,6 +262,16 @@ components:
             volume sees its files.
           items:
             $ref: "#/components/schemas/VolumeMount"
+        binds:
+          type: array
+          description: >-
+            Directories of the sandbox host bound into the sandbox, read-write or
+            read-only. Only directories under the host directories the installation
+            allows (its workspace roots) and never a root itself; any other is refused
+            (`invalid-request`). A bind is no volume: the backend never creates, lists or
+            deletes the directory.
+          items:
+            $ref: "#/components/schemas/BindMount"
         owner:
           $ref: "#/components/schemas/Owner"
         networks:
@@ -312,6 +322,22 @@ components:
         path:
           $ref: "#/components/schemas/AbsolutePath"
           description: Directory inside the sandbox the volume is mounted on.
+    BindMount:
+      type: object
+      required: [hostPath, path, readOnly]
+      additionalProperties: false
+      properties:
+        hostPath:
+          $ref: "#/components/schemas/AbsolutePath"
+          description: >-
+            Directory on the sandbox host, normalized (no `.` or `..` segments), strictly
+            under a directory the installation allows.
+        path:
+          $ref: "#/components/schemas/AbsolutePath"
+          description: Directory inside the sandbox the host directory is bound to.
+        readOnly:
+          type: boolean
+          description: Whether the sandbox may only read the directory.
     Sandbox:
       type: object
       required: [id, template, isolationClass, state, createdAt]

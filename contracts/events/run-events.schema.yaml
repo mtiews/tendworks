@@ -31,7 +31,7 @@ $defs:
       type:
         const: dev.tendworks.run.completed
       data:
-        $ref: '#/$defs/runData'
+        $ref: '#/$defs/runCompletedData'
   runFailed:
     title: RunFailedEvent
     description: A run failed; `error.instance` names the failing task.
@@ -93,17 +93,40 @@ $defs:
       workflow:
         type: string
         description: Name of the workflow the run executes.
+  runCompletedData:
+    title: RunCompletedEventData
+    type: object
+    additionalProperties: false
+    required: [workflow, artifacts]
+    properties:
+      workflow:
+        type: string
+        description: Name of the workflow the run executes.
+      artifacts:
+        type: array
+        description: >-
+          The artifacts the run's steps reported, in step order (e.g. the pull request
+          its agent opened), so consumers such as notifications need not read the run.
+        items:
+          $ref: '../schemas/run.schema.yaml#/$defs/stepArtifact'
   runFailedData:
     title: RunFailedEventData
     type: object
     additionalProperties: false
-    required: [workflow, error]
+    required: [workflow, error, artifacts]
     properties:
       workflow:
         type: string
         description: Name of the workflow the run executes.
       error:
         $ref: '../schemas/run.schema.yaml#/$defs/workflowError'
+      artifacts:
+        type: array
+        description: >-
+          The artifacts the run's steps reported, in step order (e.g. the pull request
+          its agent opened), so consumers such as notifications need not read the run.
+        items:
+          $ref: '../schemas/run.schema.yaml#/$defs/stepArtifact'
   stepData:
     title: StepEventData
     type: object

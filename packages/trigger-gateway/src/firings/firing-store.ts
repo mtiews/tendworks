@@ -4,16 +4,18 @@ import type { TriggerFiredEvent } from "../trigger-events.js";
 /** How a binding's last check went (contracts/schemas/trigger.schema.yaml#/$defs/evaluation). */
 export type Evaluation = Contract.components["schemas"]["evaluation"];
 
-/** One issue matched by one binding; the unit of deduplication. */
+/** One item a binding fired for in one workspace; the unit of deduplication. */
 export interface FiringKey {
   binding: string;
-  /** Identifies the issue across checks, e.g. `acme/playground#7`. */
+  /** Name of the workspace; absent for a binding without workspaces. */
+  workspace?: string;
+  /** The item's stable key, e.g. `acme/playground#7`. */
   item: string;
 }
 
 /**
- * The trigger gateway's own record of fired triggers. It guarantees that an issue
- * starts at most one run per binding, also across restarts and several instances.
+ * The trigger gateway's own record of fired triggers. It guarantees that an item
+ * starts at most one run per binding and workspace, also across restarts and several instances.
  *
  * A firing is claimed before its run is started and recorded with the run id after;
  * the record and its `trigger.fired` event commit together (outbox).

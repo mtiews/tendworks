@@ -1,11 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { DEFAULT_CHAT_IDLE_MINUTES, isTraceparent } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, enabledAssistant, isTraceparent } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { ChatConflictError, ChatRefusedError, type AgentRuntimePort } from "./agent-runtime.js";
-import type { ApprovalsPort, ApprovalStatus } from "./approvals.js";
+import type { ApprovalsPort, ApprovalStatus, AskApproval } from "./approvals.js";
 import type { Configuration } from "./configuration.js";
-import { REFUSAL_STATUS, type MergesPort } from "./merges.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
@@ -32,8 +31,6 @@ export interface ControlPlaneApiOptions {
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
   notifications?: NotificationsPort;
-  /** Human interaction's merge gate; `POST /pull-requests/merge` answers 503 without it. */
-  merges?: MergesPort;
   /** Human interaction's approval requests; their endpoints answer 503 without it. */
   approvals?: ApprovalsPort;
   /**
@@ -82,7 +79,6 @@ export function createControlPlaneApi({
   agentRuntime,
   triggers = createInMemoryTriggers(),
   notifications,
-  merges,
   approvals,
   apiToken,
   readToken,
@@ -246,18 +242,21 @@ export function createControlPlaneApi({
   app.post("/chats", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     const text = textOf(body);
-    const repository = body?.repository;
-    if (typeof body?.agent !== "string" || text === undefined || (repository !== undefined && typeof repository !== "string")) {
+    const { agent, workspace, ...rest } = body ?? {};
+    const valid =
+      text !== undefined &&
+      Object.keys(rest).every((key) => key === "text") &&
+      ((typeof agent === "string" && workspace === undefined) || (typeof workspace === "string" && agent === undefined));
+    if (!valid) {
       return problem(
         400,
         "Invalid request",
-        "the body must be { agent, text, repository? } with the name of an agent profile that allows chats, the first message and a clone URL",
+        "the body must be { agent, text } with the name of an agent profile that allows chats, or { workspace, text } with the name of a workspace whose assistant is enabled, and the first message",
       );
     }
-    const agent = body.agent;
     return throughRuntime(async (runtime) => {
-      // The agent runtime checks the repository: it owns the workspace rules.
-      const chat = await runtime.startChat({ agent, text, ...(repository === undefined ? {} : { repository }) });
+      // The agent runtime decides whether the profile or the workspace's assistant allows the chat.
+      const chat = await runtime.startChat(typeof agent === "string" ? { agent, text } : { workspace: workspace as string, text });
       return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
     });
   });
@@ -346,6 +345,15 @@ export function createControlPlaneApi({
     return c.json({ items } satisfies Schemas["AgentList"], 200);
   });
 
+  // Whom a client can chat with besides profiles: the workspaces with an enabled assistant (ADR 0022).
+  app.get("/workspaces", (c) => {
+    const items = configuration.workspaces.map(({ metadata: { name }, spec }): Schemas["WorkspaceSummary"] => {
+      const assistant = enabledAssistant(spec.assistant);
+      return { name, kind: spec.directory ? "directory" : "git", ...(assistant ? { assistant } : {}) };
+    });
+    return c.json({ items } satisfies Schemas["WorkspaceList"], 200);
+  });
+
   app.get("/triggers", async (c) => {
     let items;
     try {
@@ -365,30 +373,7 @@ export function createControlPlaneApi({
     }
   });
 
-  app.post("/pull-requests/merge", authenticated, async (c) => {
-    const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
-    // Only these two fields: what the gate decides by comes from the platform's records.
-    const valid =
-      body !== undefined &&
-      typeof body.run === "string" &&
-      (typeof body.pullRequest === "string" || body.pullRequest === null) &&
-      Object.keys(body).every((key) => key === "run" || key === "pullRequest");
-    if (!valid) {
-      return problem(
-        400,
-        "Invalid request",
-        "the body must be { run, pullRequest } with the id of a running run and the URL of its pull request (or null); the policy comes from the platform's configuration",
-      );
-    }
-    if (!merges) return problem(503, "Merging unavailable", "no merge gate is configured");
-    const outcome = await merges.merge({ run: body.run as string, pullRequest: body.pullRequest as string | null });
-    if ("merged" in outcome) return c.json(outcome.merged satisfies Schemas["PullRequestMerge"], 200);
-    if ("pending" in outcome) return c.json(outcome.pending satisfies Schemas["PullRequestMerge"], 202);
-    const { reason, title, detail } = outcome.refused;
-    return problem(REFUSAL_STATUS[reason], title, detail);
-  });
-
-  const STATUSES: ApprovalStatus[] = ["pending", "approved", "rejected"];
+  const STATUSES: ApprovalStatus[] = ["pending", "decided"];
 
   app.get("/approval-requests", async (c) => {
     const status = c.req.query("status");
@@ -404,22 +389,60 @@ export function createControlPlaneApi({
     }
   });
 
+  app.get("/approval-requests/:approvalRequestId", async (c) => {
+    if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
+    const id = c.req.param("approvalRequestId");
+    let request;
+    try {
+      request = await approvals.get(id);
+    } catch (error) {
+      return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if (!request) return problem(404, "Approval request not found", `no approval request '${id}' exists`);
+    return c.json(request satisfies Schemas["approvalRequest"], 200);
+  });
+
+  // A workflow's human step asks; human interaction decides by the run's own record.
+  app.post("/approval-requests", authenticated, async (c) => {
+    const body: unknown = await c.req.json().catch(() => undefined);
+    const invalid = askProblem(body);
+    if (invalid) return problem(400, "Invalid request", invalid);
+    if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
+    let outcome;
+    try {
+      outcome = await approvals.ask(body as AskApproval);
+    } catch (error) {
+      return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
+    }
+    if ("refused" in outcome) {
+      const { reason, detail } = outcome.refused;
+      if (reason === "unknown-run") return problem(404, "Run not found", detail);
+      if (reason === "not-running") return problem(409, "Run is not running", detail);
+      return problem(400, "Invalid request", detail);
+    }
+    return c.json(outcome satisfies Schemas["ApprovalOutcome"], 200);
+  });
+
   app.post("/approval-requests/:approvalRequestId/decision", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Partial<Schemas["ApprovalDecisionRequest"]> | undefined;
-    if (body?.decision !== "approve" && body?.decision !== "reject") {
-      return problem(400, "Invalid request", "`decision` must be approve or reject");
+    if (typeof body?.answer !== "string" || body.answer === "" || Object.keys(body).length !== 1) {
+      return problem(400, "Invalid request", "the body must be { answer } with the label of one of the request's answers");
     }
     if (!approvals) return problem(503, "Approval requests unavailable", "no approval store is configured");
     const id = c.req.param("approvalRequestId");
     let outcome;
     try {
-      outcome = await approvals.decide(id, body.decision);
+      outcome = await approvals.decide(id, body.answer);
     } catch (error) {
       return problem(503, "Approval requests unavailable", error instanceof Error ? error.message : String(error));
     }
     if (!outcome) return problem(404, "Approval request not found", `no approval request '${id}' exists`);
+    if ("unknownAnswer" in outcome) {
+      const offered = outcome.unknownAnswer.answers.map(({ label }) => `'${label}'`).join(", ");
+      return problem(400, "Unknown answer", `approval request ${id} offers no answer '${body.answer}' (answers: ${offered})`);
+    }
     if ("conflict" in outcome) {
-      return problem(409, "Approval request already decided", `approval request ${id} was already ${outcome.conflict.status}`);
+      return problem(409, "Approval request already decided", `approval request ${id} was already decided with '${outcome.conflict.answer ?? ""}'`);
     }
     return c.json(outcome.decided satisfies Schemas["approvalRequest"], 200);
   });
@@ -430,4 +453,31 @@ export function createControlPlaneApi({
   });
 
   return { fetch: async (request) => app.fetch(request) };
+}
+
+const NAME = /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$/;
+
+/** Why `body` is not a question a human step can ask (`AskApprovalRequest`); `undefined` when it is. */
+function askProblem(body: unknown): string | undefined {
+  const text = (value: unknown) => typeof value === "string" && value !== "";
+  const only = (value: object, keys: string[]) => Object.keys(value).every((key) => keys.includes(key));
+  if (!isRecord(body) || !only(body, ["run", "step", "action", "question", "links", "answers"])) {
+    return "the body must be { run, step, action, question, links?, answers }";
+  }
+  if (!text(body.run) || !text(body.step)) return "`run` and `step` must name the running run and its human step";
+  if (typeof body.action !== "string" || !NAME.test(body.action)) return "`action` must be a name of letters, digits and dashes";
+  if (!text(body.question)) return "`question` must not be empty";
+  const links = body.links ?? [];
+  const link = (value: unknown) =>
+    isRecord(value) && only(value, ["title", "url"]) && text(value.title) && typeof value.url === "string" && /^https?:\/\/./.test(value.url);
+  if (!Array.isArray(links) || !links.every(link)) return "`links` must be a list of { title, url } with http(s) URLs";
+  const answer = (value: unknown) => isRecord(value) && only(value, ["label", "outcome"]) && text(value.label) && (value.outcome === "continue" || value.outcome === "stop");
+  if (!Array.isArray(body.answers) || body.answers.length === 0 || !body.answers.every(answer)) {
+    return "`answers` must be a non-empty list of { label, outcome } with outcome continue or stop";
+  }
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }

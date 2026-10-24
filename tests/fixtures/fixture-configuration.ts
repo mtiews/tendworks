@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -43,13 +43,40 @@ function files(dir: string): string[] {
     .map((entry) => relative(dir, join(entry.parentPath, entry.name)));
 }
 
+/** The workspace root of the compose stack under test (git-ignored), with the directory workspace `scripted-directory` in it. */
+export const WORKSPACE_ROOT = fileURLToPath(new URL("workspace-root", import.meta.url));
+export const DIRECTORY_WORKSPACE = join(WORKSPACE_ROOT, "scripted-directory");
+
+/** A host path as the Docker engine knows it: Docker Desktop on Windows sees the drives under /run/desktop/mnt/host. */
+function onDockerHost(path: string): string {
+  return process.platform === "win32" ? `/run/desktop/mnt/host/${path[0]!.toLowerCase()}${path.slice(2).replaceAll("\\", "/")}` : path;
+}
+
+/**
+ * Adds the directory workspace `scripted-directory` to an assembled configuration: its path
+ * depends on where the repository lies, so no fixture file can name it. Returns the
+ * workspace root to set as TEND_WORKSPACE_ROOTS.
+ */
+function addDirectoryWorkspace(target: string): string {
+  mkdirSync(DIRECTORY_WORKSPACE, { recursive: true });
+  chmodSync(DIRECTORY_WORKSPACE, 0o777); // the sandbox user writes there
+  const root = onDockerHost(WORKSPACE_ROOT);
+  writeFileSync(
+    join(target, "workspaces", "scripted-directory.yaml"),
+    `# A directory workspace for the end-to-end tests, under the stack's workspace root.\napiVersion: tendworks.dev/v1\nkind: Workspace\nmetadata:\n  name: scripted-directory\nspec:\n  directory:\n    path: ${root}/scripted-directory\n`,
+  );
+  return root;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   assembleFixtureConfiguration(ASSEMBLED_CONFIGURATION);
+  const workspaceRoot = addDirectoryWorkspace(ASSEMBLED_CONFIGURATION);
   // Compose resolves the path against deploy/, the project directory.
   const configPath = relative(fileURLToPath(new URL("../../deploy", import.meta.url)), ASSEMBLED_CONFIGURATION).split("\\").join("/");
   console.info(`TEND_CONFIG_PATH=${configPath}`);
+  console.info(`TEND_WORKSPACE_ROOTS=${workspaceRoot}`);
   const command = process.argv.slice(2).join(" ");
   if (command === "") process.exit(0);
-  const { status } = spawnSync(command, { stdio: "inherit", shell: true, env: { ...process.env, TEND_CONFIG_PATH: configPath } });
+  const { status } = spawnSync(command, { stdio: "inherit", shell: true, env: { ...process.env, TEND_CONFIG_PATH: configPath, TEND_WORKSPACE_ROOTS: workspaceRoot } });
   process.exit(status ?? 1);
 }

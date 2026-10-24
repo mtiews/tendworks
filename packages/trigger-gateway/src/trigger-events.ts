@@ -19,25 +19,27 @@ const SOURCE = "/tendworks/trigger-gateway";
 
 export function triggerFired(firing: {
   binding: string;
-  item: string;
+  /** Absent for a binding without workspaces. */
+  workspace?: string;
   workflow: string;
   runId: string;
-  issue: TriggerEvents.IssueReference;
+  item: TriggerEvents.ItemReference;
   time: string;
   /** The trace the firing starts; the run it started belongs to it too. */
   traceparent: string;
 }): TriggerFiredEvent {
+  const { binding, workspace, workflow, item } = firing;
   return {
     ...eventEnvelope({
-      // Deterministic: one binding fires once per issue.
-      id: `${firing.binding}/${firing.item}:trigger.fired`,
+      // Deterministic: one binding fires once per workspace and item. Workspace names hold no `/`.
+      id: `${binding}/${workspace ?? ""}/${item.key}:trigger.fired`,
       source: SOURCE,
-      subject: `triggers/${firing.binding}`,
+      subject: `triggers/${binding}`,
       time: firing.time,
       runId: firing.runId,
       traceparent: firing.traceparent,
     }),
     type: "dev.tendworks.trigger.fired",
-    data: { binding: firing.binding, workflow: firing.workflow, issue: firing.issue },
+    data: { binding, workflow, ...(workspace === undefined ? {} : { workspace }), item },
   };
 }

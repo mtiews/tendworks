@@ -132,7 +132,7 @@ describe("transcript", () => {
       { type: "message-received", message: { messageId: "m-2", role: "ROLE_USER", parts: [{ text: "Also add a test" }] } },
       { type: "permission", tool: "Bash", granted: true },
       { type: "plan", steps: [{ content: "Write the test", status: "completed" }, { content: "Fix it", status: "in-progress" }] },
-      { type: "workspace-checkout", workspace: { repository: "https://example.test/acme/playground.git", branch: "agent/7" }, exitCode: 0, output: "Cloning…" },
+      { type: "workspace-checkout", workspace: { url: "https://example.test/acme/playground.git", name: "playground", branch: "agent/7" }, exitCode: 0, output: "Cloning…" },
       { type: "artifacts", artifacts: [{ name: "pull-request", url: "https://example.test/acme/playground/pull/8" }] },
       { type: "artifacts-ignored", problem: "not a list" },
       { type: "input-required", message: "Done.", cost: { amount: 0.2, currency: "USD" } },

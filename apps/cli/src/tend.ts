@@ -2,6 +2,7 @@ import {
   followTranscript as followPlatformTranscript,
   formatCost,
   formatOrigin,
+  formatSchedule,
   totalCost,
   TranscriptStreamRefusedError,
   TranscriptStreamUnreachableError,
@@ -19,9 +20,10 @@ type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
-type Duration = ControlPlane.components["schemas"]["duration"];
+type WorkspaceList = ControlPlane.components["schemas"]["WorkspaceList"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
+type ApprovalRequest = ControlPlane.components["schemas"]["approvalRequest"];
 type AgentList = ControlPlane.components["schemas"]["AgentList"];
 type TranscriptEntry = ControlPlane.components["schemas"]["TranscriptEntryList"]["items"][number];
 type Chat = ControlPlane.components["schemas"]["chat"];
@@ -192,11 +194,26 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatTriggerList));
     });
 
+  program
+    .command("workspace")
+    .description("inspect workspaces")
+    .command("list")
+    .description("list the configured workspaces with their kind and assistant (tend chat --workspace <name>)")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/workspaces").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatWorkspaceList));
+    });
+
   const notification = program.command("notification").description("inspect notifications");
 
   notification
     .command("list")
-    .description("list notifications, newest first, with their delivery status")
+    .description("list notifications, newest first, with their first link and the delivery status per channel")
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
@@ -225,37 +242,53 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatApprovalList));
     });
 
-  for (const [name, decision, done] of [
-    ["approve", "approve", "approved"],
-    ["reject", "reject", "rejected"],
-  ] as const) {
-    approval
-      .command(name)
-      .description(`${name} an approval request; the waiting run goes on`)
-      .argument("<id>", "approval request id")
-      .action(async (id: string, _options: unknown, command: Command) => {
-        const { baseUrl, client } = controlPlane(command);
-        const { data, error, response } = await client
-          .POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { decision } })
-          .catch((cause: unknown) => {
-            throw new UnreachableError(baseUrl, cause);
-          });
-        if (response.status === 404) throw new Error(`approval request ${id} not found`);
-        if (!data) throw new AnswerError(response, error);
-        io.stdout(`approval request ${data.id} ${done}\n`);
+  approval
+    .command("get")
+    .description("show one approval request with its question, links and the answers to choose from")
+    .argument("<id>", "approval request id")
+    .addOption(outputOption())
+    .action(async (id: string, options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/approval-requests/{approvalRequestId}", { params: { path: { approvalRequestId: id } } }).catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
       });
-  }
+      if (response.status === 404) throw new Error(`approval request ${id} not found`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatApprovalRequest));
+    });
+
+  approval
+    .command("answer")
+    .description("decide an approval request with one of its answers; the waiting run continues or stops by it")
+    .argument("<id>", "approval request id")
+    .argument("<answer>", "the label of one of the request's answers (tend approval get <id>)")
+    .action(async (id: string, answer: string, _options: unknown, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client
+        .POST("/approval-requests/{approvalRequestId}/decision", { params: { path: { approvalRequestId: id } }, body: { answer } })
+        .catch((cause: unknown) => {
+          throw new UnreachableError(baseUrl, cause);
+        });
+      if (response.status === 404) throw new Error(`approval request ${id} not found`);
+      if (!data) throw new AnswerError(response, error);
+      const outcome = data.answers.find((offered) => offered.label === data.answer)?.outcome;
+      io.stdout(`approval request ${data.id} answered "${data.answer ?? answer}"; the run ${outcome === "stop" ? "stops" : "continues"}\n`);
+    });
 
   const chat = program
     .command("chat")
     .description(
-      "chat with an agent profile that allows chats; Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
+      "chat with the platform assistant, another agent profile that allows chats, or a workspace's assistant (--workspace); Ctrl+C cancels a running turn, and leaves the chat open while the agent waits (as Ctrl+D does); /end ends the chat",
     )
-    .argument("<profile>", "agent profile")
-    .option("--repo <url>", "public Git repository (https clone URL) checked out as the chat's workspace")
-    .action(async (agent: string, options: { repo?: string }, command: Command) => {
+    .argument("[profile]", `agent profile that allows chats (default: ${PLATFORM_ASSISTANT}, the platform assistant)`)
+    .option("--workspace <name>", "chat with the assistant of this workspace about its contents (tend workspace list shows those with one; read-only unless the workspace allows writing)")
+    .action(async (profile: string | undefined, options: { workspace?: string }, command: Command) => {
+      if (profile !== undefined && options.workspace !== undefined) {
+        throw new Error("give either a profile or --workspace: a workspace's assistant is held with the profile its workspace names");
+      }
       const { baseUrl, client } = controlPlane(command);
-      await startChat({ agent, ...(options.repo === undefined ? {} : { repository: options.repo }), client, baseUrl, io });
+      const chatWith = options.workspace === undefined ? { agent: profile ?? PLATFORM_ASSISTANT } : { workspace: options.workspace };
+      await startChat({ chatWith, client, baseUrl, io });
     });
 
   /** A chat by id, or a clear error when there is none. */
@@ -300,7 +333,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       const found = await getChat(client, baseUrl, chatId);
       const terminal = chatTerminal(io);
       try {
-        io.stdout(`chat ${chatId} with ${found.agent} (${found.status}); type /end to end it\n`);
+        io.stdout(`chat ${chatId} with ${found.agent}${onWorkspace(found)} (${found.status}); type /end to end it\n`);
         await converse({ chatId, client, baseUrl, io, terminal, sent: [] });
       } finally {
         await terminal.close();
@@ -392,16 +425,27 @@ function formatAgentList(list: AgentList): string {
 
 function formatChatList(list: ChatList): string {
   const rows = [
-    ["ID", "AGENT", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
-    ...list.items.map((chat) => [chat.id, chat.agent, chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
+    ["ID", "AGENT", "WORKSPACE", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
+    ...list.items.map((chat) => [chat.id, chat.agent, chat.workspace ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
   ];
   return table(rows);
+}
+
+function formatWorkspaceList(list: WorkspaceList): string {
+  const assistantOf = ({ assistant }: WorkspaceList["items"][number]) => (assistant ? `${assistant.profile} (${assistant.write ? "may write" : "read-only"})` : "-");
+  return table([["NAME", "KIND", "ASSISTANT"], ...list.items.map((workspace) => [workspace.name, workspace.kind, assistantOf(workspace)])]);
+}
+
+/** ` on workspace <name> (read-only)` for a chat with a workspace's assistant; empty otherwise. */
+function onWorkspace(chat: Chat): string {
+  return chat.workspace === undefined ? "" : ` on workspace ${chat.workspace} (${chat.write ? "may write" : "read-only"})`;
 }
 
 function formatChat(chat: Chat): string {
   const fields = [
     ["CHAT", chat.id],
     ["AGENT", chat.agent],
+    ...(chat.workspace ? [["WORKSPACE", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`]] : []),
     ["STATUS", chat.status],
     ["STARTED", chat.startedAt],
     ["LAST ACTIVITY", chat.lastActivityAt],
@@ -417,8 +461,16 @@ function formatChat(chat: Chat): string {
 
 function formatTriggerList(list: TriggerList): string {
   const rows = [
-    ["NAME", "WORKFLOW", "EVERY", "NEXT EXECUTION", "LAST CHECK"],
-    ...list.items.map((trigger) => [trigger.name, trigger.workflow, formatDuration(trigger.schedule.every), trigger.suspended ? "suspended" : trigger.nextExecutionAt, formatEvaluation(trigger.lastEvaluation)]),
+    ["NAME", "WORKFLOW", "TRIGGER", "WORKSPACES", "SCHEDULE", "NEXT EXECUTION", "LAST CHECK"],
+    ...list.items.map((trigger) => [
+      trigger.name,
+      trigger.workflow,
+      trigger.kind,
+      trigger.workspaces.join(",") || "-",
+      formatSchedule(trigger.schedule),
+      trigger.suspended ? "suspended" : trigger.nextExecutionAt,
+      formatEvaluation(trigger.lastEvaluation),
+    ]),
   ];
   return table(rows);
 }
@@ -428,12 +480,6 @@ function formatEvaluation(evaluation: TriggerList["items"][number]["lastEvaluati
   if (!evaluation) return "";
   if (evaluation.status === "failed") return `failed ${evaluation.at}${evaluation.message ? `: ${evaluation.message}` : ""}`;
   return `succeeded ${evaluation.at}, ${evaluation.startedRuns} ${evaluation.startedRuns === 1 ? "run" : "runs"} started`;
-}
-
-/** `{ minutes: 5, seconds: 30 }` as `5m30s`. */
-function formatDuration(duration: Duration): string {
-  const units = [["days", "d"], ["hours", "h"], ["minutes", "m"], ["seconds", "s"]] as const;
-  return units.map(([unit, suffix]) => (duration[unit] ? `${duration[unit]}${suffix}` : "")).join("") || "0s";
 }
 
 function formatRun(run: Run): string {
@@ -462,7 +508,9 @@ function formatRun(run: Run): string {
   ];
   const withTranscript = run.steps.filter((step) => step.transcript);
   const transcripts = withTranscript.length > 0 ? `\n${table([["STEP", "TRANSCRIPT"], ...withTranscript.map((step) => [step.reference, step.transcript!])])}` : "";
-  return `${table(fields)}\n${table(steps)}${transcripts}${formatOutput(run.output)}`;
+  const artifacts = run.steps.flatMap((step) => (step.artifacts ?? []).map((artifact) => [step.reference, artifact.name, artifact.url]));
+  const reported = artifacts.length > 0 ? `\n${table([["STEP", "ARTIFACT", "URL"], ...artifacts])}` : "";
+  return `${table(fields)}\n${table(steps)}${transcripts}${reported}${formatOutput(run.output)}`;
 }
 
 /** The run's output, one row per top-level field; single-line strings as they are, anything else as JSON. */
@@ -654,19 +702,21 @@ function queue<T>() {
   };
 }
 
+/** The chat profile `tend chat` without arguments talks to. */
+const PLATFORM_ASSISTANT = "assistant";
+
 /**
- * `tend chat <profile>`: an interactive chat (ADR 0015). The first line starts the chat,
- * which then goes on as in {@link converse}.
+ * `tend chat [profile]` and `tend chat --workspace <name>`: an interactive chat (ADR 0015)
+ * with an agent profile or a workspace's assistant (ADR 0022). The first line starts the
+ * chat, which then goes on as in {@link converse}.
  */
 async function startChat({
-  agent,
-  repository,
+  chatWith,
   client,
   baseUrl,
   io,
 }: {
-  agent: string;
-  repository?: string;
+  chatWith: { agent: string } | { workspace: string };
   client: ControlPlaneClient;
   baseUrl: string;
   io: TendIo;
@@ -685,15 +735,14 @@ async function startChat({
       }
       if (event.text.trim() !== "") first = event.text.trim();
     }
-    const started = await client.POST("/chats", { body: { agent, text: first, ...(repository === undefined ? {} : { repository }) } }).catch((cause: unknown) => {
+    const started = await client.POST("/chats", { body: { ...chatWith, text: first } }).catch((cause: unknown) => {
       throw new UnreachableError(baseUrl, cause);
     });
     if (!started.data) {
       if (started.response.status === 400 && started.error?.detail) throw new Error(started.error.detail);
       throw new AnswerError(started.response, started.error);
     }
-    const checkout = started.data.repository === undefined ? "" : ` in a checkout of ${started.data.repository}`;
-    io.stdout(`chat ${started.data.id} with ${agent}${checkout}; type /end to end it\n`);
+    io.stdout(`chat ${started.data.id} with ${started.data.agent}${onWorkspace(started.data)}; type /end to end it\n`);
     await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first] });
   } finally {
     await terminal.close();
@@ -962,7 +1011,7 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
         line(entry.time, "turn", entry.reason);
         break;
       case "workspace-checkout":
-        line(entry.time, "checkout", `${[entry.workspace.repository, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
+        line(entry.time, "checkout", `${[entry.workspace.url, entry.workspace.branch].filter(Boolean).join(" ")} (exit code ${entry.exitCode})${entry.output ? `\n${entry.output}` : ""}`);
         break;
       case "artifacts":
         for (const artifact of entry.artifacts) line(entry.time, "artifact", `${artifact.name} ${artifact.url}`);
@@ -983,24 +1032,48 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
 
 function formatNotificationList(list: NotificationList): string {
   const rows = [
-    ["CREATED", "KIND", "RUN", "DELIVERY", "TITLE"],
+    ["CREATED", "KIND", "RUN", "LINK", "DELIVERY", "TITLE"],
     ...list.items.map((n) => [
       n.createdAt,
       n.kind,
       n.runId,
-      n.delivery.error ? `${n.delivery.status}: ${n.delivery.error}` : n.delivery.status,
+      n.artifacts?.[0]?.url ?? "-",
+      n.deliveries.map(({ channel, status }) => `${channel} ${status}`).join(", ") || "no channel",
       n.title,
     ]),
   ];
-  return table(rows);
+  // Reasons are long; they follow the table, one line per failed delivery.
+  const failures = list.items.flatMap((n) =>
+    n.deliveries.flatMap(({ channel, status, error }) => (status === "failed" ? [`${channel} failed for ${n.id}: ${error ?? "no reason given"}`] : [])),
+  );
+  return failures.length === 0 ? table(rows) : `${table(rows)}\n${failures.join("\n")}\n`;
 }
 
 function formatApprovalList(list: ApprovalRequestList): string {
   const rows = [
-    ["ID", "STATUS", "RUN", "CREATED", "QUESTION"],
-    ...list.items.map((request) => [request.id, request.status, request.runId, request.createdAt, request.question]),
+    ["ID", "STATUS", "RUN", "CREATED", "ANSWER", "QUESTION"],
+    ...list.items.map((request) => [request.id, request.status, request.runId, request.createdAt, request.answer ?? "-", request.question]),
   ];
   return table(rows);
+}
+
+function formatApprovalRequest(request: ApprovalRequest): string {
+  const fields = [
+    ["APPROVAL REQUEST", request.id],
+    ["RUN", request.runId],
+    ["WORKFLOW", request.workflow],
+    ["STEP", request.step],
+    ["ACTION", request.action],
+    ["POLICY", request.policy ?? "- (no policy applies, so the platform asks)"],
+    ["STATUS", request.status],
+    ["CREATED", request.createdAt],
+    ...(request.answer ? [["DECIDED", `${request.answer}${request.decidedAt ? ` (${request.decidedAt})` : ""}`]] : []),
+    ["QUESTION", request.question],
+  ];
+  const links = request.links.length > 0 ? `\n${table([["LINK", "URL"], ...request.links.map((link) => [link.title, link.url])])}` : "";
+  const answers = table([["ANSWER", "THEN"], ...request.answers.map((answer) => [answer.label, answer.outcome])]);
+  const hint = request.status === "pending" ? `\nAnswer with: tend approval answer ${request.id} "<answer>"\n` : "";
+  return `${table(fields)}${links}\n${answers}${hint}`;
 }
 
 /** Aligns cells in columns; the last column is not padded. */

@@ -1,0 +1,20 @@
+# Template of a Pushover channel (ADR 0025): notifications on your phone. The loader reads
+# only *.yaml, *.yml and agents/*.md, so this file does nothing until you rename it to
+# phone.yaml. Do that only after setting the two platform secrets in deploy/.env
+# (docs/operator-guide.md, "Pushover on your phone"): without them every delivery fails,
+# and `tend notification list` shows the delivery to phone as failed, naming the secret.
+#
+# A notification of a finished run links its first artifact, e.g. the pull request the
+# developer reported, so a tap opens it. For failures with an alert that bypasses quiet
+# hours, add a second channel with `events: [run.failed]` and `priority: 1`.
+apiVersion: tendworks.dev/v1
+kind: NotificationChannel
+metadata:
+  name: phone
+spec:
+  integration: pushover
+  events: [approval.requested, run.failed, run.completed]
+  pushover:
+    token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
+    user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
+    # priority: 0   # -2 (no alert) to 1 (high); 0 is the default

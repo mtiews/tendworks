@@ -102,7 +102,7 @@ From the start, the model is built as "steps that consume and produce artifacts,
 | Object | Owning domain | Content |
 | --- | --- | --- |
 | `WorkflowDefinition` | Orchestration | Serverless Workflow YAML; steps call agents via A2A, wait for events or approvals |
-| `TriggerBinding` | Trigger | CloudEvents filter (type, source, attributes) → workflow + input mapping |
+| `TriggerBinding` | Trigger | workflow, workspaces and one trigger kind (`schedule`, `github-issues`); one run per workspace and item, input `{ workspace, item }` (ADR 0023) |
 | `AgentProfile` | Agent Runtime | role, harness, model, skills, MCP servers, sandbox template, budget; published as an A2A Agent Card |
 | `SandboxTemplate` | Sandbox | OCI image, isolation class (container, gvisor, microvm), CPU/RAM, egress allowlist |
 | `Policy` | Human Interaction | when a gate applies: risk class, budget, paths, target environment |
@@ -193,7 +193,7 @@ tendworks-config/
   policies/deploy.rego
   policies/deploy_test.rego
   integrations/mcp/github.yaml
-  integrations/notify/ntfy.yaml
+  notifications/phone.yaml
   sandboxes/node-gvisor.yaml
   secrets/integrations.sops.yaml
   deploy/compose.yaml
@@ -264,7 +264,7 @@ The class is set per tool in the integration configuration; unclassified tools c
 
 ## Human-in-the-loop and notification
 
-The human is only called via `ApprovalRequest`s, and whether one is created is decided by a policy, not by the workflow author case by case. A workflow step "wait for approval" is a `listen` on `approval.decided` in Serverless Workflow.
+The human is only called via `ApprovalRequest`s, and whether one is created is decided by a policy, not by the workflow author case by case. A workflow waits for a human with the human step `call: approval` (ADR 0024): it names an action, a question, links and custom answers, each mapped to continue or stop; policies decide per action name and workflow whether it asks (`ask`) or proceeds (`allow`), and the step waits for the `approval.decided` of its own request.
 
 **Gate types**
 
@@ -274,7 +274,7 @@ The human is only called via `ApprovalRequest`s, and whether one is created is d
 
 **An ApprovalRequest contains** the question in one sentence, 2–4 options (including "send back with comment"), links to diff, artifacts and transcript, a deadline and the behavior on expiry (cancel, safe default, escalate).
 
-**Delivery** via a notification port with adapters: Web Push to the UI (also mobile as a PWA), ntfy (self-hosted), optionally Matrix, Slack or email. Every message carries a deep link into the approval inbox. Decisions are only made in the UI (authenticated via OIDC), never by replying to an email.
+**Delivery** through notification channels (`kind: NotificationChannel`, ADR 0025 (notification-channels-deliver-selected-events-through-adapters)): each selects the events it receives and an adapter behind the notification delivery port; the delivery status is recorded per channel. Pushover is the first adapter, with the run's first artifact as the message's link; Web Push to the UI (also mobile as a PWA), ntfy, Matrix, Slack or email are further adapters later. Every message carries a deep link into the approval inbox. Decisions are only made in the UI (authenticated via OIDC), never by replying to an email.
 
 The policy part should be built as a separate, replaceable decision function: input is a JSON document (step, diff statistics, target, cost), output is `allow`, `deny` or `ask`. Open Policy Agent with Rego or a CEL expression fits this. That keeps the rule itself declarative and in Git.
 
@@ -304,8 +304,8 @@ Tendworks has two first-party clients, both built only on the public control pla
 - `tend status` — platform health, active runs, pending approvals
 - `tend run list|get|logs|cancel|resume` — runs and steps; `--follow` streams live events
 - `tend trigger list|fire` — triggers including the next scheduled execution; fire one manually
-- `tend agent list` and `tend chat <profile> [--repo …]` — start an agent session in the terminal; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
-- `tend approval list|approve|reject` — answer gates from the terminal
+- `tend agent list`, `tend workspace list`, and `tend chat [profile]` or `tend chat --workspace <name>` — start an agent session in the terminal with the platform assistant, another chat profile or a workspace's assistant; `tend chat list/get/attach/end` — find, rejoin from any client, or end one
+- `tend approval list|get|answer` — show approval requests with their answers and decide them from the terminal
 - `tend config validate|diff|apply` — check configuration against the JSON Schemas; apply directly in local mode, otherwise open a pull request
 - `tend context use <name>` — switch between laptop, server and cluster
 
@@ -440,17 +440,17 @@ Today: a Linux Docker container with Claude Code, two secrets as environment var
 | label `ready-for-agent` | filter in the TriggerBinding (`triggers/issue-ready-for-agent.yaml`) | unchanged |
 | skills (Matt Pocock) | unchanged as `SKILL.md` under `skills/`, referenced in the developer profile | part of the factory blueprint |
 | container with Claude Code | sandbox from a SandboxTemplate (isolation class `container`; `gvisor` verified on a Linux host), controlled via ACP | further harnesses through the same port |
-| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; harness credentials from the operator's own subscription (long-lived OAuth token) or an API key, selected by configuration (third-party or shared use requires an API key under the vendor's terms), and a fine-grained agent token limited to the playground repo; a separate platform token (polling, merge) never enters the sandbox | injection via egress proxy, sandbox only sees placeholders; GitHub App installation token per repo and run |
-| commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), merge as a platform workflow step behind a gate (`merge: auto \| ask` in the policy); accepted risk: without repository rulesets (private repo on the free plan) the agent token could technically merge (what one account on the free plan can and cannot enforce: [GitHub access for agents](github-agent-access.md)) | merge depends on the evidence bundle; external actions through the Action Gateway with action journal (milestone 3) |
-| — | notifications and approval requests are persisted first, then delivered through the notification port (fake adapter that only logs) | ntfy, Web Push |
+| secrets as environment variables | unchanged, but only inside the sandbox and from `.env` or SOPS; harness credentials from the operator's own subscription (long-lived OAuth token) or an API key, selected by configuration (third-party or shared use requires an API key under the vendor's terms), and a fine-grained agent token limited to the playground repo; a separate issues token that only reads issues never enters the sandbox | injection via egress proxy, sandbox only sees placeholders; GitHub App installation token per repo and run |
+| commit and merge by the agent | pull request by the agent (`git push`, `gh pr create`), reported as the run's artifact; the run ends with it and the human merges in the forge, the platform performs no forge action (ADR 0024 (the-platform-has-no-pull-request-integration)); accepted risk: without repository rulesets (private repo on the free plan) the agent token could technically merge (what one account on the free plan can and cannot enforce: [GitHub access for agents](github-agent-access.md)) | deeper forge integration builds on artifacts, notifications and the generic human step; external actions through the Action Gateway with action journal |
+| — | notifications and approval requests are persisted first, then delivered to every notification channel that selects them (`fake`, Pushover; ADR 0025 (notification-channels-deliver-selected-events-through-adapters)) | Web Push, ntfy |
 
 **Success criterion (milestone 1):** An issue labeled `ready-for-agent` leads to a merged pull request without manual intervention; run status, transcript and cost are visible through the API and `tend run get`; restarting the platform mid-run resumes the run.
 
 **Interactive path (chat, milestone 1b)**
 
-`tend chat <profile>` opens a chat with a profile that allows chats (`spec.chat`), optionally with a public repository checked out as its workspace. As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Messages and tool calls are visible live, questions are answered directly in the chat, and any client can leave the chat and attach to it again later (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
+`tend chat` opens a chat with the platform assistant, `tend chat <profile>` with another profile that allows chats (`spec.chat`), and `tend chat --workspace <name>` with a workspace's assistant, about that workspace's contents (milestone 3, ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). As in the automated path, the agent runs in a sandbox with Claude Code via ACP. Messages and tool calls are visible live, questions are answered directly in the chat, and any client can leave the chat and attach to it again later (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)).
 
-- **Permissions in the walking skeleton:** work in the sandbox workspace only; no push, no pull request, no merge. Enforced by credentials, not by the prompt: the chat profile (`assistant`) holds no repository token.
+- **Permissions:** the platform assistant works in an empty workspace and holds no repository token; a workspace assistant is read-only unless its workspace sets `assistant.write: true` (git: the credential only for the checkout; directory: mounted read-only). Enforced by credentials and mounts, not by the prompt.
 - **Platform context via MCP:** the chat agent gets a read-only MCP server on the control plane API (first stage of the meta-agent) with a read-only token; agents in workflows get neither (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)). Tools: `list_runs` (active and recent runs with status), `get_run` (details, steps, errors), `list_triggers` (including next scheduled execution), `list_agents` (profiles and their active agent sessions, run steps and chats).
 - **Example questions that must work:** "Is an agent running right now?", "Were the last runs successful?", "When does the developer agent run next?"
 
@@ -474,7 +474,7 @@ The former roadmap steps 2–6 move back by one.
 **Success criterion (milestone 2):** Following only the operator guide, a fresh installation on Ubuntu:
 
 - runs `hello-developer`;
-- runs `develop-issue` with `merge: ask` on a private repository with the narrowed agent token;
+- runs `develop-issue` on a private repository with the narrowed agent token, ending with the agent's pull request;
 - answers an `assistant` chat from live state;
 - serves the web UI to the operator's phone over HTTPS;
 - continues a run across a host reboot;
@@ -482,13 +482,31 @@ The former roadmap steps 2–6 move back by one.
 - restores from a backup;
 - leaves no orphaned sandboxes or volumes.
 
-1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR → merge gate → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
+**Milestone 3 – generic platform: workspaces, triggers, notifications (design review of 24 Oct 2026, spec #71)**
+
+The platform serves many repositories and use cases with three generic building blocks:
+
+- **Workspaces** are declared once, by name: `git` on any host with the workspace's own credential, or a `directory` under roots the operator allows (ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). A workspace may enable a workspace assistant, read-only by default; the platform assistant answers questions about the platform.
+- **Trigger bindings** start a workflow per workspace when their trigger fires (`schedule`, `github-issues`), with trigger sources as pluggable implementations behind a port (ADR 0023 (trigger-bindings-start-a-workflow-per-workspace-from-pluggable-sources)).
+- **Notifications** reach the operator through notification channels, Pushover first, carrying the run's artifacts (ADR 0025 (notification-channels-deliver-selected-events-through-adapters)).
+
+The platform has no pull request integration. Agents open pull requests themselves and report them as artifacts; a generic human step waits for decisions where a workflow continues after a human action (ADR 0024 (the-platform-has-no-pull-request-integration)).
+
+**Success criterion (milestone 3):**
+
+- A real repository declared as a workspace gets an issue worked by `develop-issue` through the issue trigger.
+- The Pushover message on the operator's phone opens the pull request.
+- A scheduled workflow runs over the workspace.
+- A workspace assistant with `write: false` answers about the repository and cannot push.
+
+1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR reported as an artifact → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
 2. **Clean single-host deployment on Linux (milestone 2).** As refined below: tagged releases, secure defaults, schema migrations, backup and restore, sandbox clean-up, the platform MCP server on Linux, access from the operator's devices through a TLS layer.
-3. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
-4. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
-5. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
-6. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
-7. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
+3. **Generic platform: workspaces, triggers, notifications (milestone 3).** As refined below: named workspaces (git, directory) with their own credentials, trigger bindings over workspaces with pluggable sources, no pull request integration, a generic human step, notification channels with Pushover, workspace assistants.
+4. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
+5. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
+6. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
+7. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
+8. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
 
 **Fitness functions (run in CI, protect openness)**
 

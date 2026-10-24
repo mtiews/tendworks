@@ -6,6 +6,7 @@ export type SandboxTemplate = Schemas["SandboxTemplate"];
 export type ExecRequest = Schemas["ExecRequest"];
 export type ExecResult = Schemas["ExecResult"];
 export type VolumeMount = Schemas["VolumeMount"];
+export type BindMount = Schemas["BindMount"];
 /** A sandbox as the installation lists it, with the owner it was created with and when. */
 export type ListedSandbox = Pick<Schemas["Sandbox"], "id" | "owner" | "createdAt">;
 /** A volume as the installation lists it, with the owner of the sandbox that created it and when. */
@@ -30,9 +31,11 @@ export interface Sandboxes {
   /**
    * Volumes outlive the sandbox, so a later sandbox mounting them carries on with their files.
    * The owner (the task the sandbox works for) is recorded on the sandbox and its new volumes.
-   * The sandbox also joins the given networks (only those the installation allows).
+   * The sandbox also joins the given networks (only those the installation allows), and
+   * binds the given host directories (only those under the installation's workspace roots);
+   * a bound directory is never a volume, so nothing deletes it.
    */
-  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[]; owner?: string; networks?: string[] }): Promise<{ id: string }>;
+  create(template: SandboxTemplate, options?: { volumes?: VolumeMount[]; binds?: BindMount[]; owner?: string; networks?: string[] }): Promise<{ id: string }>;
   /** The installation's sandboxes, also stopped ones and those nobody remembers. */
   list(): Promise<ListedSandbox[]>;
   /** The installation's volumes. */

@@ -3,6 +3,7 @@ import { useCallback, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { formatCost, formatOrigin, totalCost } from "@tendworks/platform";
+import { Artifacts } from "./artifacts.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
 import { Time } from "./time.js";
@@ -43,6 +44,10 @@ export function RunDetail({ runId }: { runId: string }) {
   }
 
   const costs = run.steps.flatMap((step) => (step.cost ? [step.cost] : []));
+  // The item a trigger started the run for, e.g. the issue, when it has a safe link.
+  const item = run.startedBy?.kind === "trigger" ? run.startedBy.item : undefined;
+  const itemHref = item?.url === undefined ? undefined : safeHref(item.url);
+  const itemLink = item && itemHref ? { href: itemHref, text: item.title || item.key } : undefined;
   const fields: [string, ReactNode][] = [
     ["Workflow", run.workflow],
     ["Status", <span className={`status status-${run.status}`}>{run.status}</span>],
@@ -71,10 +76,10 @@ export function RunDetail({ runId }: { runId: string }) {
           </div>
         ))}
       </dl>
-      {run.startedBy?.kind === "trigger" && safeHref(run.startedBy.issue.url) && (
+      {itemLink && (
         <p>
-          <a href={safeHref(run.startedBy.issue.url)} target="_blank" rel="noopener noreferrer">
-            {run.startedBy.issue.title ?? `${run.startedBy.issue.repository}#${run.startedBy.issue.number}`}
+          <a href={itemLink.href} target="_blank" rel="noopener noreferrer">
+            {itemLink.text}
           </a>
         </p>
       )}
@@ -164,25 +169,7 @@ function AgentStep({ runId, step, taskId, ended }: { runId: string; step: Step; 
         <span className="muted">{taskId}</span>
       </p>
       {step.error && <p className="message message-error failure">{describeError(step.error)}</p>}
-      {step.artifacts && step.artifacts.length > 0 && (
-        <ul className="artifacts">
-          {step.artifacts.map((artifact) => {
-            const href = safeHref(artifact.url);
-            return (
-              <li key={`${artifact.name} ${artifact.url}`}>
-                {href ? (
-                  <a href={href} target="_blank" rel="noopener noreferrer">
-                    {artifact.name}
-                  </a>
-                ) : (
-                  artifact.name
-                )}
-                {artifact.description && <span className="muted"> {artifact.description}</span>}
-              </li>
-            );
-          })}
-        </ul>
-      )}
+      <Artifacts artifacts={step.artifacts ?? []} />
       <LiveTranscript read={read} open={open} live={step.status === "running"} missing="No transcript was found for this step." onEnded={ended} />
     </section>
   );

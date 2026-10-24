@@ -31,7 +31,7 @@ function platform(agentRuntime: AgentRuntimePort = createInMemoryAgentRuntime())
   const configuration = loadConfiguration(fixtureConfiguration());
   const runs = createInMemoryRuns();
   const triggers = createInMemoryTriggers([
-    { name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" },
+    { name: "issue-ready-for-agent", workflow: "hello-agent", kind: "fake", workspaces: [], schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" },
   ]);
   const controlPlane = createControlPlaneApi({ probes: [], configuration, runs, agentRuntime, triggers, apiToken: API_TOKEN, readToken: READ_TOKEN });
   const guarded = contracts["control-plane"].guard((request) => controlPlane.fetch(request));
@@ -79,7 +79,7 @@ describe("the platform MCP server", () => {
     const result = await client.callTool({ name: "list_triggers", arguments: {} });
 
     expect(answer(result)).toEqual({
-      items: [{ name: "issue-ready-for-agent", workflow: "hello-agent", schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" }],
+      items: [{ name: "issue-ready-for-agent", workflow: "hello-agent", kind: "fake", workspaces: [], schedule: { every: { seconds: 10 } }, nextExecutionAt: "2026-10-19T10:00:10.000Z" }],
     });
   });
 

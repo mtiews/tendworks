@@ -2,9 +2,10 @@ $id: https://tendworks.dev/schemas/v1/schemas/trigger-binding.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: TriggerBinding
 description: >-
-  Binds a trigger to a workflow. A time trigger asks an issue tracker on a schedule for
-  the issues matching a filter and starts one run of `spec.workflow` per matching issue,
-  with the input built by `spec.input`. An issue starts at most one run per binding.
+  Binds a trigger to a workflow and a list of workspaces (ADR 0023). When the trigger
+  fires, the trigger gateway starts one run of `spec.workflow` per workspace and per item
+  its trigger source reports, with the input `{ workspace, item }`. An item starts at most
+  one run per binding and workspace.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -25,32 +26,67 @@ properties:
   spec:
     title: TriggerBindingSpec
     type: object
-    required: [schedule, source, workflow]
+    required: [workflow, trigger]
+    additionalProperties: false
+    properties:
+      workflow:
+        type: string
+        description: Name (`document.name`) of the configured workflow each firing starts.
+      workspaces:
+        type: array
+        uniqueItems: true
+        items:
+          type: string
+          pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: >-
+          Names of configured workspaces (kind Workspace). The binding starts one run per
+          workspace and item, with the workspace's name as `workspace` in the input.
+          Without workspaces it starts one run per item, without a workspace.
+      suspend:
+        type: boolean
+        description: >-
+          When true, the binding is never checked and starts nothing, e.g. because it
+          needs a secret that is not set yet. Defaults to false.
+      trigger:
+        $ref: '#/$defs/trigger'
+$defs:
+  trigger:
+    title: Trigger
+    description: >-
+      The trigger source that fires the binding, as exactly one kind with its settings.
+      Each kind is a trigger source deployed with the platform. `schedule` fires at every
+      execution of its schedule, and the tick is the item, keyed by the time of the
+      execution.
+    type: object
+    minProperties: 1
+    maxProperties: 1
     additionalProperties: false
     properties:
       schedule:
         $ref: '#/$defs/schedule'
-      source:
-        $ref: '#/$defs/issueSource'
-      workflow:
-        type: string
-        description: Name (`document.name`) of the configured workflow each match starts.
-      suspend:
-        type: boolean
-        description: >-
-          When true, the binding is never checked on its schedule, e.g. because it needs a
-          secret that is not set yet. Defaults to false.
-      input:
-        type: object
-        additionalProperties: true
-        description: >-
-          Workflow input. String leaves of the form `${ <jq> }` are evaluated against
-          `{ issue }`, the matched issue; everything else is copied. Defaults to
-          `{ issue: ${ .issue } }`.
-$defs:
+      github-issues:
+        $ref: '#/$defs/githubIssuesTrigger'
   schedule:
     title: TriggerSchedule
-    description: When the trigger checks its source.
+    description: >-
+      When the trigger gateway checks the source: a cron expression or an interval.
+    oneOf:
+      - $ref: '#/$defs/cronSchedule'
+      - $ref: '#/$defs/intervalSchedule'
+  cronSchedule:
+    title: CronSchedule
+    type: object
+    required: [cron]
+    additionalProperties: false
+    properties:
+      cron:
+        type: string
+        pattern: ^\S+(\s+\S+){4}$
+        description: >-
+          Five-field cron expression (minute, hour, day of month, month, day of week),
+          evaluated in UTC, e.g. `0 2 * * *` for 02:00 UTC every day.
+  intervalSchedule:
+    title: IntervalSchedule
     type: object
     required: [every]
     additionalProperties: false
@@ -78,46 +114,21 @@ $defs:
       seconds:
         type: integer
         minimum: 0
-  issueSource:
-    title: IssueSource
-    description: The issue tracker to ask and which issues match.
+  githubIssuesTrigger:
+    title: GithubIssuesTrigger
+    description: >-
+      Fires once per issue of each git workspace's repository that carries every label in
+      `labels` and is in `state`, asked `every` interval with `token`: the issues token, a platform secret
+      that may read the issues of the workspaces' repositories, never a workspace's agent
+      credential. Pull requests are never reported as issues. The item is the issue.
     type: object
-    required: [integration, issues]
+    required: [every, token]
     additionalProperties: false
+    examples:
+      - labels: [ready-for-agent]
+        every: { minutes: 1 }
+        token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }
     properties:
-      integration:
-        type: string
-        enum: [fake, github]
-        description: >-
-          Which issue tracker answers. `fake` serves the issues listed under `fake`, for
-          tests and demos; `github` asks the GitHub REST API with the settings under
-          `github`.
-      issues:
-        $ref: '#/$defs/issueFilter'
-      fake:
-        $ref: '#/$defs/fakeIssueTracker'
-      github:
-        $ref: '#/$defs/githubIssueTracker'
-    allOf:
-      - if:
-          properties:
-            integration:
-              const: github
-        then:
-          required: [github]
-          properties:
-            github: true
-  issueFilter:
-    title: IssueFilter
-    description: Which issues match. All conditions must hold.
-    type: object
-    required: [repository]
-    additionalProperties: false
-    properties:
-      repository:
-        type: string
-        pattern: ^[^/\s]+/[^/\s]+$
-        description: Repository as `<owner>/<name>`.
       labels:
         type: array
         items:
@@ -128,38 +139,37 @@ $defs:
         type: string
         enum: [open, closed, all]
         description: Defaults to `open`.
-  fakeIssueTracker:
-    title: FakeIssueTracker
-    description: Issues the fake issue tracker serves.
-    type: object
-    additionalProperties: false
-    properties:
-      issues:
-        type: array
-        items:
-          $ref: '#/$defs/issue'
-  githubIssueTracker:
-    title: GithubIssueTracker
-    description: How the `github` issue tracker reaches the repository.
-    type: object
-    required: [token]
-    additionalProperties: false
-    examples:
-      - token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }
-    properties:
+      every:
+        $ref: '#/$defs/duration'
       token:
         $ref: '#/$defs/secretRef'
-        description: >-
-          Token that may read the repository's issues. Pull requests are never reported
-          as issues.
+  item:
+    title: TriggerItem
+    description: >-
+      What a trigger source reports, and what a run's input carries as `item`: a key that
+      is stable across checks, a title and a link, plus whatever else the source knows
+      about it (e.g. an issue's number and body).
+    type: object
+    required: [key, title]
+    additionalProperties: true
+    properties:
+      key:
+        type: string
+        minLength: 1
+        description: Identifies the item across checks; an item starts one run per binding and workspace.
+      title:
+        type: string
+      url:
+        type: string
+        description: Link to the item, if it has one.
   secretRef:
     title: SecretRef
     description: >-
       Reference to a secret the platform holds, so the secret itself never appears in
       configuration. In the laptop profile secrets are environment variables of the
-      platform, set from `deploy/.env`. Platform integrations may only reference
-      platform secrets (`TENDWORKS_PLATFORM_*`), never the agents' or any other variable
-      of the platform (ADR 0008).
+      platform, set from `deploy/.env`. Trigger sources may only reference platform
+      secrets (`TENDWORKS_PLATFORM_*`), never the agents' or any other variable of the
+      platform (ADR 0008).
     type: object
     required: [secretRef]
     additionalProperties: false
@@ -173,29 +183,3 @@ $defs:
             type: string
             pattern: ^TENDWORKS_PLATFORM_[A-Z0-9_]+$
             description: Name of the secret, e.g. `TENDWORKS_PLATFORM_GITHUB_TOKEN`.
-  issue:
-    title: Issue
-    description: An issue as an issue tracker reports it.
-    type: object
-    required: [repository, number, title, state, labels, url]
-    additionalProperties: false
-    properties:
-      repository:
-        type: string
-        description: Repository as `<owner>/<name>`.
-      number:
-        type: integer
-        minimum: 1
-      title:
-        type: string
-      body:
-        type: string
-      state:
-        type: string
-        enum: [open, closed]
-      labels:
-        type: array
-        items:
-          type: string
-      url:
-        type: string

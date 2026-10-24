@@ -23,15 +23,16 @@ export function approvalRequested(request: ApprovalRequest, time: string): Appro
   return { ...envelope(request, "requested", time), type: "dev.tendworks.approval.requested", data: { ...request } };
 }
 
+/** `request` is decided: its `answer` is the label of one of its answers. */
 export function approvalDecided(request: ApprovalRequest, time: string): ApprovalEvents.ApprovalDecidedEvent {
   return {
     ...envelope(request, "decided", time),
     type: "dev.tendworks.approval.decided",
     data: {
       approvalRequest: request.id,
-      decision: request.status === "approved" ? "approve" : "reject",
       action: request.action,
-      ...(request.pullRequest === undefined ? {} : { pullRequest: request.pullRequest }),
+      answer: request.answer!,
+      outcome: request.answers.find((answer) => answer.label === request.answer)!.outcome,
     },
   };
 }

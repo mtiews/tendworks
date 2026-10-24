@@ -1,0 +1,24 @@
+{
+  "name": "@tendworks/trigger-source-github-issues",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Trigger source of kind github-issues (not a domain): the issues of each git workspace's repository on GitHub, read with a read-only platform token. Imports only the trigger source port and platform libraries.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./stub": {
+      "source": "./src/github-api.stub.ts",
+      "types": "./dist/github-api.stub.d.ts",
+      "default": "./dist/github-api.stub.js"
+    }
+  },
+  "dependencies": {
+    "@tendworks/platform": "workspace:*",
+    "@tendworks/shared": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*"
+  }
+}

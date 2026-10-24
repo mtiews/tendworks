@@ -20,7 +20,7 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
     beforeEach(async () => {
       context = await setup();
       // Unique per test, so a shared database needs no cleanup.
-      key = { binding: `binding-${crypto.randomUUID()}`, item: "acme/playground#7" };
+      key = { binding: `binding-${crypto.randomUUID()}`, workspace: "app", item: "acme/playground#7" };
     });
 
     const event = (runId: string, firing = key) =>
@@ -28,7 +28,7 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
         ...firing,
         workflow: "implement-issue",
         runId,
-        issue: { repository: "acme/playground", number: 7, url: "https://issues.example/7" },
+        item: { key: firing.item, title: "Fix the login", url: "https://issues.example/7" },
         time: "2026-10-18T10:00:00.000Z",
         traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       });
@@ -48,6 +48,27 @@ export function describeFiringStore(name: string, setup: () => Promise<FiringSto
       await context.store.claim(key);
 
       expect(await context.store.claim({ ...key, binding: `${key.binding}-other` })).toBe(true);
+    });
+
+    it("keeps keys of different workspaces apart, and a binding without workspaces apart from both", async () => {
+      await context.store.claim(key);
+
+      const { workspace: _workspace, ...withoutWorkspace } = key;
+      expect(await context.store.claim({ ...key, workspace: "web" })).toBe(true);
+      expect(await context.store.claim(withoutWorkspace)).toBe(true);
+      expect(await context.store.claim(withoutWorkspace)).toBe(false);
+    });
+
+    it("releases and records a key without a workspace like any other", async () => {
+      const { workspace: _workspace, ...withoutWorkspace } = key;
+      await context.store.claim(withoutWorkspace);
+      await context.store.release(withoutWorkspace);
+      expect(await context.store.claim(withoutWorkspace)).toBe(true);
+
+      await context.store.fired(withoutWorkspace, "run-1", event("run-1", withoutWorkspace));
+      await context.store.release(withoutWorkspace);
+
+      expect(await context.store.claim(withoutWorkspace)).toBe(false);
     });
 
     it("makes a released claim claimable again", async () => {

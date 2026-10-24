@@ -19,6 +19,17 @@
 // A prompt "mcp:<tool>" calls that tool without arguments on the first HTTP MCP server the
 // session was given (the platform MCP server) and answers with what it returned, or with
 // why the call failed: "mcp <tool>: <text>" or "mcp <tool> failed: <reason>".
+//
+// A prompt that starts with "workspace:" answers with what the checkout in the working
+// directory is: "branch <current branch>" and the first line of its README.md.
+//
+// A prompt "write: <file>" writes <file> into the working directory and answers
+// "wrote <file>", or "cannot write <file>: <reason>" (e.g. on a read-only workspace).
+//
+// A prompt "push: <branch>" pushes the checkout's HEAD to <branch> on its remote and
+// answers "pushed <branch>" or "cannot push <branch>: <git's last line>", followed by
+// "git credential: none" or "git credential: present" (whether the session got one).
+import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -64,6 +75,37 @@ const connection = acp
       await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
       return { stopReason: "end_turn" };
     }
+    if (said.startsWith("workspace:")) {
+      const text = describeCheckout(session.cwd);
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
+    if (said.startsWith("write:")) {
+      const name = said.slice(6).trim();
+      let text;
+      try {
+        writeFileSync(join(session.cwd, name), "written by the scripted agent\n");
+        text = `wrote ${name}`;
+      } catch (error) {
+        text = `cannot write ${name}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
+    if (said.startsWith("push:")) {
+      const branch = said.slice(5).trim();
+      let text;
+      try {
+        execFileSync("git", ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], { cwd: session.cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+        text = `pushed ${branch}`;
+      } catch (error) {
+        const output = String(error?.stderr ?? error?.message ?? error).trim().split("\n").at(-1);
+        text = `cannot push ${branch}: ${output}`;
+      }
+      text += `\ngit credential: ${process.env.TENDWORKS_GIT_PASSWORD ? "present" : "none"}`;
+      await update(ctx, { sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+      return { stopReason: "end_turn" };
+    }
     if (said.startsWith("mcp:")) {
       const tool = said.slice(4).trim();
       const text = await callTool(session.mcpServers, tool).then(
@@ -102,6 +144,17 @@ const connection = acp
   })
   .onNotification(acp.methods.agent.session.cancel, () => cancel())
   .connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(process.stdin)));
+
+/** The checkout in `cwd`: its current branch and the first line of its README, or why there is none. */
+function describeCheckout(cwd) {
+  try {
+    const branch = execFileSync("git", ["branch", "--show-current"], { cwd, encoding: "utf8" }).trim();
+    const readme = existsSync(join(cwd, "README.md")) ? readFileSync(join(cwd, "README.md"), "utf8").split("\n")[0] : "(no README.md)";
+    return `branch ${branch}\n${readme}`;
+  } catch (error) {
+    return `no checkout: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 
 /** Calls a tool on the first HTTP MCP server with one JSON-RPC request (the platform's server is stateless). */
 async function callTool(mcpServers, tool) {

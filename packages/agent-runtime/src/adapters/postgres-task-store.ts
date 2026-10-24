@@ -11,30 +11,28 @@ const ACTIVE = `(task->'status'->>'state') not in (${TERMINAL_STATES.map((state)
 // The agent runtime owns the schema `agent_runtime`; no other domain reads these tables.
 /**
  * The agent runtime's schema, one migration per change (docs/platform-implementation.md,
- * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
- * migrations; its `if not exists` statements adopt such a store with its data.
+ * "Schema migrations").
  */
 export const agentRuntimeMigrations: readonly Migration[] = [
   {
     version: 1,
     name: "initial",
     sql: `
-create schema if not exists agent_runtime;
-create table if not exists agent_runtime.tasks (
+create table agent_runtime.tasks (
   message_id  text primary key,
   task_id     text not null unique,
   agent       text not null,
   started_at  timestamptz not null,
   task        jsonb not null,
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  -- The harness session (e.g. the ACP session id), to resume it after a restart.
+  session     jsonb,
+  -- What kind of work the task is: a run's step (task) or a chat.
+  kind        text not null default 'task'
 );
--- The harness session (e.g. the ACP session id), to resume it after a restart.
-alter table agent_runtime.tasks add column if not exists session jsonb;
--- What kind of work the task is: a run's step (task) or a chat.
-alter table agent_runtime.tasks add column if not exists kind text not null default 'task';
-create index if not exists tasks_kind_started_at on agent_runtime.tasks (kind, started_at desc);
+create index tasks_kind_started_at on agent_runtime.tasks (kind, started_at desc);
 -- The tasks that have not ended: the active agent sessions.
-create index if not exists tasks_active on agent_runtime.tasks (started_at desc) where ${ACTIVE};
+create index tasks_active on agent_runtime.tasks (started_at desc) where ${ACTIVE};
 `,
   },
 ];

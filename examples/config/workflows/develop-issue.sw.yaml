@@ -1,11 +1,9 @@
 # Automated path: the developer agent implements an issue and opens a pull request.
-# Input: { issue: { repository: <owner>/<name>, number, title, body, url } }, as a trigger
-# binding with the default input mapping passes it. The agent works on a checkout of the
-# issue's repository on a branch fixed by the run, so a retry updates the same branch and
-# pull request. The platform then merges the pull request the agent reported, behind the
-# gate of the policies that apply to this workflow (examples/config/policies/); when they
-# ask, the run waits for the decision on the approval request. The run's output holds the
-# pull request and the merge.
+# Input: { workspace: <name>, item: { number, title, body, url, … } }: the workspace by
+# name (kind Workspace) and the issue, as a github-issues trigger binding passes them. The agent works on a checkout of the workspace on a branch fixed by the run, so a
+# retry updates the same branch and pull request. The agent opens the pull request itself
+# with the workspace's credential and reports it as its `pull-request` artifact; the run
+# ends with it. A human reviews and merges in the forge.
 document:
   dsl: '1.0.3'
   namespace: examples
@@ -13,7 +11,7 @@ document:
   version: '0.1.0'
   summary: Hands an issue to the developer agent, which opens a pull request for it.
 input:
-  from: '${ . + { branch: "tendworks/issue-\(.issue.number)-\($workflow.id[0:8])" } }'
+  from: '${ . + { branch: "tendworks/issue-\(.item.number)-\($workflow.id[0:8])" } }'
 do:
   - implement:
       call: a2a
@@ -26,60 +24,20 @@ do:
             parts:
               - kind: text
                 text: >-
-                  ${ "Implement issue #\(.issue.number) of \(.issue.repository): \(.issue.title)\n\n"
-                  + (.issue.body // "(no description)")
-                  + "\n\nIssue: \(.issue.url)\n"
-                  + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.issue.number)." }
+                  ${ "Implement issue #\(.item.number): \(.item.title)\n\n"
+                  + (.item.body // "(no description)")
+                  + "\n\nIssue: \(.item.url)\n"
+                  + "The repository is checked out on branch \(.branch). Push your work to this branch and open a pull request from it that describes the change and references #\(.item.number)." }
             metadata:
               dev.tendworks/workspace:
-                repository: '${ "https://github.com/\(.issue.repository).git" }'
+                name: '${ .workspace }'
                 branch: '${ .branch }'
       output:
         as: >-
           ${ {
-            issue: $input.issue.number,
+            workspace: $input.workspace,
+            issue: $input.item.number,
             branch: $input.branch,
             taskId: .id,
             pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])
           } }
-  # The platform, not the agent, merges: the control plane's merge gate checks that this
-  # run reported the pull request, decides by the policies of this workflow and merges
-  # with the platform's token. A run whose agent reported no pull request fails here with
-  # the reason. When a policy asks, nothing is merged yet and the gate opens an approval
-  # request (merged: false).
-  - merge:
-      call: http
-      with:
-        method: post
-        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
-        body:
-          run: '${ $workflow.id }'
-          pullRequest: '${ .pullRequest }'
-      output:
-        as: '${ $input + { merged: .merged, commit: .commit, decision: .decision, approvalRequest: .approvalRequest.id } }'
-  - merged:
-      switch:
-        - done: { when: '${ .merged }', then: end }
-  # Waits, also across platform restarts, until the approval request is decided.
-  - awaitDecision:
-      listen:
-        to:
-          one:
-            with: { type: dev.tendworks.approval.decided }
-      output:
-        as: '${ $input + { approval: .[0].decision } }'
-  - decided:
-      switch:
-        - approved: { when: '${ .approval == "approve" }', then: mergeApproved }
-        - rejected: { then: end }
-  # The gate now finds the approved request and merges.
-  - mergeApproved:
-      call: http
-      with:
-        method: post
-        endpoint: '${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
-        body:
-          run: '${ $workflow.id }'
-          pullRequest: '${ .pullRequest }'
-      output:
-        as: '${ $input + { merged: .merged, commit: .commit } }'

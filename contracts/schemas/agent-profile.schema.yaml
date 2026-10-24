@@ -88,8 +88,10 @@ properties:
         description: >-
           Environment variables set for the agent inside its sandbox, each from a secret
           the platform holds (ADR 0008). Everything listed here is visible to the agent,
-          so list only secrets meant for it, e.g. a repository token scoped to what the
-          agent may do. A secret that cannot be resolved fails the task with its name.
+          so list only secrets meant for it, e.g. a key for a service the agent's tools
+          call. Repository credentials belong to workspaces (ADR 0022), not to profiles, so
+          a profile works with every workspace. A secret that cannot be resolved fails the
+          task with its name.
         propertyNames:
           pattern: ^[A-Z_][A-Z0-9_]*$
         additionalProperties:
@@ -100,8 +102,7 @@ $defs:
     description: >-
       Allows chats with the profile (ADR 0015): a human can start an agent session with it
       directly and lead it turn by turn. Without it the profile only takes tasks from
-      workflows, so nobody can steer an agent with push rights past workflow and merge
-      gate. Give it only to profiles whose credentials keep a chat inside its workspace.
+      workflows, so nobody can steer an agent with push rights past its workflow. Give it only to profiles whose credentials keep a chat inside its workspace.
     type: object
     additionalProperties: false
     properties:

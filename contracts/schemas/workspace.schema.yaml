@@ -1,0 +1,170 @@
+$id: https://tendworks.dev/schemas/v1/schemas/workspace.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Workspace
+description: >-
+  A workspace agents work in, declared once and referred to by name (ADR 0022): workflows
+  name it in the `dev.tendworks/workspace` metadata of an agent task
+  (contracts/schemas/a2a.schema.yaml#/$defs/workspace). A `git` workspace is a repository
+  on any git host, cloned in the agent's sandbox with the workspace's own credential. A
+  `directory` workspace is a directory on the sandbox host under one of the roots the
+  operator allows (`TEND_WORKSPACE_ROOTS`), bound into the agent's sandbox.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: Workspace
+  metadata:
+    type: object
+    title: WorkspaceMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        $ref: '#/$defs/workspaceName'
+  spec:
+    title: WorkspaceSpec
+    description: Exactly one of `git` and `directory`; only a `git` workspace has credentials.
+    type: object
+    additionalProperties: false
+    properties:
+      git:
+        $ref: '#/$defs/gitWorkspace'
+      directory:
+        $ref: '#/$defs/directoryWorkspace'
+      credentials:
+        $ref: '#/$defs/workspaceCredentials'
+      assistant:
+        $ref: '#/$defs/workspaceAssistant'
+    oneOf:
+      - title: DirectoryWorkspaceSpec
+        required: [directory]
+        properties:
+          directory: true
+          credentials: false
+      - title: GitWorkspaceSpec
+        required: [git]
+        properties:
+          git: true
+$defs:
+  workspaceName:
+    title: WorkspaceName
+    type: string
+    pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+    description: Name workflows, trigger bindings and chats refer to the workspace by.
+  gitWorkspace:
+    title: GitWorkspace
+    description: >-
+      A git repository. The agent runtime clones it into the sandbox's workspace, then
+      checks out the branch the workflow asks for (created from `defaultBranch` when the
+      remote does not have it yet), or stays on `defaultBranch`.
+    type: object
+    required: [url, defaultBranch]
+    additionalProperties: false
+    examples:
+      - url: https://git.example/acme/app.git
+        defaultBranch: main
+    properties:
+      url:
+        type: string
+        maxLength: 2048
+        # http(s) without user name or password in the URL (the credential is a secret
+        # reference), or a file URL of a repository inside the sandbox image.
+        pattern: ^(?:https?://[^/@\s]+(?:/\S*)?|file:///\S+)$
+        description: >-
+          Clone URL: `https://` or `http://` without credentials in it, or `file:///` for a
+          repository the sandbox image carries. A workspace with `credentials` needs
+          `https://`; the configuration refuses it with another URL when it loads.
+      defaultBranch:
+        type: string
+        pattern: ^[^-\s]\S*$
+        description: The branch new branches start from, and the one checked out when a task asks for none.
+  directoryWorkspace:
+    title: DirectoryWorkspace
+    description: >-
+      A directory on the sandbox host, bound into the sandbox's workspace, read-write or
+      read-only as the session asks (e.g. read-only for a read-only assistant). It must
+      lie strictly under one of the roots in `TEND_WORKSPACE_ROOTS`, also after resolving
+      `..` and symbolic links; anything else is refused when the configuration loads and
+      again before each session. Only one agent session at a time works in a directory.
+    type: object
+    required: [path]
+    additionalProperties: false
+    examples:
+      - path: /srv/tendworks/workspaces/app
+    properties:
+      path:
+        type: string
+        minLength: 2
+        maxLength: 4096
+        description: Absolute path of the directory on the sandbox host, strictly under a workspace root.
+  workspaceAssistant:
+    title: WorkspaceAssistant
+    description: >-
+      The workspace assistant (ADR 0022): a chat about the workspace's contents, started by
+      the workspace's name (`POST /chats` with `workspace`, `tend chat --workspace <name>`).
+      Read-only by default: a git credential is used only for the checkout and never reaches
+      the agent session, so it cannot push, and a directory is bound read-only. With
+      `write: true` the session gets the credential and works on the branch
+      `tendworks/chat-<chat id>`, and a directory is writable.
+    type: object
+    additionalProperties: false
+    examples:
+      - enabled: true
+      - enabled: true
+        profile: app-assistant
+        write: true
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        description: Whether chats with the workspace's assistant may start; without it the workspace has none.
+      profile:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        default: workspace-assistant
+        description: >-
+          The agent profile the assistant is held with; it must allow chats (`spec.chat`). It
+          gets the platform MCP server only when it lists it (`mcp: [tendworks]`).
+      write:
+        type: boolean
+        default: false
+        description: Whether the assistant may change the workspace (push to its chat branch, write to the directory).
+  workspaceCredentials:
+    title: WorkspaceCredentials
+    description: >-
+      The workspace's credential, its own agent secret (ADR 0008), so each repository can
+      have a token scoped to it. git uses it through a credential helper for the
+      repository's host only. The agent session also sees it under `env` when set, e.g.
+      `GH_TOKEN` for a forge's command line tool.
+    type: object
+    required: [secretRef]
+    additionalProperties: false
+    examples:
+      - secretRef: { name: TENDWORKS_AGENT_APP_TOKEN }
+        env: GH_TOKEN
+    properties:
+      secretRef:
+        type: object
+        required: [name]
+        additionalProperties: false
+        properties:
+          name:
+            type: string
+            pattern: ^TENDWORKS_AGENT_[A-Z0-9_]+$
+            description: Name of the agent secret, e.g. `TENDWORKS_AGENT_APP_TOKEN`.
+      username:
+        type: string
+        pattern: ^[^\s:]+$
+        default: x-access-token
+        description: >-
+          User name git sends with the token. Hosts that accept any user name with a token
+          need none; others want the account or a fixed name.
+      env:
+        type: string
+        pattern: ^[A-Z_][A-Z0-9_]*$
+        description: >-
+          Environment variable under which the agent session sees the credential. Without
+          it, only git reaches the credential.

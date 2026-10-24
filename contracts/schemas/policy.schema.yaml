@@ -2,11 +2,11 @@ $id: https://tendworks.dev/schemas/v1/schemas/policy.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: Policy
 description: >-
-  Decides when a gate applies. When a run asks the platform to perform a gated action,
-  human interaction evaluates every policy that applies to the run's workflow to `allow`
-  (perform the action) or `ask` (an approval request decides first); the strictest
-  decision wins, and the action is refused when no policy applies. The run cannot pick
-  the policy. For now the only gated action is merging a pull request.
+  Decides per action name and workflow whether a workflow's human step (`call: approval`)
+  proceeds right away (`allow`) or asks the human first (`ask`), ADR 0024. Human
+  interaction evaluates every policy that applies to the run's workflow and names the
+  step's action; the strictest decision wins, and the platform asks when no policy
+  applies. The run cannot pick the policy.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -24,11 +24,11 @@ properties:
       name:
         type: string
         pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
-        description: Name of the policy, e.g. in approval requests it caused.
+        description: Name of the policy, e.g. in the approval requests it caused.
   spec:
     title: PolicySpec
     type: object
-    required: [merge]
+    required: [actions]
     additionalProperties: false
     properties:
       workflows:
@@ -40,18 +40,22 @@ properties:
         description: >-
           Names of the workflows (`document.name`) the policy applies to. Without it the
           policy applies to every workflow.
-      merge:
-        type: string
-        enum: [auto, ask]
+      actions:
+        type: object
+        title: PolicyActions
         description: >-
-          How a pull request is merged. `auto`: the platform merges it as soon as the
-          workflow asks. `ask`: an approval request is created first and the merge waits
-          for its decision.
+          The decision per action name of a human step, e.g. `merge-pull-request: allow`.
+          Actions not named here are not decided by this policy.
+        minProperties: 1
+        propertyNames:
+          pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        additionalProperties:
+          $ref: '#/$defs/decision'
 $defs:
   decision:
     title: PolicyDecision
     description: >-
-      What a policy decides for a gated action. `allow`: perform it. `ask`: an approval
-      request decides first.
+      What a policy decides for a human step's action. `allow`: the step proceeds without
+      asking. `ask`: an approval request decides first.
     type: string
     enum: [allow, ask]

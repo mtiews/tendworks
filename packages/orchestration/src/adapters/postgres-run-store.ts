@@ -11,16 +11,14 @@ export interface SqlTransaction {
 // Orchestration owns the schema `orchestration`; no other domain reads these tables.
 /**
  * Orchestration's schema, one migration per change (docs/platform-implementation.md,
- * "Schema migrations"). Migration 1 is the schema as the store created it before versioned
- * migrations; its `if not exists` statements adopt such a store with its data.
+ * "Schema migrations").
  */
 export const orchestrationMigrations: readonly Migration[] = [
   {
     version: 1,
     name: "initial",
     sql: `
-create schema if not exists orchestration;
-create table if not exists orchestration.runs (
+create table orchestration.runs (
   position    bigserial unique,
   id          text primary key,
   workflow    text not null,
@@ -30,9 +28,11 @@ create table if not exists orchestration.runs (
   error       jsonb,
   created_at  timestamptz not null,
   started_at  timestamptz,
-  finished_at timestamptz
+  finished_at timestamptz,
+  traceparent text,
+  started_by  jsonb
 );
-create table if not exists orchestration.steps (
+create table orchestration.steps (
   run_id      text not null references orchestration.runs (id) on delete cascade,
   reference   text not null,
   position    bigserial,
@@ -42,15 +42,13 @@ create table if not exists orchestration.steps (
   error       jsonb,
   started_at  timestamptz not null,
   finished_at timestamptz,
+  transcript  text,
+  cost        jsonb,
+  artifacts   jsonb,
+  workspace   jsonb,
   primary key (run_id, reference)
 );
-alter table orchestration.steps add column if not exists transcript text;
-alter table orchestration.steps add column if not exists cost jsonb;
-alter table orchestration.steps add column if not exists artifacts jsonb;
-alter table orchestration.runs add column if not exists traceparent text;
-alter table orchestration.steps add column if not exists workspace jsonb;
-alter table orchestration.runs add column if not exists started_by jsonb;
-create table if not exists orchestration.outbox (
+create table orchestration.outbox (
   position   bigserial primary key,
   id         text not null unique,
   type       text not null,

@@ -12,7 +12,7 @@ type Service = {
   networks?: string[];
   network_mode?: string;
   command?: string[];
-  volumes?: string[];
+  volumes?: (string | { source: string })[];
   depends_on?: Record<string, { condition: string }>;
 };
 const read = (path: string) => readFileSync(new URL(`../../deploy/${path}`, import.meta.url), "utf8");
@@ -28,8 +28,17 @@ const withEnvFile = Object.entries(compose.services)
 /** Every variable an operator may set in deploy/.env (deploy/.env.example). */
 const operatorVariables = Object.fromEntries([...read(".env.example").matchAll(/^#? ?([A-Z][A-Z0-9_]*)=/gm)].map((match) => [match[1], "value"]));
 
-it("never gives the platform's repository token to the worker, which starts the sandboxes", () => {
+it("never gives the platform's issue tracker token to the worker, which starts the sandboxes", () => {
   expect(environment("worker")).not.toContain("TENDWORKS_PLATFORM_GITHUB_TOKEN");
+});
+
+it("gives platform secrets, such as the Pushover token and user key, to the server only", () => {
+  const platformSecrets = (service: string) => environment(service).filter((name) => name.startsWith("TENDWORKS_PLATFORM_"));
+
+  expect(platformSecrets("server")).toEqual(expect.arrayContaining(["TENDWORKS_PLATFORM_PUSHOVER_TOKEN", "TENDWORKS_PLATFORM_PUSHOVER_USER"]));
+  for (const service of Object.keys(compose.services).filter((name) => name !== "server")) expect(platformSecrets(service), service).toEqual([]);
+  // deploy/.env.example offers them, as platform secrets an agent profile cannot reference.
+  expect(Object.keys(operatorVariables)).toEqual(expect.arrayContaining(["TENDWORKS_PLATFORM_PUSHOVER_TOKEN", "TENDWORKS_PLATFORM_PUSHOVER_USER"]));
 });
 
 it("hands deploy/.env as a whole only to the agent secrets exporter, which reaches no network", () => {
@@ -47,7 +56,7 @@ it("gives agent secrets only to the worker, which reads them from the exporter's
   expect(compose.services.worker?.volumes).toContain("agent-secrets:/var/lib/tendworks/agent-secrets:ro");
   expect(compose.services.worker?.environment?.TEND_AGENT_SECRETS_FILE).toBe("/var/lib/tendworks/agent-secrets/agent-secrets.json");
   expect(compose.services.worker?.depends_on?.["agent-secrets"]).toEqual({ condition: "service_completed_successfully" });
-  expect(compose.services.server?.volumes?.filter((volume) => volume.startsWith("agent-secrets:"))).toEqual([]);
+  expect(compose.services.server?.volumes?.filter((volume) => (typeof volume === "string" ? volume : volume.source).startsWith("agent-secrets"))).toEqual([]);
   expect(environment("server").filter((name) => name.startsWith("TENDWORKS_AGENT_"))).toEqual([]);
 });
 
@@ -58,7 +67,7 @@ it("lets agent profiles reference only the agent secrets of deploy/.env", () => 
 });
 
 it("never lets an agent profile hand the worker's API token into a sandbox", () => {
-  // The worker holds the token for the merge step; a sandbox only gets the harness
+  // The worker holds the token for its `call: http` tasks; a sandbox only gets the harness
   // credential and what agent profiles reference, which resolves to agent secrets only.
   expect(environment("worker")).toContain("TEND_API_TOKEN");
   const worker = Object.fromEntries(environment("worker").map((name) => [name, "value"]));

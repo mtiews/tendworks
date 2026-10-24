@@ -1,19 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type AgentRuntimePort } from "./index.js";
+import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration, type AgentRuntimePort } from "./index.js";
 
 const profile = (name: string) => ({ apiVersion: "tendworks.dev/v1" as const, kind: "AgentProfile" as const, metadata: { name }, spec: { harness: "fake" as const } });
 
 function setup(agentRuntime: AgentRuntimePort | "none" = createInMemoryAgentRuntime({ chatAgents: ["assistant"] })) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: {
-      workflowNames: [],
-      workflow: () => undefined,
-      agentProfiles: [profile("developer"), profile("assistant")],
-      triggerBindings: [],
-      policies: [],
-      pullRequestIntegrations: [],
-    },
+    configuration: emptyConfiguration({ agentProfiles: [profile("developer"), profile("assistant")] }),
     runs: createInMemoryRuns(),
     ...(agentRuntime === "none" ? {} : { agentRuntime }),
     apiToken: "test-token",
@@ -97,18 +90,13 @@ describe("agents API: chat settings and MCP servers", () => {
   it("shows a profile's chat settings with their defaults and its MCP servers, and leaves them out where the profile has none", async () => {
     const api = createControlPlaneApi({
       probes: [],
-      configuration: {
-        workflowNames: [],
-        workflow: () => undefined,
+      configuration: emptyConfiguration({
         agentProfiles: [
           { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "assistant" }, spec: { harness: "fake", chat: { idleMinutes: 10 }, mcp: ["tendworks"] } },
           { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "chatty" }, spec: { harness: "fake", chat: {} } },
           profile("developer"),
         ],
-        triggerBindings: [],
-        policies: [],
-        pullRequestIntegrations: [],
-      },
+      }),
       runs: createInMemoryRuns(),
       apiToken: "test-token",
     });

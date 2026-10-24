@@ -5,6 +5,7 @@ import {
   createControlPlaneApi,
   createInMemoryAgentRuntime,
   createInMemoryRuns,
+  emptyConfiguration,
   type AgentRuntimePort,
   type Run,
   type TranscriptEntry,
@@ -30,7 +31,7 @@ function setup(agentRuntime?: AgentRuntimePort) {
   runs.runs.set(running.id, running);
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs,
     ...(agentRuntime ? { agentRuntime } : {}),
     apiToken: "test-token",
@@ -95,7 +96,7 @@ describe("transcripts API: following a step live", () => {
     runs.runs.set(running.id, running);
     const api = createControlPlaneApi({
       probes: [],
-      configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+      configuration: emptyConfiguration(),
       runs,
       ...(agentRuntime ? { agentRuntime } : {}),
       apiToken: "test-token",

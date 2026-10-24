@@ -14,7 +14,19 @@ name: tendworks
 # and the worker, which fills the pin into sandbox templates that name the image by its
 # repository alone, both read this value.
 x-sandbox-images:
-  claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-1
+  claude-code: &sandbox-claude-code-image tendworks/sandbox-claude-code:0.85.1-2
+
+# The workspace root (TEND_WORKSPACE_ROOTS, ADR 0022), mounted read-only into server and
+# worker at the same path as on the host: both check that a directory workspace lies under
+# it after resolving symbolic links and `..`, and the worker binds the real path into the
+# sandbox. Sandboxes reach only the workspace's own directory, never the root. The stack
+# mounts one root; without one, an empty directory stands in and nothing is allowed. (Server
+# and worker accept several roots separated by `:`, for deployments that mount each one.)
+x-workspace-root: &workspace-root
+  type: bind
+  source: ${TEND_WORKSPACE_ROOTS:-./no-workspace-roots}
+  target: ${TEND_WORKSPACE_ROOTS:-/no-workspace-roots}
+  read_only: true
 
 services:
   postgres:
@@ -106,17 +118,24 @@ services:
       TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_WORKER_URL: http://worker:8081
       TEND_CONFIG_DIR: /config
-      # Platform token: trigger bindings reference it (secretRef) to poll GitHub, and the
-      # merge gate merges pull requests on github.com with it. Never in a sandbox.
+      # Issues token: github-issues trigger bindings reference it (secretRef) to read
+      # GitHub issues. Read access only; never in a sandbox.
       TENDWORKS_PLATFORM_GITHUB_TOKEN: ${TENDWORKS_PLATFORM_GITHUB_TOKEN:-}
+      # Platform secrets of Pushover notification channels (ADR 0025): the application's
+      # token and the user key. Never in a sandbox.
+      TENDWORKS_PLATFORM_PUSHOVER_TOKEN: ${TENDWORKS_PLATFORM_PUSHOVER_TOKEN:-}
+      TENDWORKS_PLATFORM_PUSHOVER_USER: ${TENDWORKS_PLATFORM_PUSHOVER_USER:-}
       # API token: every operation but GET /status needs a token, operations that change
       # state need this one (ADR 0014 (interim-bearer-token-on-the-control-plane-api)).
       # The read-only token is accepted for reading only (ADR 0016 (chat-agents-read-the-platform-through-mcp-with-a-read-only-token)).
       # There are no defaults: the server refuses to start without both (scripts/setup-env.sh).
       TEND_API_TOKEN: ${TEND_API_TOKEN:-}
       TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
+      # Directory workspaces must lie under this root (ADR 0022); the server refuses others at startup.
+      TEND_WORKSPACE_ROOTS: ${TEND_WORKSPACE_ROOTS:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      - *workspace-root
     ports:
       - "127.0.0.1:${TEND_PORT:-8080}:8080"
     depends_on:
@@ -162,7 +181,7 @@ services:
       TEND_POSTGRES_PASSWORD: ${TEND_POSTGRES_PASSWORD:-}
       TEND_CONFIG_DIR: /config
       TEND_TRANSCRIPT_DIR: /var/lib/tendworks/transcripts
-      # Workflows reach the control plane API (and only it) from here, e.g. the merge step,
+      # Workflows reach the control plane API (and only it) from here with `call: http`,
       # with the API token. The token is no agent secret, so it never enters a sandbox.
       TEND_CONTROL_PLANE_URL: http://server:8080
       TEND_API_TOKEN: ${TEND_API_TOKEN:-}
@@ -189,12 +208,16 @@ services:
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
-      # Secrets agent profiles pass into sandboxes (spec.env): every TENDWORKS_AGENT_*
+      # Secrets workspaces (credentials) and agent profiles (spec.env) pass into sandboxes: every TENDWORKS_AGENT_*
       # variable of deploy/.env, read from the file agent-secrets writes, again at every
       # reference. Only TENDWORKS_AGENT_* resolve; platform secrets never get here.
       TEND_AGENT_SECRETS_FILE: /var/lib/tendworks/agent-secrets/agent-secrets.json
+      # Directory workspaces (ADR 0022): only directories under this root are bound into
+      # sandboxes, after resolving links and `..` against the root mounted below.
+      TEND_WORKSPACE_ROOTS: ${TEND_WORKSPACE_ROOTS:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
+      - *workspace-root
       # Transcripts of agent sessions, kept outside the sandboxes.
       - transcripts:/var/lib/tendworks/transcripts
       - agent-secrets:/var/lib/tendworks/agent-secrets:ro

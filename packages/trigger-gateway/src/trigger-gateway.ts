@@ -1,120 +1,149 @@
 import { createSecretResolver, newTraceparent, type SecretResolver } from "@tendworks/platform";
-import type { TriggerBinding, TriggerGateway as Contract } from "@tendworks/shared";
-import type { FiringStore } from "./firings/firing-store.js";
-import { mapInput } from "./input.js";
-import type { Issue, IssueSource, IssueTracker } from "./issues/issue-tracker.js";
-import { issueTrackerFor } from "./issues/issue-tracker-for.js";
+import type { TriggerBinding, TriggerGateway as Contract, Workspace } from "@tendworks/shared";
+import type { FiringKey, FiringStore } from "./firings/firing-store.js";
 import type { RunStarter } from "./runs.js";
-import { nextExecution } from "./schedule.js";
+import { checkSchedule, latestExecution, nextExecution } from "./schedule.js";
+import type { TriggerItem, TriggerKind, TriggerSettings, TriggerSource, TriggerSourceContext, TriggerSourceFactory, TriggerSources } from "./sources/trigger-source.js";
 import { triggerFired } from "./trigger-events.js";
 
 export type Trigger = Contract.components["schemas"]["trigger"];
 
 export interface TriggerGatewayOptions {
   bindings: TriggerBinding.TriggerBinding[];
+  /** The configured workspaces; bindings refer to them by name. */
+  workspaces?: Workspace.Workspace[];
+  /**
+   * The trigger sources deployed with the platform, by trigger kind (ADR 0023). The
+   * gateway knows sources only through this registry; the server bundle passes it in.
+   */
+  sources: TriggerSources;
   store: FiringStore;
   runs: RunStarter;
-  /** Resolves the secret references of bindings: only platform secrets. Without it none resolves. */
+  /** Resolves the secret references of sources: only platform secrets. Without it none resolves. */
   secrets?: SecretResolver;
-  /** Resolves a binding's source to its issue tracker; defaults to the built-in integrations. */
-  issueTrackers?: (source: IssueSource) => IssueTracker;
   now?: () => Date;
   /** Where scheduled checks report what they did; defaults to the console. */
   log?: (line: string) => void;
 }
 
-/** What one check of a binding did, per matching issue it had not fired for yet. */
+/** What one check of a binding did, per workspace and item it had not fired for yet. */
 export interface CheckResult {
-  fired: { issue: string; runId: string }[];
-  /** Issues whose run could not be started; the next check retries them. */
-  failed: { issue: string; error: string }[];
+  fired: { workspace?: string; item: string; runId: string }[];
+  /**
+   * Workspaces whose source could not be asked (no `item`), and items whose run could not
+   * be started; the next check retries both.
+   */
+  failed: { workspace?: string; item?: string; error: string }[];
 }
 
 export interface TriggerGateway {
   /**
-   * Asks the binding's source once and starts a run for every new match. Records how
-   * the check went, also when it fails (and then rejects).
+   * Asks the binding's source once per workspace, for the execution at or before now, and
+   * starts a run for every new (workspace, item). Records how the check went.
    */
   check(binding: string): Promise<CheckResult>;
   /** The bindings, ordered by name, with their next scheduled execution and how their last check went. */
   triggers(): Promise<Trigger[]>;
-  /** Checks every binding at its scheduled executions until {@link stop}. */
+  /** Checks every binding that is not suspended at its scheduled executions until {@link stop}. */
   start(): void;
   /** Stops scheduling and waits for running checks. */
   stop(): Promise<void>;
 }
 
-const DEFAULT_INPUT = { issue: "${ .issue }" };
 /** setTimeout cannot wait longer; a later execution is reached in several waits. */
 const MAX_TIMER_MS = 2 ** 31 - 1;
 
+interface Bound {
+  binding: TriggerBinding.TriggerBinding;
+  kind: string;
+  source: TriggerSource;
+}
+
+/**
+ * Creates the trigger gateway. Throws when a binding's trigger kind has no deployed
+ * source, the source refuses the binding (e.g. its workspaces) or its schedule cannot be
+ * read, so such a binding stops the start.
+ */
 export function createTriggerGateway({
   bindings,
+  workspaces = [],
+  sources,
   store,
   runs,
   secrets = createSecretResolver("platform", {}),
-  issueTrackers = (source) => issueTrackerFor(source, { secrets }),
   now = () => new Date(),
   log = (line) => console.info(line),
 }: TriggerGatewayOptions): TriggerGateway {
-  const byName = new Map(bindings.map((binding) => [binding.metadata.name, binding]));
+  const workspacesByName = new Map(workspaces.map((workspace) => [workspace.metadata.name, workspace]));
+  const byName = new Map(bindings.map((binding) => [binding.metadata.name, bind(binding, sources, secrets, workspacesByName)]));
   const timers = new Map<string, NodeJS.Timeout>();
   const running = new Map<string, Promise<unknown>>();
   let started = false;
 
-  async function check(name: string): Promise<CheckResult> {
-    const binding = byName.get(name);
-    if (!binding) throw new Error(`unknown trigger binding '${name}'`);
+  async function check(name: string, execution?: Date): Promise<CheckResult> {
+    const bound = byName.get(name);
+    if (!bound) throw new Error(`unknown trigger binding '${name}'`);
     const at = now().toISOString();
     let result: CheckResult;
     try {
-      result = await evaluate(name, binding);
+      result = await evaluate(name, bound, execution ?? latestExecution(bound.source.schedule, now()));
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      await store.recordEvaluation(name, { at, status: "failed", startedRuns: 0, message });
+      await store.recordEvaluation(name, { at, status: "failed", startedRuns: 0, message: errorMessage(error) });
       throw error;
     }
     const { fired, failed } = result;
-    const message = failed.map(({ issue, error }) => `${issue} could not start a run: ${error}`).join("; ");
+    const message = failed.map(describeFailure).join("; ");
     await store.recordEvaluation(name, { at, status: failed.length > 0 ? "failed" : "succeeded", startedRuns: fired.length, ...(message ? { message } : {}) });
     return result;
   }
 
-  async function evaluate(name: string, binding: TriggerBinding.TriggerBinding): Promise<CheckResult> {
-    const { source, workflow, input = DEFAULT_INPUT } = binding.spec;
-    const issues = await issueTrackers(source).findIssues(source.issues);
+  async function evaluate(name: string, { binding, source }: Bound, execution: Date): Promise<CheckResult> {
+    const { workflow, workspaces: names } = binding.spec;
     const result: CheckResult = { fired: [], failed: [] };
-    for (const issue of issues) {
-      const key = { binding: name, item: itemKey(issue) };
-      if (!(await store.claim(key))) continue;
-      // A firing starts a trace; the run and all its events belong to it.
-      const traceparent = newTraceparent();
-      const reference = { repository: issue.repository, number: issue.number, title: issue.title, url: issue.url };
-      let runId: string;
+    // Without workspaces the binding is asked once, for no workspace.
+    for (const workspaceName of names?.length ? names : [undefined]) {
+      const workspace = workspaceName === undefined ? undefined : workspacesByName.get(workspaceName);
+      const scope = workspaceName === undefined ? {} : { workspace: workspaceName };
+      let items: TriggerItem[];
       try {
-        const startedBy = { kind: "trigger" as const, binding: name, issue: reference };
-        runId = (await runs.start({ workflow, input: mapInput(input, { issue }) as Record<string, unknown>, traceparent, startedBy })).id;
+        if (workspaceName !== undefined && !workspace) throw new Error(`no workspace '${workspaceName}' is configured`);
+        items = await source.items({ at: execution, ...(workspace ? { workspace } : {}) });
       } catch (error) {
-        await store.release(key);
-        result.failed.push({ issue: key.item, error: error instanceof Error ? error.message : String(error) });
+        result.failed.push({ ...scope, error: errorMessage(error) });
         continue;
       }
-      // From here on the run exists: the claim is never released again, so no second run starts.
-      await store.fired(key, runId, triggerFired({ ...key, workflow, runId, issue: reference, time: now().toISOString(), traceparent }));
-      result.fired.push({ issue: key.item, runId });
+      for (const item of items) {
+        const key: FiringKey = { binding: name, ...scope, item: item.key };
+        if (!(await store.claim(key))) continue;
+        // A firing starts a trace; the run and all its events belong to it.
+        const traceparent = newTraceparent();
+        const reference = { key: item.key, title: item.title, ...(item.url === undefined ? {} : { url: item.url }) };
+        let runId: string;
+        try {
+          const startedBy = { kind: "trigger" as const, binding: name, ...scope, item: reference };
+          runId = (await runs.start({ workflow, input: { ...scope, item: structuredClone(item) }, traceparent, startedBy })).id;
+        } catch (error) {
+          await store.release(key);
+          result.failed.push({ ...scope, item: item.key, error: errorMessage(error) });
+          continue;
+        }
+        // From here on the run exists: the claim is never released again, so no second run starts.
+        await store.fired(key, runId, triggerFired({ binding: name, ...scope, workflow, runId, item: reference, time: now().toISOString(), traceparent }));
+        result.fired.push({ ...scope, item: item.key, runId });
+      }
     }
     return result;
   }
 
   // One check per binding at a time; an execution that finds the previous one still running is skipped.
-  async function scheduledCheck(name: string): Promise<void> {
+  async function scheduledCheck(name: string, execution: Date): Promise<void> {
     if (running.has(name)) return;
-    const done = check(name).then(
+    const done = check(name, execution).then(
       ({ fired, failed }) => {
-        for (const { issue, runId } of fired) log(`trigger ${name}: ${issue} started run ${runId}`);
-        for (const { issue, error } of failed) log(`trigger ${name}: ${issue} could not start a run, retrying next time: ${error}`);
+        for (const { workspace, item, runId } of fired) log(`trigger ${name}: ${workspace === undefined ? "" : `workspace ${workspace}: `}${item} started run ${runId}`);
+        for (const failure of failed) log(`trigger ${name}: ${describeFailure(failure)}`);
       },
-      (error: unknown) => log(`trigger ${name}: check failed: ${error instanceof Error ? error.message : String(error)}`),
+      (error: unknown) => log(`trigger ${name}: check failed: ${errorMessage(error)}`),
     );
     running.set(name, done);
     await done;
@@ -126,23 +155,25 @@ export function createTriggerGateway({
     const wait = at.getTime() - now().getTime();
     const timer = setTimeout(() => {
       if (wait > MAX_TIMER_MS) return schedule(name, at);
-      void scheduledCheck(name).then(() => schedule(name, nextExecution(byName.get(name)!.spec.schedule, now())));
+      void scheduledCheck(name, at).then(() => schedule(name, nextExecution(byName.get(name)!.source.schedule, now())));
     }, Math.max(0, Math.min(wait, MAX_TIMER_MS)));
     timers.set(name, timer);
   }
 
   return {
-    check,
+    check: (name) => check(name),
     async triggers() {
       const evaluations = await store.lastEvaluations();
       return [...byName.values()]
-        .map(({ metadata, spec }) => {
+        .map(({ binding: { metadata, spec }, kind, source }) => {
           const lastEvaluation = evaluations.get(metadata.name);
           return {
             name: metadata.name,
             workflow: spec.workflow,
-            schedule: structuredClone(spec.schedule),
-            nextExecutionAt: nextExecution(spec.schedule, now()).toISOString(),
+            kind,
+            workspaces: [...(spec.workspaces ?? [])],
+            schedule: structuredClone(source.schedule),
+            nextExecutionAt: nextExecution(source.schedule, now()).toISOString(),
             ...(spec.suspend ? { suspended: true } : {}),
             ...(lastEvaluation ? { lastEvaluation } : {}),
           };
@@ -152,8 +183,8 @@ export function createTriggerGateway({
     start() {
       if (started) return;
       started = true;
-      for (const [name, binding] of byName) {
-        if (!binding.spec.suspend) schedule(name, nextExecution(binding.spec.schedule, now()));
+      for (const [name, { binding, source }] of byName) {
+        if (!binding.spec.suspend) schedule(name, nextExecution(source.schedule, now()));
       }
     },
     async stop() {
@@ -165,4 +196,49 @@ export function createTriggerGateway({
   };
 }
 
-const itemKey = (issue: Issue) => `${issue.repository}#${issue.number}`;
+/**
+ * The binding's trigger source, created by the factory its trigger kind selects with the
+ * binding's configured workspaces. A workspace that is not configured is left out here;
+ * its checks fail.
+ */
+function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, secrets: SecretResolver, workspaces: ReadonlyMap<string, Workspace.Workspace>): Bound {
+  const name = binding.metadata.name;
+  const [kind, settings] = Object.entries(binding.spec.trigger)[0] ?? [];
+  if (kind === undefined) throw new Error(`trigger binding '${name}' has no trigger`);
+  if (!isDeployed(kind, sources)) {
+    const deployed = Object.keys(sources).sort().join(", ") || "none";
+    throw new Error(`trigger binding '${name}' has a trigger of kind '${kind}', but no trigger source '${kind}' is deployed (deployed: ${deployed})`);
+  }
+  const bound = (binding.spec.workspaces ?? []).flatMap((workspace) => workspaces.get(workspace) ?? []);
+  let source: TriggerSource;
+  try {
+    source = createSource(kind, settings, sources, { secrets, workspaces: bound });
+    checkSchedule(source.schedule);
+  } catch (error) {
+    throw new Error(`trigger binding '${name}': ${errorMessage(error)}`, { cause: error });
+  }
+  return { binding, kind, source };
+}
+
+/** Whether a factory is deployed for `kind`. */
+function isDeployed(kind: string, sources: TriggerSources): kind is TriggerKind {
+  return Object.hasOwn(sources, kind) && sources[kind as TriggerKind] !== undefined;
+}
+
+/**
+ * The source the factory of `kind` creates from a binding's settings. The binding schema
+ * has validated the settings for their kind when the configuration loaded; this is where
+ * that check becomes their type.
+ */
+function createSource<K extends TriggerKind>(kind: K, settings: unknown, sources: TriggerSources, context: TriggerSourceContext): TriggerSource {
+  const create: TriggerSourceFactory<TriggerSettings[K]> | undefined = sources[kind];
+  if (!create) throw new Error(`no trigger source '${kind}' is deployed`);
+  return create(settings as TriggerSettings[K], context);
+}
+
+function describeFailure({ workspace, item, error }: CheckResult["failed"][number]): string {
+  const scope = workspace === undefined ? "" : `workspace ${workspace}: `;
+  return `${scope}${item === undefined ? "could not ask the source" : `${item} could not start a run`}: ${error}`;
+}
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));

@@ -33,8 +33,8 @@ paths:
                 $ref: "../schemas/chat.schema.yaml#/$defs/chat"
         "400":
           description: >-
-            The body is invalid, no such agent profile is configured, the profile does not
-            allow chats, or the repository is no clone URL reachable without credentials.
+            The body is invalid, no such agent profile or workspace is configured, the
+            profile does not allow chats, or the workspace has no enabled assistant.
           content:
             application/json:
               schema:

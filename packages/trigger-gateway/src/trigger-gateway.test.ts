@@ -1,62 +1,83 @@
-import type { TriggerBinding } from "@tendworks/shared";
+import type { TriggerBinding, Workspace } from "@tendworks/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "./index.js";
+import {
+  createFakeTriggerSource,
+  fakeTriggerBinding,
+  type FakeTriggerSettings,
+  createInMemoryFiringStore,
+  createInMemoryRunStarter,
+  createTriggerGateway,
+  type SourceCheck,
+  type TriggerItem,
+  type TriggerSources,
+} from "./index.js";
 
 type Binding = TriggerBinding.TriggerBinding;
-type Issue = TriggerBinding.Issue;
 
-const issue = (number: number, overrides: Partial<Issue> = {}): Issue => ({
-  repository: "acme/playground",
-  number,
+const NOW = "2026-10-18T10:02:30.000Z";
+
+const item = (number: number, overrides: Partial<TriggerItem> = {}): TriggerItem => ({
+  key: `acme/playground#${number}`,
   title: `Issue ${number}`,
-  state: "open",
-  labels: ["ready-for-agent"],
   url: `https://issues.example/acme/playground/${number}`,
+  number,
   ...overrides,
 });
 
-const binding = (issues: Issue[], spec: Partial<Binding["spec"]> = {}): Binding => ({
+const workspace = (name: string): Workspace.Workspace => ({
   apiVersion: "tendworks.dev/v1",
-  kind: "TriggerBinding",
-  metadata: { name: "ready-issues" },
-  spec: {
-    schedule: { every: { minutes: 5 } },
-    source: {
-      integration: "fake",
-      issues: { repository: "acme/playground", labels: ["ready-for-agent"], state: "open" },
-      fake: { issues },
-    },
-    workflow: "implement-issue",
-    ...spec,
-  },
+  kind: "Workspace",
+  metadata: { name },
+  spec: { git: { url: `https://git.example/acme/${name}.git`, defaultBranch: "main" } },
 });
+const WORKSPACES = [workspace("app"), workspace("web")];
 
-function setup(bindings: Binding[]) {
+const binding = (items: TriggerItem[], spec: Partial<Omit<Binding["spec"], "trigger">> = {}): Binding =>
+  fakeTriggerBinding({ name: "ready-issues" }, { workflow: "implement-issue", trigger: { every: { minutes: 5 }, items }, ...spec });
+
+/** A fake source whose items a test changes between checks, and which records what it was asked. */
+function liveSource(items: (check: SourceCheck) => TriggerItem[] | Promise<TriggerItem[]>) {
+  const checks: { at: string; workspace?: string }[] = [];
+  const sources: TriggerSources = {
+    fake: (settings: FakeTriggerSettings) => ({
+      schedule: { every: settings.every },
+      async items(check) {
+        checks.push({ at: check.at.toISOString(), ...(check.workspace ? { workspace: check.workspace.metadata.name } : {}) });
+        return items(check);
+      },
+    }),
+  };
+  return { checks, sources };
+}
+
+function setup(bindings: Binding[], options: { sources?: TriggerSources } = {}) {
   const runs = createInMemoryRunStarter();
   const store = createInMemoryFiringStore();
-  const gateway = createTriggerGateway({ bindings, store, runs, now: () => new Date("2026-10-18T10:02:30.000Z") });
+  const gateway = createTriggerGateway({
+    bindings,
+    workspaces: WORKSPACES,
+    sources: options.sources ?? { fake: createFakeTriggerSource },
+    store,
+    runs,
+    now: () => new Date(NOW),
+    log: () => {},
+  });
   return { runs, store, gateway };
 }
 
 describe("trigger gateway schedule", () => {
   beforeEach(() => {
-    vi.useFakeTimers({ now: new Date("2026-10-18T10:02:30.000Z") });
+    vi.useFakeTimers({ now: new Date(NOW) });
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it("checks each binding at its scheduled executions once started, and no more once stopped", async () => {
+    const items = [item(1)];
+    const { checks, sources } = liveSource(() => items);
     const runs = createInMemoryRunStarter();
-    const store = createInMemoryFiringStore();
-    const issues = [issue(1)];
-    const gateway = createTriggerGateway({
-      bindings: [binding([])],
-      store,
-      runs,
-      issueTrackers: () => ({ findIssues: async () => issues }),
-      log: () => {},
-    });
+    const gateway = createTriggerGateway({ bindings: [binding([])], sources, store: createInMemoryFiringStore(), runs, log: () => {} });
 
     gateway.start();
     await vi.advanceTimersByTimeAsync(2 * 60_000);
@@ -65,36 +86,48 @@ describe("trigger gateway schedule", () => {
     expect(runs.started).toHaveLength(1);
     expect((await gateway.triggers())[0]?.nextExecutionAt).toBe("2026-10-18T10:10:00.000Z");
 
-    issues.push(issue(2));
+    items.push(item(2));
     await vi.advanceTimersByTimeAsync(5 * 60_000); // 10:10:00
     expect(runs.started).toHaveLength(2);
+    expect(checks.map((check) => check.at)).toEqual(["2026-10-18T10:05:00.000Z", "2026-10-18T10:10:00.000Z"]);
 
     await gateway.stop();
-    issues.push(issue(3));
+    items.push(item(3));
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(runs.started).toHaveLength(2);
   });
 
-  it("reports a check whose issue tracker fails and keeps checking at the next executions", async () => {
-    const runs = createInMemoryRunStarter();
-    const lines: string[] = [];
-    let rateLimited = true;
+  it("checks a cron binding at the times of its expression", async () => {
+    const { checks, sources } = liveSource(() => []);
     const gateway = createTriggerGateway({
       bindings: [binding([])],
+      sources: { fake: (settings, context) => ({ ...sources.fake!(settings, context), schedule: { cron: "30 10 * * *" } }) },
       store: createInMemoryFiringStore(),
-      runs,
-      issueTrackers: () => ({
-        findIssues: async () => {
-          if (rateLimited) throw new Error("GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z");
-          return [issue(1)];
-        },
-      }),
-      log: (line) => lines.push(line),
+      runs: createInMemoryRunStarter(),
+      log: () => {},
     });
 
     gateway.start();
+    await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+    await gateway.stop();
+
+    expect(checks.map((check) => check.at)).toEqual(["2026-10-18T10:30:00.000Z"]);
+    expect((await gateway.triggers())[0]).toMatchObject({ schedule: { cron: "30 10 * * *" } });
+  });
+
+  it("reports a check whose source fails and keeps checking at the next executions", async () => {
+    let rateLimited = true;
+    const { sources } = liveSource(() => {
+      if (rateLimited) throw new Error("GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z");
+      return [item(1)];
+    });
+    const lines: string[] = [];
+    const runs = createInMemoryRunStarter();
+    const gateway = createTriggerGateway({ bindings: [binding([])], sources, store: createInMemoryFiringStore(), runs, log: (line) => lines.push(line) });
+
+    gateway.start();
     await vi.advanceTimersByTimeAsync(2.5 * 60_000); // 10:05:00
-    expect(lines).toEqual(["trigger ready-issues: check failed: GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z"]);
+    expect(lines).toEqual(["trigger ready-issues: could not ask the source: GitHub rate limit exhausted; it resets at 2026-10-18T10:07:00.000Z"]);
     expect(runs.started).toHaveLength(0);
 
     rateLimited = false;
@@ -102,45 +135,93 @@ describe("trigger gateway schedule", () => {
     expect(runs.started).toHaveLength(1);
     await gateway.stop();
   });
+
+  it("never checks a suspended binding, and lists it as suspended", async () => {
+    const { checks, sources } = liveSource(() => [item(1)]);
+    const { runs, gateway } = setup([binding([], { suspend: true })], { sources });
+
+    gateway.start();
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await gateway.stop();
+
+    expect(checks).toEqual([]);
+    expect(runs.started).toEqual([]);
+    expect((await gateway.triggers())[0]).toMatchObject({ name: "ready-issues", suspended: true });
+  });
 });
 
 describe("trigger gateway", () => {
-  it("starts one run of the bound workflow per matching issue, with the mapped input", async () => {
-    const { runs, gateway } = setup([
-      binding([issue(1), issue(2, { labels: [] }), issue(3, { state: "closed" }), issue(4, { repository: "acme/other" }), issue(5)], {
-        input: { issue: { number: "${ .issue.number }", title: "${ .issue.title }" }, mode: "auto" },
-      }),
-    ]);
+  it("starts one run per workspace and item, with the workspace's name and the item as input", async () => {
+    const { runs, gateway } = setup([binding([item(1), item(2)], { workspaces: ["app", "web"] })]);
 
     await gateway.check("ready-issues");
 
-    expect(runs.started).toEqual([
-      expect.objectContaining({ workflow: "implement-issue", input: { issue: { number: 1, title: "Issue 1" }, mode: "auto" } }),
-      expect.objectContaining({ workflow: "implement-issue", input: { issue: { number: 5, title: "Issue 5" }, mode: "auto" } }),
+    expect(runs.started.map(({ workflow, input }) => ({ workflow, input }))).toEqual([
+      { workflow: "implement-issue", input: { workspace: "app", item: item(1) } },
+      { workflow: "implement-issue", input: { workspace: "app", item: item(2) } },
+      { workflow: "implement-issue", input: { workspace: "web", item: item(1) } },
+      { workflow: "implement-issue", input: { workspace: "web", item: item(2) } },
     ]);
   });
 
-  it("passes the whole issue as input when the binding maps none", async () => {
-    const { runs, gateway } = setup([binding([issue(1)])]);
+  it("asks the source once per workspace, handing it the workspace and the execution the check belongs to", async () => {
+    const { checks, sources } = liveSource(({ workspace }) => (workspace?.metadata.name === "web" ? [item(3)] : []));
+    const { runs, gateway } = setup([binding([], { workspaces: ["app", "web"] })], { sources });
 
     await gateway.check("ready-issues");
 
-    expect(runs.started).toEqual([expect.objectContaining({ workflow: "implement-issue", input: { issue: issue(1) } })]);
+    expect(checks).toEqual([
+      { at: "2026-10-18T10:00:00.000Z", workspace: "app" },
+      { at: "2026-10-18T10:00:00.000Z", workspace: "web" },
+    ]);
+    expect(runs.started.map((run) => run.input)).toEqual([{ workspace: "web", item: item(3) }]);
   });
 
-  it("never starts a second run for an issue, also after a restart", async () => {
-    const { runs, store, gateway } = setup([binding([issue(1)])]);
+  it("starts runs without a workspace for a binding without workspaces", async () => {
+    const { checks, sources } = liveSource(() => [item(1)]);
+    const { runs, gateway } = setup([binding([])], { sources });
+
+    await gateway.check("ready-issues");
+
+    expect(checks).toEqual([{ at: "2026-10-18T10:00:00.000Z" }]);
+    expect(runs.started.map((run) => run.input)).toEqual([{ item: item(1) }]);
+    expect(runs.started[0]?.startedBy).toEqual({ kind: "trigger", binding: "ready-issues", item: { key: "acme/playground#1", title: "Issue 1", url: item(1).url } });
+  });
+
+  it("never starts a second run for an item in a workspace, also after a restart, but does in another workspace", async () => {
+    const { runs, store, gateway } = setup([binding([item(1)], { workspaces: ["app"] })]);
     await gateway.check("ready-issues");
 
     await gateway.check("ready-issues");
-    const restarted = createTriggerGateway({ bindings: [binding([issue(1), issue(2)])], store, runs });
+    const restarted = createTriggerGateway({
+      bindings: [binding([item(1), item(2)], { workspaces: ["app", "web"] })],
+      workspaces: WORKSPACES,
+      sources: { fake: createFakeTriggerSource },
+      store,
+      runs,
+    });
     await restarted.check("ready-issues");
 
-    expect(runs.started.map((run) => (run.input.issue as Issue).number)).toEqual([1, 2]);
+    expect(runs.started.map(({ input }) => [input.workspace, (input.item as TriggerItem).key])).toEqual([
+      ["app", "acme/playground#1"],
+      ["app", "acme/playground#2"],
+      ["web", "acme/playground#1"],
+      ["web", "acme/playground#2"],
+    ]);
   });
 
-  it("records each fired trigger as a trigger.fired event referencing the issue and the run", async () => {
-    const { store, gateway } = setup([binding([issue(1, { title: "Fix the login" })])]);
+  it("keeps the items of different bindings apart", async () => {
+    const other: Binding = { ...binding([item(1)]), metadata: { name: "triage" } };
+    const { runs, gateway } = setup([binding([item(1)]), other]);
+
+    await gateway.check("ready-issues");
+    await gateway.check("triage");
+
+    expect(runs.started).toHaveLength(2);
+  });
+
+  it("records each firing as a trigger.fired event referencing the workspace, the item and the run", async () => {
+    const { store, gateway } = setup([binding([item(1, { title: "Fix the login" })], { workspaces: ["app"] })]);
 
     await gateway.check("ready-issues");
     await gateway.check("ready-issues");
@@ -148,25 +229,26 @@ describe("trigger gateway", () => {
     expect(await store.publisher.events()).toEqual([
       {
         specversion: "1.0",
-        id: "ready-issues/acme/playground#1:trigger.fired",
+        id: "ready-issues/app/acme/playground#1:trigger.fired",
         source: "/tendworks/trigger-gateway",
         type: "dev.tendworks.trigger.fired",
         subject: "triggers/ready-issues",
-        time: "2026-10-18T10:02:30.000Z",
+        time: NOW,
         datacontenttype: "application/json",
         runid: "run-1",
         traceparent: expect.stringMatching(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/),
         data: {
           binding: "ready-issues",
           workflow: "implement-issue",
-          issue: { repository: "acme/playground", number: 1, title: "Fix the login", url: "https://issues.example/acme/playground/1" },
+          workspace: "app",
+          item: { key: "acme/playground#1", title: "Fix the login", url: "https://issues.example/acme/playground/1" },
         },
       },
     ]);
   });
 
-  it("declares each run as started by the binding for the issue it matched", async () => {
-    const { runs, gateway } = setup([binding([issue(1, { title: "Fix the login" })])]);
+  it("declares each run as started by the binding, for its workspace and item", async () => {
+    const { runs, gateway } = setup([binding([item(1, { title: "Fix the login" })], { workspaces: ["web"] })]);
 
     await gateway.check("ready-issues");
 
@@ -174,13 +256,14 @@ describe("trigger gateway", () => {
       {
         kind: "trigger",
         binding: "ready-issues",
-        issue: { repository: "acme/playground", number: 1, title: "Fix the login", url: "https://issues.example/acme/playground/1" },
+        workspace: "web",
+        item: { key: "acme/playground#1", title: "Fix the login", url: "https://issues.example/acme/playground/1" },
       },
     ]);
   });
 
   it("starts each run in the trace of its trigger.fired event", async () => {
-    const { runs, store, gateway } = setup([binding([issue(1), issue(2)])]);
+    const { runs, store, gateway } = setup([binding([item(1), item(2)])]);
 
     await gateway.check("ready-issues");
 
@@ -189,8 +272,8 @@ describe("trigger gateway", () => {
     expect(events[0]!.traceparent).not.toBe(events[1]!.traceparent);
   });
 
-  it("records no event for an issue whose run could not be started", async () => {
-    const { runs, store, gateway } = setup([binding([issue(1)])]);
+  it("records no event for an item whose run could not be started", async () => {
+    const { runs, store, gateway } = setup([binding([item(1)])]);
     runs.fail(new Error("down"));
 
     await gateway.check("ready-issues");
@@ -198,79 +281,52 @@ describe("trigger gateway", () => {
     expect(await store.publisher.events()).toEqual([]);
   });
 
-  it("never checks a suspended binding on its schedule, and lists it as suspended", async () => {
-    const runs = createInMemoryRunStarter();
-    const suspended = binding([issue(1)], { suspend: true });
-    const gateway = createTriggerGateway({ bindings: [suspended], store: createInMemoryFiringStore(), runs, log: () => {} });
-
-    vi.useFakeTimers({ now: new Date("2026-10-18T10:02:30.000Z") });
-    try {
-      gateway.start();
-      await vi.advanceTimersByTimeAsync(60 * 60_000);
-      await gateway.stop();
-    } finally {
-      vi.useRealTimers();
-    }
-
-    expect(runs.started).toEqual([]);
-    expect((await gateway.triggers())[0]).toMatchObject({ name: "ready-issues", suspended: true });
-  });
-
-  it("lists its bindings by name with their next scheduled execution", async () => {
-    const hourly: Binding = { ...binding([]), metadata: { name: "hourly" }, spec: { ...binding([]).spec, schedule: { every: { hours: 1 } } } };
-    const { gateway } = setup([binding([]), hourly]);
+  it("lists its bindings by name with their kind, workspaces, schedule and next execution", async () => {
+    const hourly = fakeTriggerBinding({ name: "hourly" }, { workflow: "implement-issue", trigger: { every: { hours: 1 } } });
+    const { gateway } = setup([binding([], { workspaces: ["app", "web"] }), hourly]);
 
     expect(await gateway.triggers()).toEqual([
-      { name: "hourly", workflow: "implement-issue", schedule: { every: { hours: 1 } }, nextExecutionAt: "2026-10-18T11:00:00.000Z" },
-      { name: "ready-issues", workflow: "implement-issue", schedule: { every: { minutes: 5 } }, nextExecutionAt: "2026-10-18T10:05:00.000Z" },
+      { name: "hourly", workflow: "implement-issue", kind: "fake", workspaces: [], schedule: { every: { hours: 1 } }, nextExecutionAt: "2026-10-18T11:00:00.000Z" },
+      {
+        name: "ready-issues",
+        workflow: "implement-issue",
+        kind: "fake",
+        workspaces: ["app", "web"],
+        schedule: { every: { minutes: 5 } },
+        nextExecutionAt: "2026-10-18T10:05:00.000Z",
+      },
     ]);
   });
 
-  it("lists how each binding's last check went: started runs, or why it failed", async () => {
-    const runs = createInMemoryRunStarter();
-    const store = createInMemoryFiringStore();
-    const findIssues = vi.fn(async () => [issue(1)]);
-    const gateway = createTriggerGateway({
-      bindings: [binding([])],
-      store,
-      runs,
-      issueTrackers: () => ({ findIssues }),
-      now: () => new Date("2026-10-18T10:02:30.000Z"),
+  it("lists how each binding's last check went: started runs, or why it failed per workspace", async () => {
+    let failing = false;
+    const { sources } = liveSource(({ workspace }) => {
+      if (failing && workspace?.metadata.name === "web") throw new Error("GitHub answered 403: API rate limit exceeded");
+      return [item(1)];
     });
+    const { gateway } = setup([binding([], { workspaces: ["app", "web"] })], { sources });
     const lastEvaluation = async () => (await gateway.triggers())[0]!.lastEvaluation;
 
     expect(await lastEvaluation()).toBeUndefined();
     await gateway.check("ready-issues");
-    expect(await lastEvaluation()).toEqual({ at: "2026-10-18T10:02:30.000Z", status: "succeeded", startedRuns: 1 });
+    expect(await lastEvaluation()).toEqual({ at: NOW, status: "succeeded", startedRuns: 2 });
 
-    findIssues.mockRejectedValueOnce(new Error("GitHub answered 403: API rate limit exceeded"));
-    await expect(gateway.check("ready-issues")).rejects.toThrow("rate limit");
+    failing = true;
+    const result = await gateway.check("ready-issues");
+    expect(result.failed).toEqual([{ workspace: "web", error: "GitHub answered 403: API rate limit exceeded" }]);
     expect(await lastEvaluation()).toEqual({
-      at: "2026-10-18T10:02:30.000Z",
+      at: NOW,
       status: "failed",
       startedRuns: 0,
-      message: "GitHub answered 403: API rate limit exceeded",
+      message: "workspace web: could not ask the source: GitHub answered 403: API rate limit exceeded",
     });
   });
 
-  it("records a check as failed when a matching issue's run could not be started", async () => {
-    const { runs, gateway } = setup([binding([issue(1)])]);
-    runs.fail(new Error("control plane answered HTTP 503"));
-
-    await gateway.check("ready-issues");
-
-    expect((await gateway.triggers())[0]!.lastEvaluation).toEqual({
-      at: "2026-10-18T10:02:30.000Z",
-      status: "failed",
-      startedRuns: 0,
-      message: "acme/playground#1 could not start a run: control plane answered HTTP 503",
-    });
-  });
-
-  it("retries an issue on the next check when its run could not be started", async () => {
-    const { runs, gateway } = setup([binding([issue(1), issue(2)])]);
+  it("records a check as failed when an item's run could not be started, and retries it on the next check", async () => {
+    const { runs, gateway } = setup([binding([item(1), item(2)], { workspaces: ["app"] })]);
     runs.fail(new Error("control plane answered HTTP 503"));
     const failed = await gateway.check("ready-issues");
+    const evaluation = (await gateway.triggers())[0]!.lastEvaluation;
 
     runs.fail(undefined);
     const retried = await gateway.check("ready-issues");
@@ -278,16 +334,62 @@ describe("trigger gateway", () => {
     expect(failed).toEqual({
       fired: [],
       failed: [
-        { issue: "acme/playground#1", error: "control plane answered HTTP 503" },
-        { issue: "acme/playground#2", error: "control plane answered HTTP 503" },
+        { workspace: "app", item: "acme/playground#1", error: "control plane answered HTTP 503" },
+        { workspace: "app", item: "acme/playground#2", error: "control plane answered HTTP 503" },
       ],
+    });
+    expect(evaluation).toMatchObject({
+      status: "failed",
+      message:
+        "workspace app: acme/playground#1 could not start a run: control plane answered HTTP 503; workspace app: acme/playground#2 could not start a run: control plane answered HTTP 503",
     });
     expect(retried).toEqual({
       fired: [
-        { issue: "acme/playground#1", runId: "run-1" },
-        { issue: "acme/playground#2", runId: "run-2" },
+        { workspace: "app", item: "acme/playground#1", runId: "run-1" },
+        { workspace: "app", item: "acme/playground#2", runId: "run-2" },
       ],
       failed: [],
     });
+  });
+
+  it("fails the checks of a binding naming a workspace that is not configured", async () => {
+    const { runs, gateway } = setup([binding([item(1)], { workspaces: ["app", "mobile"] })]);
+
+    const result = await gateway.check("ready-issues");
+
+    expect(result.failed).toEqual([{ workspace: "mobile", error: "no workspace 'mobile' is configured" }]);
+    expect(runs.started.map((run) => run.input.workspace)).toEqual(["app"]);
+  });
+
+  it("refuses a binding whose trigger kind has no source, or whose schedule cannot be read", () => {
+    const store = createInMemoryFiringStore();
+    const runs = createInMemoryRunStarter();
+
+    expect(() => createTriggerGateway({ bindings: [binding([])], sources: {}, store, runs })).toThrow(
+      "trigger binding 'ready-issues' has a trigger of kind 'fake', but no trigger source 'fake' is deployed (deployed: none)",
+    );
+    expect(() =>
+      createTriggerGateway({ bindings: [binding([])], sources: { fake: () => ({ schedule: { cron: "61 * * * *" }, items: async () => [] }) }, store, runs }),
+    ).toThrow("trigger binding 'ready-issues': cron expression '61 * * * *' is invalid");
+  });
+
+  it("creates each source with the binding's workspaces, and refuses a binding its source cannot serve", () => {
+    const store = createInMemoryFiringStore();
+    const runs = createInMemoryRunStarter();
+    const given: string[][] = [];
+    const picky: TriggerSources = {
+      fake: (settings: FakeTriggerSettings, { workspaces }) => {
+        given.push(workspaces.map((workspace) => workspace.metadata.name));
+        if (workspaces.some((workspace) => workspace.metadata.name === "web")) throw new Error("workspace 'web' cannot be read");
+        return createFakeTriggerSource(settings);
+      },
+    };
+    const options = { workspaces: WORKSPACES, sources: picky, store, runs };
+
+    createTriggerGateway({ ...options, bindings: [binding([], { workspaces: ["app"] }), { ...binding([]), metadata: { name: "none" } }] });
+    expect(given).toEqual([["app"], []]);
+    expect(() => createTriggerGateway({ ...options, bindings: [binding([], { workspaces: ["web", "app"] })] })).toThrow(
+      "trigger binding 'ready-issues': workspace 'web' cannot be read",
+    );
   });
 });

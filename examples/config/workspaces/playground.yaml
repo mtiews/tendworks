@@ -1,0 +1,21 @@
+# The playground repository as a workspace (ADR 0022): declared once here, referred to by
+# name. Agents clone it in their sandbox with its own credential, the agent token
+# TENDWORKS_AGENT_GITHUB_TOKEN from deploy/.env (push branches and open pull requests on
+# this repository only, docs/github-agent-access.md). The session also sees it as
+# GH_TOKEN, so the developer can open its pull request with `gh`.
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata:
+  name: playground
+spec:
+  git:
+    url: https://github.com/mtiews/tendworks-playground.git
+    defaultBranch: main
+  credentials:
+    secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN }
+    env: GH_TOKEN
+  # Its workspace assistant (agent profile workspace-assistant): `tend chat --workspace
+  # playground`. Read-only: the credential is used only for the checkout, so the chat cannot
+  # push. `write: true` would let it push to its own branch tendworks/chat-<id>.
+  assistant:
+    enabled: true

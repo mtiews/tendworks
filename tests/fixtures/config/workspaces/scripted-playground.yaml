@@ -1,0 +1,15 @@
+# A git workspace on the local bare repository the scripted sandbox image carries
+# (images/sandbox-scripted-acp), for the end-to-end workspace tests. A file URL needs no
+# credential.
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata:
+  name: scripted-playground
+spec:
+  git:
+    url: file:///srv/git/playground.git
+    defaultBranch: main
+  # A read-only workspace assistant on the scripted agent (end-to-end tests): it cannot push.
+  assistant:
+    enabled: true
+    profile: scripted-assistant

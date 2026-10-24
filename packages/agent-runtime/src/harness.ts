@@ -1,6 +1,7 @@
 import type { A2A } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import type { TranscriptRecord } from "./transcripts/transcript-store.js";
+import type { Workspace } from "./workspace.js";
 
 /** One task as a harness gets it. */
 export interface HarnessTask {
@@ -12,6 +13,12 @@ export interface HarnessTask {
   elapsedMs?: number;
   /** What the harness kept about the task's agent session before an interruption; absent for a new task. */
   session?: HarnessSession;
+  /** The workspace the session works in (ADR 0022); without it the workspace starts empty. */
+  workspace?: Workspace;
+  /** The branch of the workspace to work on; without it the workspace stays on its default branch. */
+  branch?: string;
+  /** Whether the session may only read its workspace, e.g. a read-only assistant's; a directory is then bound read-only. */
+  readOnlyWorkspace?: boolean;
 }
 
 /**
@@ -87,10 +94,7 @@ export interface OpenSession {
 }
 
 /** A task without its message, for a session whose messages arrive turn by turn. */
-export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs"> & {
-  /** The workspace the session works in, checked out before its first turn; without it the workspace starts empty. */
-  workspace?: A2A.Workspace;
-};
+export type HarnessSessionTask = Omit<HarnessTask, "message" | "elapsedMs">;
 
 /**
  * The harness port: runs one agent session for a task, e.g. Claude Code over ACP in a

@@ -1,9 +1,9 @@
 import { createHealthApi, createStaticHealthProbe } from "@tendworks/health";
 import { MigrationError } from "@tendworks/platform/migrations";
 import { describe, expect, it } from "vitest";
-import { createControlPlaneApi, createInMemoryRuns, createStoppedControlPlaneApi, type HealthProbe, type PlatformStatus } from "./index.js";
+import { createControlPlaneApi, createInMemoryRuns, createStoppedControlPlaneApi, emptyConfiguration, type HealthProbe, type PlatformStatus } from "./index.js";
 
-const noRuns = { configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] }, runs: createInMemoryRuns(), apiToken: "test-token" };
+const noRuns = { configuration: emptyConfiguration(), runs: createInMemoryRuns(), apiToken: "test-token" };
 
 const healthy = (name: string): HealthProbe => ({ name, check: async () => ({ status: "healthy" }) });
 

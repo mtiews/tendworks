@@ -1,8 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentProfile, Policy, PullRequestIntegration, TriggerBinding, Workflow } from "@tendworks/shared";
+import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
+import { enabledAssistant } from "@tendworks/platform";
+import { workspaceProblem } from "@tendworks/platform/workspace-roots";
 
 // The control plane reads the configuration folder and validates every document
 // against the JSON Schema of its kind (contracts/schemas), so mistakes surface at
@@ -13,10 +15,11 @@ const schemas = new URL("../../../contracts/schemas/", import.meta.url);
 /** Schemas of the `kind`s in the apiVersion/kind/metadata/spec envelope. */
 const KINDS: Record<string, string> = {
   AgentProfile: "agent-profile.schema.yaml",
+  NotificationChannel: "notification-channel.schema.yaml",
   Policy: "policy.schema.yaml",
-  PullRequestIntegration: "pull-request-integration.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
   TriggerBinding: "trigger-binding.schema.yaml",
+  Workspace: "workspace.schema.yaml",
 };
 const WORKFLOW_SCHEMA = "serverless-workflow.schema.yaml";
 
@@ -35,10 +38,26 @@ export interface Configuration {
   agentProfiles: AgentProfile.AgentProfile[];
   /** Trigger bindings, ordered by name; each starts a configured workflow. */
   triggerBindings: TriggerBinding.TriggerBinding[];
-  /** Policies, ordered by name; workflows name them when they ask for a gated action. */
+  /** Workspaces agents work in, ordered by name (ADR 0022). */
+  workspaces: Workspace.Workspace[];
+  /** Policies, ordered by name; they decide the human steps of workflows (ADR 0024). */
   policies: Policy.Policy[];
-  /** How the platform reaches pull requests, at most one integration per host, ordered by name. */
-  pullRequestIntegrations: PullRequestIntegration.PullRequestIntegration[];
+  /** Notification channels, ordered by name; each receives the notifications it selects (ADR 0025). */
+  notificationChannels: NotificationChannel.NotificationChannel[];
+}
+
+/** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
+export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
+  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], ...overrides };
+}
+
+export interface LoadConfigurationOptions {
+  /**
+   * The roots directory workspaces must lie under (`TEND_WORKSPACE_ROOTS`), as paths on
+   * the sandbox host that this process sees at the same path; none by default, which
+   * refuses every directory workspace.
+   */
+  workspaceRoots?: readonly string[];
 }
 
 let ajv: Ajv2020 | undefined;
@@ -57,9 +76,10 @@ function validatorFor(schemaFile: string): ValidateFunction {
 /**
  * Reads and validates the configuration folder: workflows (YAML with a `document`),
  * agent profiles (`agents/*.md`, Markdown with YAML frontmatter) and every other YAML
- * document by its `kind`. Throws a {@link ConfigurationError} listing every issue.
+ * document by its `kind`. A directory workspace must lie under a workspace root, also
+ * after resolving `..` and symbolic links. Throws a {@link ConfigurationError} listing every issue.
  */
-export function loadConfiguration(dir: string): Configuration {
+export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConfigurationOptions = {}): Configuration {
   let files: string[];
   try {
     files = listFiles(dir);
@@ -71,8 +91,9 @@ export function loadConfiguration(dir: string): Configuration {
   const workflows = new Map<string, { file: string; definition: Workflow.Workflow }>();
   const profiles = new Map<string, { file: string; profile: AgentProfile.AgentProfile }>();
   const bindings = new Map<string, { file: string; binding: TriggerBinding.TriggerBinding }>();
+  const workspaces = new Map<string, { file: string; workspace: Workspace.Workspace }>();
   const policies = new Map<string, { file: string; policy: Policy.Policy }>();
-  const pullRequestIntegrations = new Map<string, { file: string; integration: PullRequestIntegration.PullRequestIntegration }>();
+  const channels = new Map<string, { file: string; channel: NotificationChannel.NotificationChannel }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -117,6 +138,18 @@ export function loadConfiguration(dir: string): Configuration {
       continue;
     }
     if (!check(file, schemaFile, document)) continue;
+    if (kind === "Workspace") {
+      const workspace = document as unknown as Workspace.Workspace;
+      const problem = workspaceProblem(workspace.spec, workspaceRoots);
+      if (problem) {
+        issues.push(`${file}: workspace '${workspace.metadata.name}': ${problem}`);
+        continue;
+      }
+      const existing = workspaces.get(workspace.metadata.name);
+      if (existing) issues.push(`${file}: workspace '${workspace.metadata.name}' is already defined in ${existing.file}`);
+      else workspaces.set(workspace.metadata.name, { file, workspace });
+      continue;
+    }
     if (kind === "Policy") {
       const policy = document as unknown as Policy.Policy;
       const existing = policies.get(policy.metadata.name);
@@ -124,16 +157,11 @@ export function loadConfiguration(dir: string): Configuration {
       else policies.set(policy.metadata.name, { file, policy });
       continue;
     }
-    if (kind === "PullRequestIntegration") {
-      const integration = document as unknown as PullRequestIntegration.PullRequestIntegration;
-      const existing = [...pullRequestIntegrations.values()].find(
-        (known) => known.integration.metadata.name === integration.metadata.name || known.integration.spec.host === integration.spec.host,
-      );
-      if (existing?.integration.metadata.name === integration.metadata.name) {
-        issues.push(`${file}: pull request integration '${integration.metadata.name}' is already defined in ${existing.file}`);
-      } else if (existing) {
-        issues.push(`${file}: pull request integration '${integration.metadata.name}' serves host ${integration.spec.host}, which ${existing.file} already serves`);
-      } else pullRequestIntegrations.set(integration.metadata.name, { file, integration });
+    if (kind === "NotificationChannel") {
+      const channel = document as unknown as NotificationChannel.NotificationChannel;
+      const existing = channels.get(channel.metadata.name);
+      if (existing) issues.push(`${file}: notification channel '${channel.metadata.name}' is already defined in ${existing.file}`);
+      else channels.set(channel.metadata.name, { file, channel });
       continue;
     }
     if (kind !== "TriggerBinding") continue;
@@ -147,6 +175,22 @@ export function loadConfiguration(dir: string): Configuration {
     for (const [reference, agent] of agentCalls(definition.do, "")) {
       if (!profiles.has(agent)) issues.push(`${file}: ${reference} calls agent://${agent}, but no agent profile '${agent}' is configured`);
     }
+    for (const [reference, name] of workspaceReferences(definition.do, "")) {
+      if (!workspaces.has(name)) issues.push(`${file}: ${reference} works in workspace '${name}', but no workspace '${name}' is configured`);
+    }
+  }
+
+  // A workspace assistant's chats would be refused at once; say so when the configuration loads.
+  for (const { file, workspace } of workspaces.values()) {
+    const assistant = enabledAssistant(workspace.spec.assistant);
+    if (!assistant) continue;
+    const name = workspace.metadata.name;
+    const profile = profiles.get(assistant.profile)?.profile;
+    if (!profile) {
+      issues.push(`${file}: workspace '${name}' has its assistant held with agent profile '${assistant.profile}', but no agent profile '${assistant.profile}' is configured`);
+    } else if (!profile.spec.chat) {
+      issues.push(`${file}: workspace '${name}' has its assistant held with agent profile '${assistant.profile}', which allows no chats (spec.chat)`);
+    }
   }
 
   for (const { file, binding } of bindings.values()) {
@@ -154,9 +198,15 @@ export function loadConfiguration(dir: string): Configuration {
     if (!workflows.has(workflow)) {
       issues.push(`${file}: trigger binding '${binding.metadata.name}' starts workflow '${workflow}', but no workflow '${workflow}' is configured`);
     }
+    for (const workspace of binding.spec.workspaces ?? []) {
+      if (!workspaces.has(workspace)) {
+        issues.push(`${file}: trigger binding '${binding.metadata.name}' starts runs in workspace '${workspace}', but no workspace '${workspace}' is configured`);
+      }
+    }
   }
 
-  // A policy for a misspelt workflow would silently never apply, leaving a laxer one in charge.
+  // A policy for a misspelt workflow would silently never apply, leaving the step to ask
+  // or a laxer policy in charge.
   for (const { file, policy } of policies.values()) {
     for (const workflow of policy.spec.workflows ?? []) {
       if (!workflows.has(workflow)) {
@@ -172,10 +222,9 @@ export function loadConfiguration(dir: string): Configuration {
     workflow: (name) => workflows.get(name)?.definition,
     agentProfiles: [...profiles.values()].map(({ profile }) => profile),
     triggerBindings: [...bindings.values()].map(({ binding }) => binding).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+    workspaces: [...workspaces.values()].map(({ workspace }) => workspace).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
     policies: [...policies.values()].map(({ policy }) => policy).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
-    pullRequestIntegrations: [...pullRequestIntegrations.values()]
-      .map(({ integration }) => integration)
-      .sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+    notificationChannels: [...channels.values()].map(({ channel }) => channel).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 
@@ -215,10 +264,60 @@ function agentCalls(tasks: Workflow.TaskList, scope: string): [string, string][]
   );
 }
 
+/** Message metadata key of the workspace an agent task asks for (contracts/schemas/a2a.schema.yaml#/$defs/workspace). */
+const WORKSPACE_METADATA = "dev.tendworks/workspace";
+
+/**
+ * Every workspace a `call: a2a` names by a fixed name (no expression) in its message's
+ * `dev.tendworks/workspace`, as [task reference, workspace name]. A name the workflow
+ * takes from its input is checked when the task starts.
+ */
+function workspaceReferences(tasks: Workflow.TaskList, scope: string): [string, string][] {
+  return tasks.flatMap((item, index) =>
+    Object.entries(item).flatMap(([name, task]): [string, string][] => {
+      const reference = `${scope}/do/${index}/${name}`;
+      if ("call" in task) {
+        if (task.call !== "a2a") return [];
+        const requested = task.with.parameters.message.metadata?.[WORKSPACE_METADATA];
+        const workspace = isObject(requested) ? requested.name : undefined;
+        return isFixed(workspace) ? [[reference, workspace]] : [];
+      }
+      return "do" in task ? workspaceReferences(task.do, reference) : [];
+    }),
+  );
+}
+
+/** A string without a runtime expression (`${ … }`), so it can be checked when the configuration loads. */
+function isFixed(value: unknown): value is string {
+  return typeof value === "string" && !value.includes("${");
+}
+
 function describe(errors: ErrorObject[]): string[] {
-  return errors
+  return closestBranches(errors)
     .filter((error) => error.keyword !== "if") // the failing branch reports the cause
     .map((error) => `${error.instancePath || "/"}: ${message(error)}`);
+}
+
+/**
+ * For a failed `oneOf`, only the errors of the branch that came closest (fewest errors,
+ * the first on a tie), e.g. a git workspace's bad URL rather than every reason it is not a
+ * directory workspace. A `oneOf` that failed because several branches matched keeps its own message.
+ */
+function closestBranches(errors: ErrorObject[]): ErrorObject[] {
+  let kept = errors;
+  for (const failed of errors.filter((error) => error.keyword === "oneOf")) {
+    const prefix = `${failed.schemaPath}/`;
+    const branches = new Map<string, ErrorObject[]>();
+    for (const error of kept) {
+      if (!error.schemaPath.startsWith(prefix)) continue;
+      const branch = error.schemaPath.slice(prefix.length).split("/")[0]!;
+      branches.set(branch, [...(branches.get(branch) ?? []), error]);
+    }
+    if (branches.size === 0) continue;
+    const closest = [...branches.values()].reduce((best, branch) => (branch.length < best.length ? branch : best));
+    kept = kept.filter((error) => error !== failed && (!error.schemaPath.startsWith(prefix) || closest.includes(error)));
+  }
+  return kept;
 }
 
 function message(error: ErrorObject): string {
@@ -227,6 +326,8 @@ function message(error: ErrorObject): string {
       return `unsupported property '${error.params.additionalProperty}'`;
     case "const":
       return `must be '${error.params.allowedValue}'`;
+    case "false schema":
+      return "is not allowed here";
     case "enum":
       return `${error.message} (${(error.params.allowedValues as unknown[]).join(", ")})`;
     default:

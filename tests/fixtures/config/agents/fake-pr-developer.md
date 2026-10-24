@@ -15,7 +15,5 @@ spec:
         description: The pull request the fake agent pretends to have opened.
 ---
 Like `fake-developer`, but reports a pull request, as the developer agent does after it
-opened one. The pull request lives on the reserved `git.example` host, which the
-platform merges in the fake pull request integration configured in
-`integrations/pull-requests/fake.yaml`. Used by the end-to-end tests of the merge
-step.
+opened one. The pull request lives on the reserved `git.example` host. Used by the
+end-to-end tests of the automated chain (`fake-develop-issue`).

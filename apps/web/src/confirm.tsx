@@ -11,11 +11,14 @@ export function Confirmation({
   confirmLabel,
   onConfirm,
   onCancel,
+  cancelLabel = "Cancel",
   busy = false,
   children,
 }: {
   title: string;
   confirmLabel: string;
+  /** The safe choice's label, e.g. when the confirmed choice itself is called "Cancel". */
+  cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
@@ -58,7 +61,7 @@ export function Confirmation({
           {confirmLabel}
         </button>
         <button type="button" ref={cancel} disabled={busy} onClick={close}>
-          Cancel
+          {cancelLabel}
         </button>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration } from "@tendworks/control-plane";
 import { describe, expect, it, vi } from "vitest";
 import { runTend } from "./tend.js";
 
@@ -42,11 +42,14 @@ function keyboard() {
  * one client against it, with its own keyboard and Ctrl+C.
  */
 function platform(answers: string[] | "never" = []) {
-  const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
+  const agentRuntime = createInMemoryAgentRuntime({
+    chatAgents: ["assistant", "workspace-assistant"],
+    workspaces: { app: { profile: "workspace-assistant", write: false }, docs: undefined },
+  });
   const api = createControlPlaneApi({
     agentRuntime,
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
   });
@@ -192,28 +195,50 @@ describe("tend chat", () => {
     expect(out()).toContain(`left chat ${chatted!.id}; it stays open`);
   });
 
-  it("starts a chat with a repository as its workspace with --repo", async () => {
-    const { exitCode, input, agentRuntime, out } = chat(["assistant", "--repo", "https://git.example/acme/app.git"], ["It has a README."]);
+  it("chats with the platform assistant without arguments", async () => {
+    const { exitCode, input, agentRuntime, out } = chat([], ["Two runs are active."]);
 
     await until(() => out().includes("> "));
-    input.type("What is in the repository?");
+    input.type("What is running?");
+    await until(() => out().includes("Two runs are active."));
+    input.close();
+
+    expect(await exitCode).toBe(0);
+    const [started] = agentRuntime.chats.values();
+    expect(started?.agent).toBe("assistant");
+    expect(out()).toMatch(/chat \S+ with assistant;/);
+  });
+
+  it("chats with a workspace's assistant with --workspace, and says that it is read-only", async () => {
+    const { exitCode, input, agentRuntime, out } = chat(["--workspace", "app"], ["It has a README."]);
+
+    await until(() => out().includes("> "));
+    input.type("What is in the workspace?");
     await until(() => out().includes("It has a README."));
     input.close();
 
     expect(await exitCode).toBe(0);
     const [started] = agentRuntime.chats.values();
-    expect(started?.repository).toBe("https://git.example/acme/app.git");
-    expect(out()).toMatch(/chat \S+ with assistant in a checkout of https:\/\/git\.example\/acme\/app\.git/);
+    expect(started).toMatchObject({ agent: "workspace-assistant", workspace: "app", write: false });
+    expect(out()).toMatch(/chat \S+ with workspace-assistant on workspace app \(read-only\);/);
   });
 
-  it("refuses an invalid repository with the reason", async () => {
-    const { exitCode, input, agentRuntime, err, out } = chat(["assistant", "--repo", "git.example:acme/app"], []);
+  it("refuses a workspace without an enabled assistant with the reason", async () => {
+    const { exitCode, input, agentRuntime, err, out } = chat(["--workspace", "docs"], []);
 
     await until(() => out().includes("> "));
     input.type("Hello");
 
     expect(await exitCode).toBe(1);
-    expect(err()).toMatch(/tend: repository "git\.example:acme\/app" is no https or http clone URL/);
+    expect(err()).toMatch(/tend: workspace docs has no enabled assistant/);
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("refuses a profile together with --workspace before anything starts", async () => {
+    const { exitCode, agentRuntime, err } = chat(["assistant", "--workspace", "app"], []);
+
+    expect(await exitCode).toBe(1);
+    expect(err()).toMatch(/tend: .*either a profile or --workspace/);
     expect(agentRuntime.chats.size).toBe(0);
   });
 
@@ -229,15 +254,27 @@ describe("tend chat", () => {
 });
 
 describe("tend chat list, get and end", () => {
-  it("lists chats with profile, status, start, last activity and cost", async () => {
+  it("lists chats with profile, workspace, status, start, last activity and cost", async () => {
     const { agentRuntime, tend } = platform();
     const id = await existingChat(agentRuntime, "Hi.");
+    const inWorkspace = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
 
     const { exitCode, out } = tend(["chat", "list"]);
 
     expect(await exitCode).toBe(0);
-    expect(out()).toMatch(/^ID\s+AGENT\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
-    expect(out()).toMatch(new RegExp(`^${id}\\s+assistant\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
+    expect(out()).toMatch(/^ID\s+AGENT\s+WORKSPACE\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
+    expect(out()).toMatch(new RegExp(`^${id}\\s+assistant\\s+-\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
+    expect(out()).toMatch(new RegExp(`^${inWorkspace.id}\\s+workspace-assistant\\s+app\\s+working\\s`, "m"));
+  });
+
+  it("shows the workspace of a chat with a workspace's assistant, and whether it may write", async () => {
+    const { agentRuntime, tend } = platform();
+    const { id } = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
+
+    const { exitCode, out } = tend(["chat", "get", id]);
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toMatch(/^WORKSPACE\s+app \(read-only\)$/m);
   });
 
   it("prints the chat list and one chat as JSON or YAML", async () => {

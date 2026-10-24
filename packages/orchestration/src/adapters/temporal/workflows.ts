@@ -24,7 +24,7 @@ const endpoints = proxyActivities<Pick<RunActivities, "httpRequest">>({
   startToCloseTimeout: "2 minutes",
   // Only a missing response fails the activity (any status is a result), so a retry
   // repeats a request that may have arrived; endpoints called from workflows must be
-  // idempotent (e.g. merging an already merged pull request succeeds).
+  // idempotent (e.g. deciding an approval request the same way again succeeds).
   retry: { maximumAttempts: 3, maximumInterval: "30 seconds" },
 });
 

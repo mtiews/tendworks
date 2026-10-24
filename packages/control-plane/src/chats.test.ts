@@ -1,11 +1,16 @@
 import { readServerSentEvents } from "@tendworks/platform";
 import { describe, expect, it } from "vitest";
-import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type AgentRuntimePort, type Chat, type TranscriptEntry } from "./index.js";
+import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration, type AgentRuntimePort, type Chat, type TranscriptEntry } from "./index.js";
 
-function setup(agentRuntime: AgentRuntimePort | "none" = createInMemoryAgentRuntime({ chatAgents: ["assistant"] })) {
+function setup(
+  agentRuntime: AgentRuntimePort | "none" = createInMemoryAgentRuntime({
+    chatAgents: ["assistant", "workspace-assistant"],
+    workspaces: { app: { profile: "workspace-assistant", write: false }, docs: undefined },
+  }),
+) {
   const api = createControlPlaneApi({
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     runs: createInMemoryRuns(),
     ...(agentRuntime === "none" ? {} : { agentRuntime }),
     apiToken: "test-token",
@@ -44,23 +49,34 @@ describe("chats API", () => {
     expect(refused).toMatchObject({ status: 400, body: { title: "Chat not allowed", detail: expect.stringContaining("spec.chat") } });
   });
 
-  it("starts a chat with a repository as its workspace", async () => {
+  it("starts a chat with a workspace's assistant by the workspace's name", async () => {
     const { call } = setup();
 
-    const started = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+    const started = await call("POST", "/chats", { workspace: "app", text: "What does it do?" });
 
-    expect(started).toMatchObject({ status: 201, body: { repository: "https://git.example/acme/app.git" } });
-    expect(await call("GET", `/chats/${started.body.id}`)).toMatchObject({ body: { repository: "https://git.example/acme/app.git" } });
+    expect(started).toMatchObject({ status: 201, body: { agent: "workspace-assistant", workspace: "app", write: false, status: "working" } });
+    expect(await call("GET", `/chats/${started.body.id}`)).toMatchObject({ body: { workspace: "app", write: false } });
   });
 
-  it("refuses a chat with an invalid repository, with the agent runtime's reason", async () => {
+  it("refuses a workspace without an enabled assistant or not configured, with the agent runtime's reason", async () => {
     const { call } = setup();
 
-    const refused = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "ssh://git.example/acme/app.git" });
-    const malformed = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: ["https://git.example/acme/app.git"] });
+    const disabled = await call("POST", "/chats", { workspace: "docs", text: "Hello" });
+    const unknown = await call("POST", "/chats", { workspace: "ghost", text: "Hello" });
 
-    expect(refused).toMatchObject({ status: 400, body: { title: "Invalid repository", detail: expect.stringContaining("https") } });
-    expect(malformed).toMatchObject({ status: 400, body: { title: "Invalid request" } });
+    expect(disabled).toMatchObject({ status: 400, body: { title: "Chat not allowed", detail: expect.stringContaining("no enabled assistant") } });
+    expect(unknown).toMatchObject({ status: 400, body: { title: "Unknown workspace", detail: "no workspace 'ghost' is configured" } });
+  });
+
+  it("refuses a repository URL, both a profile and a workspace, and neither", async () => {
+    const { call } = setup();
+
+    const repository = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+    const both = await call("POST", "/chats", { agent: "assistant", workspace: "app", text: "Hello" });
+    const neither = await call("POST", "/chats", { text: "Hello" });
+    const malformed = await call("POST", "/chats", { workspace: ["app"], text: "Hello" });
+
+    for (const refused of [repository, both, neither, malformed]) expect(refused).toMatchObject({ status: 400, body: { title: "Invalid request" } });
   });
 
   it("refuses a message while a turn runs with 409, and takes it once the turn ended", async () => {

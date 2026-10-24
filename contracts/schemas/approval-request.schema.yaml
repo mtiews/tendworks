@@ -2,15 +2,16 @@ $id: https://tendworks.dev/schemas/v1/schemas/approval-request.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: ApprovalRequests
 description: >-
-  Approval requests human interaction records when a policy decides that a gated action
-  needs the human's decision first. The run waits until the request is decided.
+  Approval requests human interaction records when a workflow's human step asks the
+  human (ADR 0024): a question with links and custom answers, each answer mapped to
+  continue or stop. The run waits until the request is decided with one of its answers.
 $defs:
   approvalRequest:
     title: ApprovalRequest
-    description: A question to the human about one gated action of one run.
+    description: A question to the human from one human step of one run.
     type: object
     additionalProperties: false
-    required: [id, runId, workflow, action, policy, question, status, createdAt]
+    required: [id, runId, workflow, step, action, question, links, answers, status, createdAt]
     properties:
       id:
         type: string
@@ -21,19 +22,39 @@ $defs:
       workflow:
         type: string
         description: Workflow the run executes.
+      step:
+        type: string
+        description: >-
+          Reference of the human step that asked (JSON pointer of the task, e.g.
+          `/do/1/confirmMerge`). A run has at most one request per step, so a retried step
+          finds its request again.
       action:
         $ref: '#/$defs/gatedAction'
-      pullRequest:
-        type: string
-        description: For `merge`, the web URL of the pull request to merge.
       policy:
         type: string
-        description: Name of the policy that asked for the approval.
+        description: >-
+          Name of the policy that decided to ask. Absent when no policy applies to the
+          action, in which case the platform asks.
       question:
         type: string
-        description: The question in one line, e.g. "Merge https://…/pull/7 for run 1f3c… of develop-issue?".
+        minLength: 1
+        description: The question in one line, e.g. "Merge https://git.example/acme/app/pull/7?".
+      links:
+        type: array
+        items:
+          $ref: '#/$defs/approvalLink'
+        description: Context the human needs to decide, e.g. the pull request.
+      answers:
+        type: array
+        minItems: 1
+        items:
+          $ref: '#/$defs/approvalAnswer'
+        description: The answers the human chooses from, in the order the workflow gave them.
       status:
         $ref: '#/$defs/approvalStatus'
+      answer:
+        type: string
+        description: Label of the answer the request was decided with; set once it is decided.
       traceparent:
         type: string
         pattern: ^00-[0-9a-f]{32}-[0-9a-f]{16}-[0-9a-f]{2}$
@@ -44,21 +65,53 @@ $defs:
       decidedAt:
         type: string
         format: date-time
-        description: When the request was approved or rejected.
+        description: When the request was decided.
+  approvalLink:
+    title: ApprovalLink
+    description: A link shown with the question.
+    type: object
+    additionalProperties: false
+    required: [title, url]
+    properties:
+      title:
+        type: string
+        minLength: 1
+        description: What the link points at, e.g. `Pull request`.
+      url:
+        type: string
+        format: uri
+        pattern: ^https?://
+  approvalAnswer:
+    title: ApprovalAnswer
+    description: One answer the human can choose, and what the run does with it.
+    type: object
+    additionalProperties: false
+    required: [label, outcome]
+    properties:
+      label:
+        type: string
+        minLength: 1
+        description: What the human sees and chooses, e.g. "Merged – continue"; unique within a request.
+      outcome:
+        $ref: '#/$defs/answerOutcome'
+  answerOutcome:
+    title: AnswerOutcome
+    description: >-
+      What the run does after the answer. `continue`: the workflow goes on with the task
+      after the human step. `stop`: the workflow ends there, and the run completes.
+    type: string
+    enum: [continue, stop]
   gatedAction:
     title: GatedAction
-    description: The action the approval request is about. For now only merging a pull request.
+    description: >-
+      Name of the action the approval request is about, chosen by the workflow, e.g.
+      `merge-pull-request`; policies decide per action name.
     type: string
-    enum: [merge]
+    pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
   approvalStatus:
     title: ApprovalStatus
     description: >-
-      `pending` until decided, then `approved` or `rejected`. A decided request never
-      changes again.
+      `pending` until decided, then `decided` with the chosen answer. A decided request
+      never changes again.
     type: string
-    enum: [pending, approved, rejected]
-  approvalDecision:
-    title: ApprovalDecision
-    description: The human's answer to an approval request.
-    type: string
-    enum: [approve, reject]
+    enum: [pending, decided]

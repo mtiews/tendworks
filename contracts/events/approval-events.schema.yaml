@@ -5,7 +5,8 @@ description: >-
   Events human interaction emits about approval requests. Each `$defs` entry is the
   complete schema of one event type: the envelope from cloudevent.schema.yaml narrowed to
   its `type` and `data`. Both carry `runid`, the run that waits; orchestration hands them
-  to that run, whose `listen` task receives `approval.decided`.
+  to that run, whose human step (`call: approval`) waits for the `approval.decided` of its
+  request.
 $defs:
   approvalRequested:
     title: ApprovalRequestedEvent
@@ -22,7 +23,7 @@ $defs:
         $ref: '../schemas/approval-request.schema.yaml#/$defs/approvalRequest'
   approvalDecided:
     title: ApprovalDecidedEvent
-    description: An approval request was approved or rejected.
+    description: An approval request was decided with one of its answers.
     allOf:
       - $ref: './cloudevent.schema.yaml'
       - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
@@ -37,14 +38,15 @@ $defs:
     title: ApprovalDecidedEventData
     type: object
     additionalProperties: false
-    required: [approvalRequest, decision, action]
+    required: [approvalRequest, action, answer, outcome]
     properties:
       approvalRequest:
         type: string
         description: Id of the decided approval request.
-      decision:
-        $ref: '../schemas/approval-request.schema.yaml#/$defs/approvalDecision'
       action:
         $ref: '../schemas/approval-request.schema.yaml#/$defs/gatedAction'
-      pullRequest:
+      answer:
         type: string
+        description: Label of the chosen answer.
+      outcome:
+        $ref: '../schemas/approval-request.schema.yaml#/$defs/answerOutcome'

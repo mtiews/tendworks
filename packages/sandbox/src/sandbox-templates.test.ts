@@ -72,4 +72,10 @@ describe("loadSandboxTemplates", () => {
     expect(() => loadSandboxTemplates(dir)).toThrow(/sandboxes\/b\.yaml: sandbox template 'twin' is already defined in sandboxes\/a\.yaml/);
     expect(() => loadSandboxTemplates(dir)).toThrow(/sandboxes\/root\.yaml: \/spec\/user: must match pattern/);
   });
+
+  it("refuses a configuration file that is not valid YAML, naming it, instead of passing over it", () => {
+    const dir = configWith({ "sandboxes/claude-code.yaml": template("claude-code"), "sandboxes/broken.yaml": "kind: [SandboxTemplate" });
+
+    expect(() => loadSandboxTemplates(dir)).toThrow(/sandboxes\/broken\.yaml: invalid YAML: /);
+  });
 });

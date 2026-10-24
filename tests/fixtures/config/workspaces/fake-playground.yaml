@@ -1,0 +1,14 @@
+# The workspace fake-develop-issue hands its fake agent, on the reserved git.example host;
+# the fake agent checks nothing out.
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata:
+  name: fake-playground
+spec:
+  git:
+    url: https://git.example/example/playground.git
+    defaultBranch: main
+  # Chats by its name go to the fake assistant (contract tests).
+  assistant:
+    enabled: true
+    profile: fake-assistant

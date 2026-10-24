@@ -10,7 +10,10 @@ export interface Cost {
 }
 
 /** What started a run, as the contract's `runOrigin` carries it. */
-export type RunOrigin = { kind: "manual" } | { kind: "trigger"; binding: string; issue: { repository: string; number: number; url: string } };
+export type RunOrigin = { kind: "manual" } | { kind: "trigger"; binding: string; workspace?: string; item: { key: string; title: string; url?: string } };
+
+/** When a trigger is checked, as the contract's `TriggerSchedule` carries it. */
+export type Schedule = { cron: string } | { every: { days?: number; hours?: number; minutes?: number; seconds?: number } };
 
 /** `0.1234 USD`: at most four decimals. */
 export const formatCost = ({ amount, currency }: Cost): string => `${Number(amount.toFixed(4))} ${currency}`;
@@ -22,12 +25,21 @@ export function totalCost(costs: readonly Cost[]): string {
   return [...sums].map(([currency, amount]) => formatCost({ amount, currency })).join(", ");
 }
 
+/** `every 5m30s` for an interval, `cron 0 2 * * *` for a cron expression. */
+export function formatSchedule(schedule: Schedule): string {
+  if ("cron" in schedule) return `cron ${schedule.cron}`;
+  const units = [["days", "d"], ["hours", "h"], ["minutes", "m"], ["seconds", "s"]] as const;
+  return `every ${units.map(([unit, suffix]) => (schedule.every[unit] ? `${schedule.every[unit]}${suffix}` : "")).join("") || "0s"}`;
+}
+
 /**
- * `manual`, or `trigger <binding>: <owner>/<name>#<n>`, with the issue's address after it
- * when `url` is set; empty for runs recorded without an origin.
+ * `manual`, or `trigger <binding> in <workspace>: <item key>` (without ` in …` for a
+ * binding without workspaces), with the item's link after it when `url` is set and the
+ * item has one; empty for a run without an origin.
  */
 export function formatOrigin(origin: RunOrigin | undefined, { url = false }: { url?: boolean } = {}): string {
   if (!origin) return "";
   if (origin.kind === "manual") return "manual";
-  return `trigger ${origin.binding}: ${origin.issue.repository}#${origin.issue.number}${url ? ` (${origin.issue.url})` : ""}`;
+  const workspace = origin.workspace === undefined ? "" : ` in ${origin.workspace}`;
+  return `trigger ${origin.binding}${workspace}: ${origin.item.key}${url && origin.item.url ? ` (${origin.item.url})` : ""}`;
 }

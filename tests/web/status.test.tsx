@@ -1,4 +1,4 @@
-import { createAgentRuntimeClient, createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, type HealthProbe, type Trigger } from "@tendworks/control-plane";
+import { createAgentRuntimeClient, createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, emptyConfiguration, type HealthProbe, type Trigger } from "@tendworks/control-plane";
 import type { AgentProfile } from "@tendworks/shared";
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -21,10 +21,13 @@ function run(id: string, status: "pending" | "running" | "completed" | "failed")
 
 const approval = {
   runId: "r-1",
-  workflow: "develop-issue",
-  action: "merge" as const,
-  policy: "merge-gate",
-  question: "Merge https://github.com/example/playground/pull/7 for run r-1 of develop-issue?",
+  workflow: "wait-for-merge",
+  step: "/do/1/confirmMerge",
+  action: "merge-pull-request",
+  policy: "careful",
+  question: "Merge https://github.com/example/playground/pull/7, then continue?",
+  links: [],
+  answers: [{ label: "Merged", outcome: "continue" as const }],
   createdAt: "2026-10-18T09:00:00.000Z",
 };
 
@@ -37,7 +40,7 @@ describe("status page: platform health", () => {
       runs,
       approvals: createInMemoryApprovals([
         { ...approval, id: "a-1", status: "pending" },
-        { ...approval, id: "a-2", status: "approved", decidedAt: "2026-10-18T09:01:00.000Z" },
+        { ...approval, id: "a-2", status: "decided", answer: "Merged", decidedAt: "2026-10-18T09:01:00.000Z" },
       ]),
     });
 
@@ -70,14 +73,7 @@ const profile = (name: string, spec: Partial<AgentProfile.AgentProfile["spec"]> 
   spec: { harness: "fake", ...spec },
 });
 
-const configuration = (agentProfiles: AgentProfile.AgentProfile[]) => ({
-  workflowNames: [],
-  workflow: () => undefined,
-  agentProfiles,
-  triggerBindings: [],
-  policies: [],
-  pullRequestIntegrations: [],
-});
+const configuration = (agentProfiles: AgentProfile.AgentProfile[]) => emptyConfiguration({ agentProfiles });
 
 describe("status page: agents", () => {
   it("shows each agent profile with its active agent sessions of run steps and chats", async () => {
@@ -129,14 +125,18 @@ const triggers: Trigger[] = [
   {
     name: "github-issues",
     workflow: "develop-issue",
+    kind: "github-issues",
+    workspaces: ["app", "web"],
     schedule: { every: { minutes: 1 } },
     nextExecutionAt: "2026-10-18T10:01:00.000Z",
     lastEvaluation: { at: "2026-10-18T10:00:00.000Z", status: "failed", startedRuns: 0, message: "secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set" },
   },
-  { name: "nightly", workflow: "triage", schedule: { every: { days: 1 } }, nextExecutionAt: "2026-10-19T00:00:00.000Z", suspended: true },
+  { name: "nightly", workflow: "triage", kind: "schedule", workspaces: ["app"], schedule: { cron: "0 2 * * *" }, nextExecutionAt: "2026-10-19T02:00:00.000Z", suspended: true },
   {
     name: "ready-issues",
     workflow: "implement-issue",
+    kind: "fake",
+    workspaces: [],
     schedule: { every: { minutes: 5, seconds: 30 } },
     nextExecutionAt: "2026-10-18T10:05:30.000Z",
     lastEvaluation: { at: "2026-10-18T10:00:00.000Z", status: "succeeded", startedRuns: 2 },
@@ -144,15 +144,23 @@ const triggers: Trigger[] = [
 ];
 
 describe("status page: triggers", () => {
-  it("shows each trigger binding with its schedule, next check and how its last check went", async () => {
+  it("shows each trigger binding with its kind, workspaces, schedule, next check and how its last check went", async () => {
     openStatus({ triggers: createInMemoryTriggers(triggers) });
 
     const section = await screen.findByRole("region", { name: "Triggers" });
     expect(rows(await within(section).findByRole("table"))).toEqual([
-      ["Name", "Workflow", "Every", "Next check", "Last check"],
-      ["github-issues", "develop-issue", "1m", "2026-10-18T10:01:00.000Z", "failed 2026-10-18T10:00:00.000Z: secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set"],
-      ["nightly", "triage", "1d", "suspended", "not checked yet"],
-      ["ready-issues", "implement-issue", "5m30s", "2026-10-18T10:05:30.000Z", "succeeded 2026-10-18T10:00:00.000Z, 2 runs started"],
+      ["Name", "Workflow", "Trigger", "Workspaces", "Schedule", "Next check", "Last check"],
+      [
+        "github-issues",
+        "develop-issue",
+        "github-issues",
+        "app, web",
+        "every 1m",
+        "2026-10-18T10:01:00.000Z",
+        "failed 2026-10-18T10:00:00.000Z: secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set",
+      ],
+      ["nightly", "triage", "schedule", "app", "cron 0 2 * * *", "suspended", "not checked yet"],
+      ["ready-issues", "implement-issue", "fake", "none", "every 5m30s", "2026-10-18T10:05:30.000Z", "succeeded 2026-10-18T10:00:00.000Z, 2 runs started"],
     ]);
   });
 

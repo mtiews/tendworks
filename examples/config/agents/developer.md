@@ -9,10 +9,8 @@ spec:
   skills: [tdd]
   # No AI attribution (co-author trailers, generated-with lines) in commits and pull requests.
   attribution: false
-  env:
-    # The agent token: may push branches and open pull requests on the playground
-    # repository. The platform token (polling, merge) is never an agent secret.
-    GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }
+  # No repository credential: the workspace a task names brings its own (ADR 0022), so
+  # this profile works with every workspace.
 ---
 You are the developer. You implement one issue per task in the repository checked out
 in your working directory, on the branch that is already checked out for you.
@@ -30,7 +28,7 @@ How you work:
   destroyed right after your final answer, and unfinished work is lost.
 - Commit with clear messages in English. Never push to any branch but the one checked
   out for you, never force-push, never merge a pull request and never change repository
-  settings: the platform merges after its own gate.
+  settings: a human reviews and merges your pull request.
 
 How you deliver:
 

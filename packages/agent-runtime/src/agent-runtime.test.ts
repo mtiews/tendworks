@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { describeAgentTasks } from "./agent-tasks.suite.js";
 import { createFakeHarness } from "./fake-agent.js";
 import { describeHarness } from "./harness.suite.js";
-import { createAgentRuntime, createInMemoryTaskStore, createInMemoryTranscriptStore, type Harness, type HarnessSession } from "./index.js";
+import { createAgentRuntime, createInMemoryTaskStore, createInMemoryTranscriptStore, type Harness, type HarnessSession, type HarnessTask, type Workspace } from "./index.js";
 
 const profile = (name: string, fake: AgentProfile.FakeAgent = {}): AgentProfile.AgentProfile => ({
   apiVersion: "tendworks.dev/v1",
@@ -142,5 +142,60 @@ describe("fake agent", () => {
 
     expect(task.status.state).toBe("TASK_STATE_COMPLETED");
     expect(sessions).toEqual([undefined, { sessionId: "session-1" }]);
+  });
+});
+
+describe("agent runtime: workspaces", () => {
+  const app: Workspace = { prepare: async () => ({ problem: "not used here" }) };
+  const workspaces = (name: string) => (name === "app" ? app : undefined);
+  const inWorkspace = (value: unknown): A2A.SendMessageRequest => ({
+    message: { messageId: crypto.randomUUID(), role: "ROLE_USER", parts: [{ text: "work" }], metadata: { "dev.tendworks/workspace": value } },
+  });
+  function recording() {
+    const tasks: HarnessTask[] = [];
+    const harness: Harness = {
+      async run(task) {
+        tasks.push(task);
+        return { state: "TASK_STATE_COMPLETED", message: "done" };
+      },
+    };
+    return { tasks, runtime: createAgentRuntime({ profiles: [profile("developer")], harnesses: { fake: harness }, workspaces }) };
+  }
+
+  it("hands the harness the configured workspace the message names, with the branch to work on", async () => {
+    const { tasks, runtime } = recording();
+
+    await runtime.sendMessage("developer", inWorkspace({ name: "app", branch: "tendworks/run-1" }));
+    await runtime.sendMessage("developer", inWorkspace({ name: "app" }));
+    await runtime.sendMessage("developer", request([{ text: "no workspace" }]));
+
+    expect(tasks.map(({ workspace, branch }) => [workspace, branch])).toEqual([
+      [app, "tendworks/run-1"],
+      [app, undefined],
+      [undefined, undefined],
+    ]);
+  });
+
+  it("hands the harness a read-only workspace when the message asks for it with write: false", async () => {
+    const { tasks, runtime } = recording();
+
+    await runtime.sendMessage("developer", inWorkspace({ name: "app", write: false }));
+    await runtime.sendMessage("developer", inWorkspace({ name: "app", write: true }));
+
+    expect(tasks.map(({ workspace, readOnlyWorkspace }) => [workspace, readOnlyWorkspace])).toEqual([
+      [app, true],
+      [app, undefined],
+    ]);
+  });
+
+  it("refuses a workspace that is not configured, or a malformed one, without starting the agent", async () => {
+    const { tasks, runtime } = recording();
+
+    const unknown = await runtime.sendMessage("developer", inWorkspace({ name: "ghost", branch: "tendworks/run-1" }));
+    const malformed = await runtime.sendMessage("developer", inWorkspace({ repository: "https://git.example/acme/app.git" }));
+
+    expect(unknown.status).toMatchObject({ state: "TASK_STATE_FAILED", message: { parts: [{ text: "no workspace 'ghost' is configured" }] } });
+    expect(malformed.status).toMatchObject({ state: "TASK_STATE_FAILED", message: { parts: [{ text: expect.stringContaining("dev.tendworks/workspace") }] } });
+    expect(tasks).toEqual([]);
   });
 });

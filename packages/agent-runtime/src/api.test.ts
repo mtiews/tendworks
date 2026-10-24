@@ -3,7 +3,14 @@ import type { A2A, AgentProfile, AgentRuntime } from "@tendworks/shared";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentRuntimeApi } from "./api.js";
 import { dyingWorker, scriptedSandboxes, scriptedTemplate, type AgentScript } from "./claude-code/scripted-acp-agent.stub.js";
-import { createAgentRuntime, createClaudeCodeHarness, createInMemoryTaskStore, createInMemoryTranscriptStore, type TranscriptEntry } from "./index.js";
+import {
+  createAgentRuntime,
+  createClaudeCodeHarness,
+  createEmptyWorkspace,
+  createInMemoryTaskStore,
+  createInMemoryTranscriptStore,
+  type TranscriptEntry,
+} from "./index.js";
 import type { Sandboxes } from "./sandboxes.js";
 
 type TranscriptEntryList = AgentRuntime.components["schemas"]["TranscriptEntryList"];
@@ -234,7 +241,12 @@ describe("agent runtime API: chats", () => {
 
   function setup() {
     const turns: (() => void)[] = [];
-    const runtime = createAgentRuntime({ profiles: [assistant, slow], sleep: () => new Promise<void>((resolve) => turns.push(resolve)) });
+    const runtime = createAgentRuntime({
+      profiles: [assistant, slow],
+      sleep: () => new Promise<void>((resolve) => turns.push(resolve)),
+      workspaces: (name) => (name === "app" || name === "docs" ? createEmptyWorkspace() : undefined),
+      assistants: (name) => (name === "app" ? { profile: "assistant", write: false } : undefined),
+    });
     const api = createAgentRuntimeApi({ runtime });
     const call = (method: string, path: string, body?: unknown) =>
       api.fetch(
@@ -318,28 +330,34 @@ describe("agent runtime API: chats", () => {
     expect(invalid.status).toBe(400);
   });
 
-  it("starts a chat with a repository as its workspace and shows it", async () => {
+  it("starts a chat with a workspace's assistant by the workspace's name and shows it", async () => {
     const { call } = setup();
 
-    const started = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+    const started = await call("POST", "/chats", { workspace: "app", text: "Hello" });
     const chat = (await started.json()) as Chat;
 
     expect(started.status).toBe(201);
-    expect(chat).toMatchObject({ repository: "https://git.example/acme/app.git" });
-    expect(await (await call("GET", `/chats/${chat.id}`)).json()).toMatchObject({ repository: "https://git.example/acme/app.git" });
+    expect(chat).toMatchObject({ agent: "assistant", workspace: "app", write: false });
+    expect(await (await call("GET", `/chats/${chat.id}`)).json()).toMatchObject({ workspace: "app", write: false });
   });
 
-  it("refuses a chat with a repository that is no clone URL without credentials, with the reason", async () => {
+  it("refuses a workspace without an enabled assistant, an unknown one, a repository URL, and both a profile and a workspace", async () => {
     const { call } = setup();
 
-    const refused = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://user:secret@git.example/acme/app.git" });
-    const malformed = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: 42 });
+    const disabled = await call("POST", "/chats", { workspace: "docs", text: "Hello" });
+    const unknown = await call("POST", "/chats", { workspace: "ghost", text: "Hello" });
+    const repository = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
+    const both = await call("POST", "/chats", { agent: "assistant", workspace: "app", text: "Hello" });
+    const neither = await call("POST", "/chats", { text: "Hello" });
 
-    expect(refused.status).toBe(400);
-    const problem = (await refused.json()) as { title: string; detail: string };
-    expect(problem).toMatchObject({ title: "Invalid repository", detail: expect.stringContaining("without user name or password") });
-    expect(problem.detail).not.toContain("secret");
-    expect(malformed.status).toBe(400);
+    expect(disabled.status).toBe(400);
+    expect(await disabled.json()).toMatchObject({ title: "Chat not allowed", detail: expect.stringContaining("workspace docs has no enabled assistant") });
+    expect(unknown.status).toBe(400);
+    expect(await unknown.json()).toMatchObject({ title: "Unknown workspace", detail: "no workspace 'ghost' is configured" });
+    for (const refused of [repository, both, neither]) {
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ title: "Invalid request" });
+    }
     expect(await (await call("GET", "/chats")).json()).toEqual({ items: [] });
   });
 

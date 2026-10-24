@@ -3,14 +3,15 @@ $schema: https://json-schema.org/draft/2020-12/schema
 title: Notification
 description: >-
   Notifications human interaction records for the operator. A notification is recorded
-  before delivery is attempted, so it survives a failing delivery channel.
+  before delivery is attempted, so it survives a failing notification channel; it is
+  then delivered to every configured channel that selects its kind (ADR 0025).
 $defs:
   notification:
     title: Notification
     description: A message to the human that needs no decision, e.g. that a run finished or that an approval request waits.
     type: object
     additionalProperties: false
-    required: [id, kind, runId, title, createdAt, delivery]
+    required: [id, kind, runId, title, createdAt, deliveries]
     properties:
       id:
         type: string
@@ -26,23 +27,40 @@ $defs:
       detail:
         type: string
         description: More context, e.g. why a run failed.
+      artifacts:
+        type: array
+        description: >-
+          For a finished run (`run.completed`, `run.failed`): the artifacts its steps
+          reported, in step order, e.g. the pull request the agent opened. For
+          `approval.requested`: the request's links (`title` as `name`). Channels that can
+          link one link the first.
+        items:
+          $ref: './run.schema.yaml#/$defs/stepArtifact'
       createdAt:
         type: string
         format: date-time
-      delivery:
-        $ref: '#/$defs/delivery'
+      deliveries:
+        type: array
+        description: >-
+          One entry per notification channel that selects this kind, in channel name
+          order. Empty when no channel does.
+        items:
+          $ref: '#/$defs/delivery'
   notificationKind:
     title: NotificationKind
     description: What the notification is about.
     type: string
     enum: [run.completed, run.failed, approval.requested]
   delivery:
-    title: NotificationDelivery
-    description: Outcome of the latest delivery attempt through the notification channel.
+    title: ChannelDelivery
+    description: Outcome of the latest attempt to deliver the notification through one channel.
     type: object
     additionalProperties: false
-    required: [status]
+    required: [channel, status]
     properties:
+      channel:
+        type: string
+        description: Name of the notification channel (`metadata.name`).
       status:
         $ref: '#/$defs/deliveryStatus'
       attemptedAt:
@@ -51,7 +69,7 @@ $defs:
         description: When delivery was last attempted.
       error:
         type: string
-        description: Why the last delivery attempt failed.
+        description: Why the last delivery attempt failed, e.g. that the channel refused the message.
   deliveryStatus:
     title: DeliveryStatus
     description: >-

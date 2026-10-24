@@ -18,6 +18,7 @@ const compose = parse(composeText) as {
       environment?: Record<string, unknown>;
       command?: string[];
       networks?: string[];
+      volumes?: (string | { type: string; source: string; target: string; read_only?: boolean })[];
       depends_on?: Record<string, { condition: string }>;
     }
   >;
@@ -93,6 +94,26 @@ describe("the compose stack", () => {
     expect(onNetwork).toEqual(["mcp-gateway"]);
     expect(compose.networks?.["platform-mcp"]?.internal).toBe(true);
     expect(gateway?.image).toMatch(/:\d+\.\d+\.\d+/);
+  });
+
+  it("mounts the workspace root only into server and worker, read-only at the path it has on the host, and allows none by default", () => {
+    const withRoot = services.filter(([, service]) => service.environment?.TEND_WORKSPACE_ROOTS !== undefined).map(([name]) => name);
+    const mounted = services
+      .filter(([, service]) => (service.volumes ?? []).some((volume) => typeof volume === "object" && String(volume.source).includes("TEND_WORKSPACE_ROOTS")))
+      .map(([name]) => name);
+
+    expect(withRoot.sort()).toEqual(["server", "worker"]);
+    expect(mounted.sort()).toEqual(["server", "worker"]);
+    for (const name of mounted) {
+      const mount = compose.services[name]!.volumes!.find((volume) => typeof volume === "object" && String(volume.source).includes("TEND_WORKSPACE_ROOTS"));
+      expect(mount, name).toEqual({
+        type: "bind",
+        source: "${TEND_WORKSPACE_ROOTS:-./no-workspace-roots}",
+        target: "${TEND_WORKSPACE_ROOTS:-/no-workspace-roots}",
+        read_only: true,
+      });
+      expect(compose.services[name]!.environment!.TEND_WORKSPACE_ROOTS, name).toBe("${TEND_WORKSPACE_ROOTS:-}");
+    }
   });
 });
 

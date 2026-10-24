@@ -8,12 +8,17 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./source": {
+      "source": "./src/sources/trigger-source.ts",
+      "types": "./dist/sources/trigger-source.d.ts",
+      "default": "./dist/sources/trigger-source.js"
     }
   },
   "dependencies": {
-    "@gabrielbryk/jq-ts": "1.7.0",
     "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
+    "cron-parser": "5.10.2",
     "hono": "4.13.13",
     "openapi-fetch": "0.17.0",
     "pg": "8.23.1"

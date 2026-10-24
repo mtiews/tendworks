@@ -1,35 +1,56 @@
 # GitHub access for agents
 
-How to give coding agents just enough GitHub access to develop: push branches and open pull requests. It works with **one GitHub account on the Free plan**, for **public and private** repositories. It reduces the risk of agent changes reaching production; it does not rule it out. The remaining risks are listed below.
+How to give coding agents just enough GitHub access to develop: push branches and open pull requests. The platform itself performs no GitHub action besides reading issues (ADR 0024 (the-platform-has-no-pull-request-integration)); you review and merge pull requests in GitHub. It works with **one GitHub account on the Free plan**, for **public and private** repositories. It reduces the risk of agent changes reaching production; it does not rule it out. The remaining risks are listed below.
 
 ## What one account on Free can and cannot enforce
 
 - A token's **permissions** can be narrowed per repository and per capability (fine-grained personal access token). That is the main lever.
-- **Rules** on `main` (rulesets, branch protection) exist on Free only for **public** repositories. And since both tokens belong to you, a rule cannot tell the agent from the platform.
+- **Rules** on `main` (rulesets, branch protection) exist on Free only for **public** repositories. And since the agent token belongs to you, a rule cannot tell the agent from you.
 - Pushing implies merging: `git push` and merging a pull request both need **Contents: write** ([permissions per endpoint](https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens)). On a private Free repository the agent token can therefore push to `main` and merge.
 
 So the setup keeps production **out of the agent token's reach**: no access to workflows, Actions, secrets or settings, and releases that only you can start.
 
 ## Setup
 
-### 1. Agent token (`TENDWORKS_AGENT_GITHUB_TOKEN`)
+A setup needs exactly two kinds of token, both fine-grained personal access tokens, and no other GitHub credential:
+
+| Token | Used by | Where it lives | Can |
+| --- | --- | --- | --- |
+| **Issues token** `TENDWORKS_PLATFORM_GITHUB_TOKEN`, one per setup | the `github-issues` trigger (`token` of the binding) | server only, never a sandbox | read issues |
+| **Agent token**, one per workspace, e.g. `TENDWORKS_AGENT_GITHUB_TOKEN` | the workspace (`spec.credentials` of its `Workspace`) | worker and the sandboxes of that workspace's tasks, never the server | push branches, open pull requests |
+
+The trigger never uses an agent token, and agents never see the issues token.
+
+### 1. Agent token per workspace (`TENDWORKS_AGENT_GITHUB_TOKEN`)
 
 GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
 
 | Setting | Value |
 | --- | --- |
 | Expiration | 30–90 days |
-| Repository access | Only select repositories: the repositories the agent works on |
+| Repository access | Only select repositories: the repository of the workspace (one token per workspace keeps each scoped to its repository) |
 | Contents | Read and write (push branches) |
 | Pull requests | Read and write (open pull requests) |
 | Metadata | Read (set automatically) |
 | **Everything else** | **No access**. Especially **Workflows** (cannot change `.github/workflows`), **Actions** (cannot start or re-run workflows), **Secrets**, **Environments**, **Administration** (cannot change settings) |
 
-### 2. Platform token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
+The token is the workspace's credential (`spec.credentials` of its `Workspace`, ADR 0022): git clones and pushes with it through the sandbox's credential helper, and the session sees it as `GH_TOKEN` for `gh` when the workspace sets `env: GH_TOKEN`, as the starter's `playground` does. For another repository, declare another workspace with its own `TENDWORKS_AGENT_*` token; agent profiles hold none.
 
-A second fine-grained token, used only by the server (trigger polling and merge gate), never in a sandbox: same repositories, **Contents** read/write, **Pull requests** read/write, **Issues** read, everything else no access.
+### 2. Issues token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`)
 
-Put both in `deploy/.env` (`chmod 600`) and recreate the stack with `docker compose -f deploy/compose.yaml up -d`; `restart` does not reload `.env`.
+The `github-issues` trigger reads the issues of each workspace's repository on github.com with this token, and only reads. GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
+
+| Setting | Value |
+| --- | --- |
+| Expiration | 30–90 days |
+| Repository access | Only select repositories: the repositories of all workspaces the `github-issues` bindings name |
+| Issues | Read-only |
+| Metadata | Read (set automatically) |
+| **Everything else** | **No access**. It cannot write anything, not even a comment or a label |
+
+The binding refers to it as `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }`. A binding may only name `TENDWORKS_PLATFORM_*` secrets, so it cannot take an agent token. When you add a workspace to a binding, add its repository to this token too; for a private repository the checks of that workspace fail with GitHub's `404` until you do.
+
+Put the issues token and every agent token in `deploy/.env` (`chmod 600`) and recreate the stack with `docker compose -f deploy/compose.yaml up -d`; `restart` does not reload `.env`.
 
 ### 3. Keep production behind you, not behind `main`
 
@@ -44,15 +65,15 @@ Whatever the agent can push may end up on `main`, so nothing that reaches produc
 Settings → Rules → Rulesets → New branch ruleset, target the default branch, **no bypass list**:
 
 - Restrict deletions, Block force pushes
-- Require a pull request before merging (0 approvals: you cannot approve your own pull requests, and both tokens are you)
+- Require a pull request before merging (0 approvals: you cannot approve your own pull requests, and the agent token is you)
 
-This stops direct and force pushes to `main` by either token. The platform still merges through pull requests. The agent token could merge too.
+This stops direct and force pushes to `main` by the agent token. You merge through pull requests. The agent token could merge too.
 
 ## Remaining risks
 
 | Risk | Private Free | Public + ruleset | Reduced by |
 | --- | --- | --- | --- |
-| Agent pushes or force-pushes to `main` | possible | blocked | merge gate (agents push their run branch), `--audit`, keep a clone as a backup |
+| Agent pushes or force-pushes to `main` | possible | blocked | role description says push only the run branch, `--audit`, keep a clone as a backup |
 | Agent merges its own pull request | possible | possible | role description says never merge; `--audit`; manual releases |
 | Agent changes CI workflows | blocked | blocked | no Workflows permission |
 | Agent starts a release or reads secrets | blocked | blocked | no Actions or Secrets permission, releases only manual |
@@ -60,11 +81,11 @@ This stops direct and force pushes to `main` by either token. The platform still
 | Leaked agent token | the selected repositories, until it expires | same | short expiry, few repositories |
 | Commits and pull requests show your name | always | always | the branch name `tendworks/issue-…` marks agent work |
 
-Closing the merge gap fully needs a second identity (a machine user with a classic token, or a GitHub App token per run, see the roadmap) plus rules, which on private repositories need GitHub Pro.
+Closing the gap fully needs a second identity (a machine user with a classic token, or a GitHub App token per run, see the roadmap) plus rules, which on private repositories need GitHub Pro.
 
 ## Verify
 
-`scripts/check-github-agent-access.sh` checks the agent token. Run it against a test repository first. It reads the token from `--env-file` or `TENDWORKS_AGENT_GITHUB_TOKEN` and never prints it.
+`scripts/check-github-agent-access.sh` checks an agent token. Run it against a test repository first. It reads `TENDWORKS_AGENT_GITHUB_TOKEN` from `--env-file` or from the environment and never prints it; for a workspace with another agent token, pass that one in the environment: `TENDWORKS_AGENT_GITHUB_TOKEN="$(grep '^TENDWORKS_AGENT_MYAPP_TOKEN=' deploy/.env | cut -d= -f2-)" scripts/check-github-agent-access.sh --repo OWNER/NAME`. The issues token needs no check: it can only read issues.
 
 ```bash
 scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env                # read-only checks

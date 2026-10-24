@@ -1,5 +1,5 @@
 import * as acp from "@agentclientprotocol/sdk";
-import type { ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplate, VolumeMount } from "../sandboxes.js";
+import type { BindMount, ExecRequest, ExecResult, Sandboxes, SandboxProcess, SandboxTemplate, VolumeMount } from "../sandboxes.js";
 
 /*
  * A fake sandbox backend whose "claude-agent-acp" process is a scripted ACP agent built
@@ -193,7 +193,9 @@ export function scriptedSandboxes(
   const volumes = new Map<string, Files>();
   const volumeOwners = new Map<string, string>();
   const volumesCreatedAt = new Map<string, string>();
-  const created: { template: SandboxTemplate; volumes: VolumeMount[]; owner?: string; networks: string[] }[] = [];
+  const created: { template: SandboxTemplate; volumes: VolumeMount[]; binds: BindMount[]; owner?: string; networks: string[] }[] = [];
+  /** Bound host directories by host path; never deleted. */
+  const hostDirectories = new Map<string, Files>();
   const destroyed: string[] = [];
   const deletedVolumes: string[] = [];
   const attached: Attached[] = [];
@@ -210,7 +212,7 @@ export function scriptedSandboxes(
   const api: Sandboxes = {
     async create(template, options = {}) {
       const id = `sandbox${created.length + 1}`;
-      created.push({ template, volumes: options.volumes ?? [], ...(options.owner === undefined ? {} : { owner: options.owner }), networks: options.networks ?? [] });
+      created.push({ template, volumes: options.volumes ?? [], binds: options.binds ?? [], ...(options.owner === undefined ? {} : { owner: options.owner }), networks: options.networks ?? [] });
       const mounts = (options.volumes ?? []).map(({ volume, path }) => {
         if (!volumes.has(volume)) {
           volumes.set(volume, new Map());
@@ -219,6 +221,10 @@ export function scriptedSandboxes(
         }
         return { path, files: volumes.get(volume)! };
       });
+      for (const { hostPath, path } of options.binds ?? []) {
+        if (!hostDirectories.has(hostPath)) hostDirectories.set(hostPath, new Map());
+        mounts.push({ path, files: hostDirectories.get(hostPath)! });
+      }
       sandboxes.set(id, { files: new Map(), mounts, kill: () => {}, createdAt: new Date().toISOString(), ...(options.owner === undefined ? {} : { owner: options.owner }) });
       return { id };
     },

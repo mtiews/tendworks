@@ -1,8 +1,8 @@
-import type { A2A, Workflow } from "@tendworks/shared";
+import type { A2A, ControlPlane, Workflow } from "@tendworks/shared";
 import { COST, RUN_ID, STEP_REFERENCE, TRANSCRIPT, WORKSPACE, type AgentTaskExecutor } from "./agent-task-executor.js";
 import { evaluate, evaluateTemplate, ExpressionError, transform, type Variables } from "./expressions.js";
 import type { EventInbox } from "./event-inbox.js";
-import type { HttpExecutor, HttpResponse } from "./http-executor.js";
+import type { HttpExecutor, HttpRequest, HttpResponse } from "./http-executor.js";
 
 // Deterministic core: no I/O, no clock, no randomness. All side effects go through
 // the executor, so the interpreter can run inside a durable execution engine.
@@ -39,7 +39,7 @@ export interface Step {
   /** What the agent session cost, as the agent reported it. */
   cost?: { amount: number; currency: string };
   /** The workspace the step handed to the agent (`dev.tendworks/workspace` of its message), as the workflow set it. */
-  workspace?: { repository: string; branch: string };
+  workspace?: { name: string; branch?: string };
   /** Links the agent reported as artifacts of its task, e.g. a pull request. */
   artifacts?: { name: string; url: string; description?: string }[];
   error?: WorkflowError;
@@ -63,6 +63,19 @@ export interface WorkflowError {
 }
 
 const ERROR_TYPES = "https://serverlessworkflow.io/spec/1.0.0/errors/";
+const APPROVAL_DECIDED = "dev.tendworks.approval.decided";
+
+/**
+ * The output of a human step: what the policies decided and, when they asked, the
+ * approval request and the chosen answer. `outcome` says whether the workflow goes on.
+ */
+export interface HumanStepOutcome {
+  decision: "allow" | "ask";
+  policy?: string;
+  approvalRequest?: string;
+  answer?: string;
+  outcome: "continue" | "stop";
+}
 
 class TaskFailure extends Error {
   constructor(readonly error: WorkflowError) {
@@ -137,6 +150,10 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
         rawOutput = await listen(task, reference);
       } else if ("call" in task && task.call === "http") {
         rawOutput = await callHttp(task, reference, input);
+      } else if ("call" in task && task.call === "approval") {
+        const outcome = await askHuman(task, reference, input);
+        rawOutput = outcome;
+        ended = outcome.outcome === "stop";
       } else if ("call" in task) {
         const result = await call(task, reference, input, step);
         step.taskId = result.id;
@@ -172,12 +189,19 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
 
   async function callHttp(task: Workflow.CallHTTPTask, reference: string, input: unknown): Promise<unknown> {
     const { method, endpoint, headers = {}, body } = task.with;
-    const request = {
-      method: method.toUpperCase(),
-      endpoint: String(evaluateTemplate(endpoint, input, variables(input))),
-      headers: evaluateTemplate(headers, input, variables(input)) as Record<string, string>,
-      ...(body === undefined ? {} : { body: evaluateTemplate(body, input, variables(input)) }),
-    };
+    return send(
+      {
+        method: method.toUpperCase(),
+        endpoint: String(evaluateTemplate(endpoint, input, variables(input))),
+        headers: evaluateTemplate(headers, input, variables(input)) as Record<string, string>,
+        ...(body === undefined ? {} : { body: evaluateTemplate(body, input, variables(input)) }),
+      },
+      reference,
+    );
+  }
+
+  /** Makes a request through `options.http`; a response outside 2xx fails the task with its problem details. */
+  async function send(request: HttpRequest, reference: string): Promise<unknown> {
     let response: HttpResponse;
     try {
       if (!options.http) throw new Error("this runtime makes no HTTP calls");
@@ -203,6 +227,56 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
       });
     }
     return response.content ?? null;
+  }
+
+  /**
+   * The human step: asks the control plane (which decides by the policies of the run's
+   * workflow), then, unless the action is allowed or the step's request was decided
+   * before (a retried step), waits for the decision of exactly that request.
+   */
+  async function askHuman(task: Workflow.CallApprovalTask, reference: string, input: unknown): Promise<HumanStepOutcome> {
+    const controlPlaneUrl = runtime.metadata.controlPlaneUrl;
+    if (typeof controlPlaneUrl !== "string") {
+      throw new TaskFailure({ type: `${ERROR_TYPES}runtime`, status: 500, instance: reference, title: "This runtime names no control plane" });
+    }
+    const question = evaluateTemplate(task.with, input, variables(input)) as Workflow.ApprovalArguments;
+    const body: AskApprovalRequest = { run: options.runId, step: reference, ...question, links: question.links ?? [] };
+    const content = await send({ method: "POST", endpoint: `${controlPlaneUrl}/approval-requests`, headers: {}, body }, reference);
+    const outcome = approvalOutcomeOf(content);
+    if (!outcome) {
+      throw new TaskFailure({
+        type: `${ERROR_TYPES}communication`,
+        status: 502,
+        instance: reference,
+        title: "The control plane answered no decision",
+        detail: JSON.stringify(content),
+      });
+    }
+    const policy = outcome.policy === undefined ? {} : { policy: outcome.policy };
+    if (outcome.decision === "allow") return { decision: "allow", ...policy, outcome: "continue" };
+    const request = outcome.approvalRequest;
+    const id = request.id;
+    let answer: unknown = request.answer;
+    if (request.status !== "decided") {
+      if (!options.events) {
+        throw new TaskFailure({ type: `${ERROR_TYPES}runtime`, status: 500, instance: reference, title: "This runtime delivers no events" });
+      }
+      const event = await options.events.receive(
+        (candidate) => candidate.type === APPROVAL_DECIDED && isObject(candidate.data) && candidate.data.approvalRequest === id,
+      );
+      answer = (event.data as Record<string, unknown>).answer;
+    }
+    const chosen = request.answers.find((offered) => offered.label === answer);
+    if (!chosen) {
+      throw new TaskFailure({
+        type: `${ERROR_TYPES}runtime`,
+        status: 500,
+        instance: reference,
+        title: "Approval request decided with an answer it does not offer",
+        detail: `approval request ${id} was decided with ${JSON.stringify(answer)}`,
+      });
+    }
+    return { decision: "ask", ...policy, approvalRequest: id, answer: chosen.label, outcome: chosen.outcome };
   }
 
   async function listen(task: Workflow.ListenTask, reference: string): Promise<unknown[]> {
@@ -260,6 +334,28 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
   }
 }
 
+type AskApprovalRequest = ControlPlane.components["schemas"]["AskApprovalRequest"];
+type ApprovalOutcome = ControlPlane.components["schemas"]["ApprovalOutcome"];
+type ApprovalRequest = NonNullable<ApprovalOutcome["approvalRequest"]>;
+
+/**
+ * The control plane's answer to `POST /approval-requests` (`ApprovalOutcome`), checked as
+ * far as the human step relies on it: a decision, and with `ask` the request with its id,
+ * status and answers. Undefined for anything else.
+ */
+function approvalOutcomeOf(
+  content: unknown,
+): { decision: "allow"; policy?: string } | { decision: "ask"; policy?: string; approvalRequest: ApprovalRequest } | undefined {
+  if (!isObject(content)) return undefined;
+  const policy = typeof content.policy === "string" ? { policy: content.policy } : {};
+  if (content.decision === "allow") return { decision: "allow", ...policy };
+  const request = content.approvalRequest;
+  const isAnswer = (answer: unknown) => isObject(answer) && typeof answer.label === "string" && (answer.outcome === "continue" || answer.outcome === "stop");
+  if (content.decision !== "ask" || !isObject(request) || typeof request.id !== "string") return undefined;
+  if ((request.status !== "pending" && request.status !== "decided") || !Array.isArray(request.answers) || !request.answers.every(isAnswer)) return undefined;
+  return { decision: "ask", ...policy, approvalRequest: request as ApprovalRequest };
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -287,11 +383,11 @@ function sessionRecord(task: A2A.Task): Pick<Step, "transcript" | "cost" | "arti
   };
 }
 
-/** The workspace a message asks for, when it names a repository and a branch. */
+/** The workspace a message asks for, when it names one, with the branch when it names one. */
 function workspaceOf(metadata: Record<string, unknown> | undefined): Step["workspace"] {
   const value = metadata?.[WORKSPACE];
-  if (!isObject(value) || typeof value.repository !== "string" || typeof value.branch !== "string") return undefined;
-  return { repository: value.repository, branch: value.branch };
+  if (!isObject(value) || typeof value.name !== "string") return undefined;
+  return { name: value.name, ...(typeof value.branch === "string" ? { branch: value.branch } : {}) };
 }
 
 function toPart(part: Workflow.A2APart): A2A.Part {

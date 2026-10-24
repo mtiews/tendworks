@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createAgentRuntime, createInMemoryTaskStore } from "@tendworks/agent-runtime";
 import { loadConfiguration } from "@tendworks/control-plane";
-import { createApprovals, createFakePullRequests, createInMemoryApprovalStore, createMergeGate } from "@tendworks/human-interaction";
+import { createApprovals, createInMemoryApprovalStore } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
 import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "@tendworks/trigger-gateway";
 import { afterAll, describe, expect, it } from "vitest";
 import { contractFiles, contractSchema, describeErrors, readContract } from "./support/contracts.js";
+import { TRIGGER_SOURCES, withFakeBindings } from "./support/trigger-sources.js";
 import { fixtureConfiguration } from "../fixtures/fixture-configuration.js";
 
 /*
@@ -94,7 +95,7 @@ describe("events the domains emit", () => {
 
   it("trigger gateway: trigger.fired for each matching issue", async () => {
     const store = createInMemoryFiringStore();
-    const gateway = createTriggerGateway({ bindings: configuration.triggerBindings, store, runs: createInMemoryRunStarter(), log: () => {} });
+    const gateway = createTriggerGateway({ bindings: withFakeBindings(configuration.triggerBindings), workspaces: configuration.workspaces, sources: TRIGGER_SOURCES, store, runs: createInMemoryRunStarter(), log: () => {} });
 
     await gateway.check("issue-ready-for-agent");
 
@@ -103,17 +104,23 @@ describe("events the domains emit", () => {
   });
 
   it("human interaction: approval.requested and approval.decided", async () => {
-    const PR = "https://git.example/example/playground/pull/1";
     const approvals = createInMemoryApprovalStore();
-    const gate = createMergeGate({
-      policies: configuration.policies,
-      runs: async (id) => ({ id, workflow: "fake-develop-and-ask", status: "running", artifacts: [{ name: "pull-request", url: PR, workspace: { repository: "https://git.example/example/playground.git", branch: "tendworks/fake" } }] }),
-      pullRequests: () => createFakePullRequests([{ url: PR, headBranch: "tendworks/fake", state: "open" }]),
-      approvals,
-    });
+    const run = { id: "r-1", workflow: "release-app", status: "running" as const, traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" };
+    const human = createApprovals({ store: approvals, runs: async () => run });
 
-    const asked = await gate.merge({ run: "r-1", pullRequest: PR });
-    await createApprovals({ store: approvals }).decide(("pending" in asked ? asked.pending : undefined)!.approvalRequest!.id, "approve");
+    const asked = await human.ask({
+      run: "r-1",
+      step: "/do/1/confirm",
+      action: "deploy",
+      question: "Deploy release 1.4 for run r-1 of release-app?",
+      links: [{ title: "Release notes", url: "https://git.example/acme/app/releases/1.4" }],
+      answers: [
+        { label: "Deploy", outcome: "continue" },
+        { label: "Cancel", outcome: "stop" },
+      ],
+    });
+    if (!("approvalRequest" in asked) || !asked.approvalRequest) throw new Error("expected an approval request");
+    await human.decide(asked.approvalRequest.id, "Cancel");
 
     expect(approvals.published.map((event) => event.type)).toEqual(["dev.tendworks.approval.requested", "dev.tendworks.approval.decided"]);
     expectValid(approvals.published);

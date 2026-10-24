@@ -34,6 +34,7 @@ export function ChatList() {
             <tr>
               <th>Chat</th>
               <th>Agent</th>
+              <th>Workspace</th>
               <th>Status</th>
               <th>Started</th>
               <th>Last activity</th>
@@ -47,6 +48,7 @@ export function ChatList() {
                   <Link to={`/chats/${encodeURIComponent(chat.id)}`}>{chat.id}</Link>
                 </td>
                 <td>{chat.agent}</td>
+                <td>{chat.workspace ?? ""}</td>
                 <td>
                   <span className={`status status-${chat.status}`}>{chat.status}</span>
                 </td>

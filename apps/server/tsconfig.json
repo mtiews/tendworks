@@ -24,6 +24,12 @@
     },
     {
       "path": "../../packages/trigger-gateway"
+    },
+    {
+      "path": "../../packages/trigger-source-github-issues"
+    },
+    {
+      "path": "../../packages/trigger-source-schedule"
     }
   ]
 }

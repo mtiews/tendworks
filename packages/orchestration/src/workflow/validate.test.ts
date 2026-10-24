@@ -37,7 +37,7 @@ do:${implement}
     expect(issues).toEqual(["/do/1/review/do/0/pause: unsupported task type 'wait' (supported: call, do, switch, listen)"]);
   });
 
-  it("rejects a call type other than a2a and http", () => {
+  it("rejects a call type other than a2a, approval and http", () => {
     const issues = issuesOf(`${header}
 do:
   - fetch:
@@ -45,7 +45,23 @@ do:
       with: { proto: { endpoint: https://example.com/a.proto }, service: { name: S, host: example.com }, method: M }
 `);
 
-    expect(issues).toEqual(["/do/0/fetch: unsupported call type 'grpc' (supported: a2a, http)"]);
+    expect(issues).toEqual(["/do/0/fetch: unsupported call type 'grpc' (supported: a2a, approval, http)"]);
+  });
+
+  it("accepts a human step and rejects an answer that neither continues nor stops", () => {
+    const step = (outcome: string) => `${header}
+do:
+  - confirm:
+      call: approval
+      with:
+        action: merge-pull-request
+        question: '\${ "Merge \\(.pullRequest)?" }'
+        links: [{ title: Pull request, url: '\${ .pullRequest }' }]
+        answers: [{ label: Merged, outcome: ${outcome} }]
+`;
+
+    expect(validateWorkflow(parse(step("continue")))).toMatchObject({ do: [{ confirm: { call: "approval" } }] });
+    expect(issuesOf(step("retry"))).toEqual([expect.stringMatching(/^\/do\/0\/confirm\/with\/answers\/0\/outcome: /)]);
   });
 
   it("accepts an http call with a literal or computed endpoint and a body", () => {
@@ -56,9 +72,9 @@ do:
       call: http
       with:
         method: post
-        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }'
+        endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/deployments" }'
         headers: { x-request: '\${ .id }' }
-        body: { pullRequest: '\${ .pullRequest }', policy: merge-gate }
+        body: { pullRequest: '\${ .pullRequest }', policy: careful }
   - ping:
       call: http
       with: { method: get, endpoint: https://example.com/ping }

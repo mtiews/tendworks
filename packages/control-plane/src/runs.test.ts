@@ -74,7 +74,7 @@ describe("runs API", () => {
   it("hands what started the run to orchestration, and declares a run without an origin as started by hand", async () => {
     const runs = createInMemoryRuns();
     const { request } = setup(runs);
-    const startedBy = { kind: "trigger", binding: "ready", issue: { repository: "acme/app", number: 7, url: "https://issues.example/7" } };
+    const startedBy = { kind: "trigger", binding: "ready", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://issues.example/7" } };
 
     await request("POST", "/runs", { workflow: "build", startedBy });
     await request("POST", "/runs", { workflow: "build" });

@@ -171,7 +171,7 @@ wait_triggered_run() {
     exit 1
   fi
   while [ $SECONDS -lt $deadline ]; do
-    id=$(api_get /runs | field "r.items.find((x) => x.startedBy?.kind === 'trigger' && x.startedBy.issue?.number === $issue && x.startedBy.issue?.repository === '$PLAYGROUND')?.id")
+    id=$(api_get /runs | field "r.items.find((x) => x.startedBy?.kind === 'trigger' && x.startedBy.item?.key === '$PLAYGROUND#$issue')?.id")
     [ -n "$id" ] && break
     sleep 10
   done
@@ -182,15 +182,6 @@ wait_triggered_run() {
     exit 1
   fi
   echo "$id"
-}
-
-# Prints a field of pull request $1 (URL) from GitHub, e.g. `pr_field <url> state`.
-pr_field() { gh pr view "$1" --json "$2" --jq ".$2"; }
-
-# True when the policy ask-before-merge lists develop-issue under spec.workflows (comments
-# in the file do not count).
-asks_for_develop_issue() {
-  grep -E '^[[:space:]]*workflows:' "$CONFIG/policies/ask-before-merge.yaml" | grep -q 'develop-issue'
 }
 
 # Fails early with a hint when the control plane does not answer, e.g. because server or

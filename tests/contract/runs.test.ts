@@ -47,7 +47,7 @@ describe("runs through the control plane, orchestration and the fake agent", () 
     const client = platform();
 
     const { data: started, response } = await client.POST("/runs", {
-      body: { workflow: "hello-agent", input: { issue: { number: 1, title: "Say hello" } } },
+      body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } },
     });
     expect(response.status).toBe(201);
 

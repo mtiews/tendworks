@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile defaults, how clients show costs and run origins, and (under ./migrations, kept out of the browser-safe entry point) versioned schema migrations for one domain's store and a bundle's start-up migration, (under ./secrets-file, also Node.js only) handing one consumer's secrets to another container through a file, and (under ./store-connection) the store's connection string with its password.",
+  "description": "Platform library (not a domain): the Tendworks CloudEvent envelope with W3C trace context, secret references with an allowlist per consumer, Server-Sent Events streams and following a transcript stream, the platform MCP server's name, agent profile and workspace assistant defaults, how clients show costs and run origins, and (under ./migrations, kept out of the browser-safe entry point) versioned schema migrations for one domain's store and a bundle's start-up migration, (under ./secrets-file, also Node.js only) handing one consumer's secrets to another container through a file, (under ./config-documents, Node.js only) reading one kind of document from a configuration folder, (under ./store-connection) the store's connection string with its password, and (under ./workspace-roots, Node.js only) the operator's workspace roots, the check that a directory workspace lies under one and that git credentials go over https only.",
   "exports": {
     ".": {
       "source": "./src/index.ts",
@@ -20,11 +20,24 @@
       "types": "./dist/secrets-file.d.ts",
       "default": "./dist/secrets-file.js"
     },
+    "./workspace-roots": {
+      "source": "./src/workspace-roots.ts",
+      "types": "./dist/workspace-roots.d.ts",
+      "default": "./dist/workspace-roots.js"
+    },
+    "./config-documents": {
+      "source": "./src/config-documents.ts",
+      "types": "./dist/config-documents.d.ts",
+      "default": "./dist/config-documents.js"
+    },
     "./store-connection": {
       "source": "./src/store-connection.ts",
       "types": "./dist/store-connection.d.ts",
       "default": "./dist/store-connection.js"
     }
+  },
+  "dependencies": {
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@types/pg": "8.23.1",

@@ -17,10 +17,10 @@ async function waitForEnd(runId: string, timeoutMs = 45_000): Promise<Run> {
 describe("runs on the compose stack", () => {
   it("starts the example workflow through the API and the fake agent completes it", { timeout: 60_000 }, async () => {
     const { data: started, response } = await client.POST("/runs", {
-      body: { workflow: "hello-agent", input: { issue: { number: 6, title: "Start a run" } } },
+      body: { workflow: "hello-agent", input: { item: { key: "start", title: "Start a run", number: 6 } } },
     });
     expect(response.status).toBe(201);
-    expect(started).toMatchObject({ workflow: "hello-agent", input: { issue: { number: 6 } } });
+    expect(started).toMatchObject({ workflow: "hello-agent", input: { item: { number: 6 } } });
 
     const run = await waitForEnd(started!.id);
 

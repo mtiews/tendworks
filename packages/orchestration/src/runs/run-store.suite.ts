@@ -25,7 +25,7 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
       workflow: "hello",
       status: "pending",
       input: { issue: { number: 7 } },
-      startedBy: { kind: "trigger", binding: "ready-issues", issue: { repository: "acme/app", number: 7, url: "https://issues.example/7" } },
+      startedBy: { kind: "trigger", binding: "ready-issues", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://issues.example/7" } },
       traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01",
       steps: [],
       createdAt: "2026-10-18T10:00:00.000Z",
@@ -103,7 +103,7 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
         name: "implement",
         reference: "/do/0/implement",
         status: "completed" as const,
-        workspace: { repository: "https://git.example/acme/app.git", branch: "tendworks/issue-7" },
+        workspace: { name: "app", branch: "tendworks/issue-7" },
         artifacts: [{ name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "The change" }],
         startedAt: "2026-10-18T10:00:01.000Z",
         finishedAt: "2026-10-18T10:00:02.000Z",
@@ -136,7 +136,7 @@ export function describeRunStore(name: string, setup: () => Promise<RunStoreSuit
     it("names the task and transcript of a running step without changing anything else", async () => {
       const run = newRun();
       await context.store.create(run);
-      const step = { name: "implement", reference: "/do/0/implement", status: "running" as const, workspace: { repository: "https://git.example/acme/app.git", branch: "b" }, startedAt: "2026-10-18T10:00:01.000Z" };
+      const step = { name: "implement", reference: "/do/0/implement", status: "running" as const, workspace: { name: "app", branch: "b" }, startedAt: "2026-10-18T10:00:01.000Z" };
       await context.store.saveStep(run.id, step, []);
 
       await context.store.nameTask(run.id, step.reference, { taskId: "t-1", transcript: "file:///var/lib/tendworks/transcripts/t-1.jsonl" });

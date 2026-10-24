@@ -15,6 +15,8 @@
     "@tendworks/platform": "workspace:*",
     "@tendworks/shared": "workspace:*",
     "@tendworks/trigger-gateway": "workspace:*",
+    "@tendworks/trigger-source-github-issues": "workspace:*",
+    "@tendworks/trigger-source-schedule": "workspace:*",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
     "openapi-fetch": "0.17.0",

@@ -1,4 +1,4 @@
-import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, type Run, type TranscriptEntry } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryAgentRuntime, createInMemoryRuns, emptyConfiguration, type Run, type TranscriptEntry } from "@tendworks/control-plane";
 import { describe, expect, it, vi } from "vitest";
 import { parse, parseAllDocuments } from "yaml";
 import { runTend } from "./tend.js";
@@ -40,7 +40,7 @@ const failed: Run = {
   id: "7f1d2a9e-run-failed",
   status: "failed",
   error,
-  startedBy: { kind: "trigger", binding: "ready-issues", issue: { repository: "acme/playground", number: 7, url: "https://github.com/acme/playground/issues/7" } },
+  startedBy: { kind: "trigger", binding: "ready-issues", workspace: "playground", item: { key: "acme/playground#7", title: "Fix the login", url: "https://github.com/acme/playground/issues/7" } },
   steps: [{ ...completed.steps[0]!, status: "failed", error }],
   createdAt: "2026-10-18T11:00:00.000Z",
 };
@@ -83,7 +83,7 @@ const transcripts: Record<string, TranscriptEntry[]> = {
     { position: 2, time: at("12:00:02"), type: "session-resume-failed", sessionId: "session-1", reason: "gone" },
     { position: 3, time: at("12:00:02"), type: "session-resumed", sessionId: "session-2" },
     { position: 4, time: at("12:00:02"), type: "plan", steps: [{ content: "Read the diff", status: "completed" }, { content: "Comment", status: "in-progress" }] },
-    { position: 5, time: at("12:00:03"), type: "workspace-checkout", workspace: { repository: "https://git.example/acme/app.git", branch: "tendworks/run-1" }, exitCode: 0, output: "" },
+    { position: 5, time: at("12:00:03"), type: "workspace-checkout", workspace: { url: "https://git.example/acme/app.git", name: "app", branch: "tendworks/run-1" }, exitCode: 0, output: "" },
     { position: 6, time: at("12:00:03"), type: "permission", tool: "Write review.md", granted: true },
     { position: 7, time: at("12:00:03"), type: "harness-output", text: "warning: slow" },
     { position: 8, time: at("12:00:04"), type: "error", message: "the harness ended unexpectedly" },
@@ -100,7 +100,7 @@ async function tend(args: string[], extra: Run[] = [], transcriptsOf: Record<str
   const api = createControlPlaneApi({
     agentRuntime,
     probes: [],
-    configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+    configuration: emptyConfiguration(),
     apiToken: "test-token",
     readToken: "test-read-token",
     runs,
@@ -131,7 +131,7 @@ describe("tend run list", () => {
     const lines = stdout.trimEnd().split("\n");
     expect(lines[0]).toMatch(/^ID\s+WORKFLOW\s+STATUS\s+STARTED BY\s+CREATED\s+FINISHED$/);
     expect(lines[1]).toMatch(
-      /^7f1d2a9e-run-failed\s+hello-agent\s+failed\s+trigger ready-issues: acme\/playground#7\s+2026-10-18T11:00:00.000Z\s+2026-10-18T10:00:02.000Z$/,
+      /^7f1d2a9e-run-failed\s+hello-agent\s+failed\s+trigger ready-issues in playground: acme\/playground#7\s+2026-10-18T11:00:00.000Z\s+2026-10-18T10:00:02.000Z$/,
     );
     expect(lines[2]).toMatch(/^0b6c4c1e-run-completed\s+hello-agent\s+completed\s+manual\s+2026-10-18T10:00:00.000Z/);
   });
@@ -196,12 +196,35 @@ describe("tend run get", () => {
     expect(stdout).toMatch(/^checks\s+\{"passed":3\}$/m);
   });
 
+  it("shows the artifacts each step's agent reported, e.g. the pull request it opened", async () => {
+    const withArtifacts: Run = {
+      ...completed,
+      id: "run-with-artifacts",
+      steps: [
+        { ...completed.steps[0]!, artifacts: [{ name: "Pull request #7", url: "https://git.example/acme/app/pull/7" }, { name: "Preview", url: "https://preview.example/7" }] },
+        { ...completed.steps[0]!, reference: "/do/1/notify", taskId: "task-2" },
+      ],
+    };
+    const { stdout } = await tend(["run", "get", withArtifacts.id], [withArtifacts]);
+
+    expect(stdout).toMatch(/^STEP\s+ARTIFACT\s+URL$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+Pull request #7\s+https:\/\/git\.example\/acme\/app\/pull\/7$/m);
+    expect(stdout).toMatch(/^\/do\/0\/implement\s+Preview\s+https:\/\/preview\.example\/7$/m);
+    expect(stdout).not.toMatch(/^\/do\/1\/notify\s+\S+\s+https?:/m);
+  });
+
+  it("shows no artifacts table for a run without artifacts", async () => {
+    const { stdout } = await tend(["run", "get", completed.id]);
+
+    expect(stdout).not.toMatch(/ARTIFACT/);
+  });
+
   it("shows why a failed run failed", async () => {
     const { exitCode, stdout } = await tend(["run", "get", failed.id]);
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(/^STATUS\s+failed$/m);
-    expect(stdout).toMatch(/^STARTED BY\s+trigger ready-issues: acme\/playground#7 \(https:\/\/github.com\/acme\/playground\/issues\/7\)$/m);
+    expect(stdout).toMatch(/^STARTED BY\s+trigger ready-issues in playground: acme\/playground#7 \(https:\/\/github.com\/acme\/playground\/issues\/7\)$/m);
     expect(stdout).toMatch(/^ERROR\s+\/do\/0\/implement: Agent task ended in state TASK_STATE_FAILED: not today$/m);
   });
 
@@ -314,7 +337,7 @@ describe("tend run logs --follow", () => {
     const api = createControlPlaneApi({
       agentRuntime,
       probes: [],
-      configuration: { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], policies: [], pullRequestIntegrations: [] },
+      configuration: emptyConfiguration(),
       apiToken: "test-token",
       readToken: "test-read-token",
       runs,

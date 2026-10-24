@@ -144,7 +144,8 @@ describe("orchestration API", () => {
     const startedBy = {
       kind: "trigger",
       binding: "ready-issues",
-      issue: { repository: "acme/playground", number: 7, title: "Fix it", url: "https://issues.example/acme/playground/7" },
+      workspace: "playground",
+      item: { key: "acme/playground#7", title: "Fix it", url: "https://issues.example/acme/playground/7" },
     };
 
     const triggered = (await request("POST", "/runs", { workflow, startedBy })).body as Run;
@@ -205,13 +206,13 @@ document: { dsl: '1.0.3', namespace: test, name: merge, version: '0.1.0' }
 do:
   - merge:
       call: http
-      with: { method: post, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/pull-requests/merge" }' }
+      with: { method: post, endpoint: '\${ $runtime.metadata.controlPlaneUrl + "/deployments" }' }
 `);
 
     const run = (await request("POST", "/runs", { workflow: merge })).body as Run;
 
     const done = await until(async () => (await request("GET", `/runs/${run.id}`)).body, finished);
     expect(done).toMatchObject({ status: "completed", output: { merged: true } });
-    expect(http.requests.map((r) => r.endpoint)).toEqual(["http://control-plane.test/pull-requests/merge"]);
+    expect(http.requests.map((r) => r.endpoint)).toEqual(["http://control-plane.test/deployments"]);
   });
 });

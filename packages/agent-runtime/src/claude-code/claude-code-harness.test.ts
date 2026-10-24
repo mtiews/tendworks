@@ -1,6 +1,9 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import * as acp from "@agentclientprotocol/sdk";
 import { createSecretResolver } from "@tendworks/platform";
-import type { A2A, AgentProfile } from "@tendworks/shared";
+import type { A2A, AgentProfile, Workspace } from "@tendworks/shared";
 import { describe, expect, it, vi } from "vitest";
 import { describeAgentTasks } from "../agent-tasks.suite.js";
 import type { HarnessObserver, HarnessSession } from "../harness.js";
@@ -15,6 +18,7 @@ import {
 } from "../index.js";
 import type { Sandboxes } from "../sandboxes.js";
 import type { TranscriptRecord } from "../transcripts/transcript-store.js";
+import { createDirectoryClaims, createDirectoryWorkspace, createGitWorkspace } from "../workspace.js";
 import { dyingWorker, encode, refusingRemovals, scriptedSandboxes, scriptedTemplate as template, type AgentScript } from "./scripted-acp-agent.stub.js";
 
 const profile = (sandbox: string | undefined = "claude-code"): AgentProfile.AgentProfile => ({
@@ -468,8 +472,21 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
   const agentToken = "agent-token-secret-value";
   const secrets = createSecretResolver("agent", { TENDWORKS_AGENT_TOKEN: agentToken, TENDWORKS_PLATFORM_TOKEN: "platform-token" });
   const withToken = { env: { GH_TOKEN: { secretRef: { name: "TENDWORKS_AGENT_TOKEN" } } } };
-  const workspace = { repository: "https://git.example/acme/app.git", branch: "tendworks/run-1" };
-  const withWorkspace = (value: unknown = workspace): A2A.Message => ({ ...message(), metadata: { "dev.tendworks/workspace": value } });
+  const workspaceToken = "workspace-token-secret-value";
+  const workspaceSecrets = createSecretResolver("agent", { TENDWORKS_AGENT_APP_TOKEN: workspaceToken });
+  const url = "https://git.example/acme/app.git";
+  /** A task in the git workspace `app`, whose credential is TENDWORKS_AGENT_APP_TOKEN. */
+  const inWorkspace = (credentials: Partial<Workspace.WorkspaceCredentials> | undefined = {}) => ({
+    taskId: "task-1",
+    message: message(),
+    profile: developer(),
+    workspace: createGitWorkspace(
+      { name: "app", url, defaultBranch: "main", ...(credentials ? { credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" }, ...credentials } } : {}) },
+      workspaceSecrets,
+    ),
+    branch: "tendworks/run-1",
+  });
+  const helperEnv = { TENDWORKS_GIT_USERNAME: "x-access-token", TENDWORKS_GIT_PASSWORD: workspaceToken };
 
   it("gives the agent its role description and how to report results as instructions for the session", async () => {
     const sandboxes = scriptedSandboxes();
@@ -578,16 +595,105 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     expect(JSON.stringify(entries)).not.toContain(agentToken);
   });
 
-  it("checks the workspace out in the sandbox, with the profile's secrets, before the harness starts", async () => {
+  it("clones the workspace on the task's branch with the workspace's credential, not the profile's secrets, before the harness starts", async () => {
     const sandboxes = scriptedSandboxes();
+    const { observer, entries } = observe();
 
-    await harness(sandboxes.api, { secrets }).run({ taskId: "task-1", message: withWorkspace(), profile: developer(withToken) }, observe().observer);
+    await harness(sandboxes.api, { secrets }).run({ ...inWorkspace(), profile: developer(withToken) }, observer);
 
     expect(sandboxes.execs).toHaveLength(1);
     const { request } = sandboxes.execs[0]!;
-    expect(request.command.slice(-2)).toEqual([workspace.repository, workspace.branch]);
-    expect(request).toMatchObject({ workingDirectory: "/workspace", env: { GH_TOKEN: agentToken } });
+    expect(request.command.slice(-5)).toEqual([url, "https://git.example", "main", "push", "tendworks/run-1"]);
+    expect(request).toMatchObject({ workingDirectory: "/workspace" });
+    expect(request.env).toEqual(helperEnv);
     expect(sandboxes.attached).toHaveLength(1);
+    expect(entries).toContainEqual(expect.objectContaining({ type: "workspace-checkout", workspace: { url, name: "app", branch: "tendworks/run-1" }, exitCode: 0 }));
+  });
+
+  it("keeps the checkout on a volume of the agent session", async () => {
+    const sandboxes = scriptedSandboxes();
+
+    await harness(sandboxes.api).run(inWorkspace(undefined), observe().observer);
+
+    expect(sandboxes.created[0]?.volumes).toContainEqual({ volume: "task-1-workspace", path: "/workspace" });
+  });
+
+  it("lets the session's git use the workspace's credential, under the configured name too when the workspace exposes it", async () => {
+    const plain = scriptedSandboxes();
+    const exposed = scriptedSandboxes();
+
+    await harness(plain.api).run(inWorkspace(), observe().observer);
+    await harness(exposed.api).run(inWorkspace({ env: "GH_TOKEN" }), observe().observer);
+
+    expect(plain.attached[0]?.request.env).toMatchObject(helperEnv);
+    expect(plain.attached[0]?.request.env).not.toHaveProperty("GH_TOKEN");
+    expect(exposed.attached[0]?.request.env).toMatchObject({ ...helperEnv, GH_TOKEN: workspaceToken });
+  });
+
+  it("tells a chat's agent what its workspace is a checkout of", async () => {
+    const sandboxes = scriptedSandboxes();
+    const { workspace, branch } = inWorkspace();
+
+    const session = harness(sandboxes.api).open!({ taskId: "chat-1", profile: developer(), workspace, branch }, observe().observer);
+    await session.turn(message());
+    await session.end();
+
+    const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+    expect(append).toContain(`Your workspace is a checkout of ${url} on branch tendworks/run-1.`);
+    expect(sandboxes.execs[0]?.request.env).toEqual(helperEnv);
+  });
+
+  it("checks out a read-only chat's workspace with the credential, but keeps it out of the session, so a push finds none", async () => {
+    const sandboxes = scriptedSandboxes();
+    const { workspace } = inWorkspace({ env: "GH_TOKEN" });
+
+    const session = harness(sandboxes.api).open!({ taskId: "chat-1", profile: developer(), workspace, readOnlyWorkspace: true }, observe().observer);
+    await session.turn(message());
+    await session.end();
+
+    expect(sandboxes.execs[0]?.request.env).toEqual(helperEnv);
+    const env = sandboxes.attached[0]?.request.env ?? {};
+    expect(Object.keys(env).filter((name) => name.startsWith("TENDWORKS_GIT_") || name === "GH_TOKEN")).toEqual([]);
+    expect(Object.values(env)).not.toContain(workspaceToken);
+    const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+    expect(append).toContain("you cannot push");
+    expect(append).not.toContain("Your credentials do not allow you to push");
+  });
+
+  it("lets a writing chat's session use the workspace's credential on its chat branch", async () => {
+    const sandboxes = scriptedSandboxes();
+    const { workspace } = inWorkspace();
+
+    const session = harness(sandboxes.api).open!({ taskId: "chat-1", profile: developer(), workspace, branch: "tendworks/chat-chat-1" }, observe().observer);
+    await session.turn(message());
+    await session.end();
+
+    expect(sandboxes.execs[0]?.request.command.at(-1)).toBe("tendworks/chat-chat-1");
+    expect(sandboxes.attached[0]?.request.env).toMatchObject(helperEnv);
+    const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+    expect(append).toContain(`Your workspace is a checkout of ${url} on branch tendworks/chat-chat-1.`);
+    expect(append).not.toContain("cannot push");
+  });
+
+  it("fails the task without a sandbox when the workspace's secret is not set, naming it but no value", async () => {
+    const sandboxes = scriptedSandboxes();
+    const task = { ...inWorkspace(), workspace: createGitWorkspace({ name: "app", url, defaultBranch: "main", credentials: { secretRef: { name: "TENDWORKS_AGENT_NOT_SET" } } }, workspaceSecrets) };
+
+    const result = await harness(sandboxes.api).run(task, observe().observer);
+
+    expect(result).toEqual({ state: "TASK_STATE_FAILED", message: "workspace: secret TENDWORKS_AGENT_NOT_SET is not set" });
+    expect(sandboxes.created).toEqual([]);
+  });
+
+  it("never reveals the workspace's credential in what it reports", async () => {
+    const sandboxes = scriptedSandboxes({ crash: `fatal: push refused for ${workspaceToken}` });
+    const { observer, entries } = observe();
+
+    const result = await harness(sandboxes.api).run(inWorkspace(), observer);
+
+    expect(result.message).toContain("fatal: push refused");
+    expect(result.message).not.toContain(workspaceToken);
+    expect(JSON.stringify(entries)).not.toContain(workspaceToken);
   });
 
   it("does not touch the workspace when the task asks for none", async () => {
@@ -598,26 +704,159 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     expect(sandboxes.execs).toEqual([]);
   });
 
-  it("fails the task with the checkout's error output when the workspace cannot be checked out", async () => {
-    const sandboxes = scriptedSandboxes({}, () => ({ exitCode: 128, stdout: "", stderr: `fatal: could not read from ${agentToken}` }));
+  describe("in a directory workspace", () => {
+    /** A workspace root with the directory `app`, as the worker sees the sandbox host. */
+    function hostWithApp() {
+      const root = join(realpathSync.native(mkdtempSync(join(tmpdir(), "tend-root-"))), "root");
+      mkdirSync(join(root, "app"), { recursive: true });
+      return { root, app: join(root, "app") };
+    }
+    const inDirectory = (taskId: string, workspace: ReturnType<typeof createDirectoryWorkspace>, readOnlyWorkspace?: boolean) => ({
+      taskId,
+      message: message(),
+      profile: developer(),
+      workspace,
+      ...(readOnlyWorkspace === undefined ? {} : { readOnlyWorkspace }),
+    });
 
-    const result = await harness(sandboxes.api, { secrets }).run(
-      { taskId: "task-1", message: withWorkspace(), profile: developer(withToken) },
-      observe().observer,
-    );
+    it("binds the directory read-write at the workspace path, with no checkout and no workspace volume, and never deletes it", async () => {
+      const { root, app } = hostWithApp();
+      const sandboxes = scriptedSandboxes();
 
-    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("fatal: could not read") });
-    expect(result.message).not.toContain(agentToken);
-    expect(sandboxes.attached).toEqual([]);
-    expect(sandboxes.destroyed).toEqual(["sandbox1"]);
+      const result = await harness(sandboxes.api).run(inDirectory("task-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] })), observe().observer);
+
+      expect(result.state).toBe("TASK_STATE_COMPLETED");
+      expect(sandboxes.created[0]?.binds).toEqual([{ hostPath: app, path: "/workspace", readOnly: false }]);
+      expect(sandboxes.created[0]?.volumes).toEqual([{ volume: "task-1-session", path: "/session" }]);
+      expect(sandboxes.execs).toEqual([]);
+      expect(sandboxes.deletedVolumes).toEqual(["task-1-session"]);
+    });
+
+    it("binds the directory read-only when the task asks for it, and tells a chat's agent", async () => {
+      const { root, app } = hostWithApp();
+      const sandboxes = scriptedSandboxes();
+
+      const session = harness(sandboxes.api).open!(inDirectory("chat-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] }), true), observe().observer);
+      await session.turn(message());
+      await session.end();
+
+      expect(sandboxes.created[0]?.binds).toEqual([{ hostPath: app, path: "/workspace", readOnly: true }]);
+      const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+      expect(append).toContain("Your workspace is the directory app, read-only: you cannot change its files.");
+    });
+
+    it("refuses a second live session on the same directory until the first ends, also through another workspace naming it", async () => {
+      const { root, app } = hostWithApp();
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const first = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims });
+      const alias = createDirectoryWorkspace({ name: "app-again", path: app }, { roots: [root], claims });
+      const chat = harness(sandboxes.api).open!(inDirectory("chat-1", first), observe().observer);
+      await chat.turn(message());
+
+      const refused = await harness(sandboxes.api).run(inDirectory("task-2", alias), observe().observer);
+      const again = await chat.turn(message());
+      await chat.end();
+      const after = await harness(sandboxes.api).run(inDirectory("task-3", alias), observe().observer);
+
+      expect(refused).toEqual({ state: "TASK_STATE_FAILED", message: `workspace: directory ${app} is in use by another agent session (task chat-1); only one session at a time works in a directory` });
+      expect(again.state).toBe("TASK_STATE_INPUT_REQUIRED");
+      expect(after.state).toBe("TASK_STATE_COMPLETED");
+      expect(sandboxes.created).toHaveLength(2);
+    });
+
+    it("refuses a session in a directory inside or around one that is in use", async () => {
+      const { root, app } = hostWithApp();
+      mkdirSync(join(app, "sub"));
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const outer = harness(sandboxes.api).open!(inDirectory("chat-1", createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims })), observe().observer);
+      await outer.turn(message());
+
+      const inner = await harness(sandboxes.api).run(inDirectory("task-2", createDirectoryWorkspace({ name: "sub", path: join(app, "sub") }, { roots: [root], claims })), observe().observer);
+      await outer.end();
+
+      expect(inner).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("is in use by another agent session (task chat-1)") });
+    });
+
+    it("frees the directory while an idle chat has no sandbox, and takes it again with the next turn", async () => {
+      const { root, app } = hostWithApp();
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims });
+      const chat = harness(sandboxes.api).open!(inDirectory("chat-1", workspace), observe().observer);
+      await chat.turn(message());
+
+      await chat.suspend();
+      const run = await harness(sandboxes.api).run(inDirectory("task-2", workspace), observe().observer);
+      const next = await chat.turn(message());
+      const refused = await harness(sandboxes.api).run(inDirectory("task-3", workspace), observe().observer);
+      await chat.end();
+
+      expect(run.state).toBe("TASK_STATE_COMPLETED");
+      expect(next.state).toBe("TASK_STATE_INPUT_REQUIRED");
+      expect(refused).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("(task chat-1)") });
+    });
+
+    it("keeps a chat open whose directory another session uses meanwhile: the turn does not run, and the next one may", async () => {
+      const { root, app } = hostWithApp();
+      const claims = createDirectoryClaims();
+      const sandboxes = scriptedSandboxes();
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root], claims });
+      const chat = harness(sandboxes.api).open!(inDirectory("chat-1", workspace), observe().observer);
+      claims.claim(app, "task-2");
+
+      const busy = await chat.turn(message());
+      claims.release(app, "task-2");
+      const next = await chat.turn(message());
+      await chat.end();
+
+      expect(busy).toEqual({
+        state: "TASK_STATE_INPUT_REQUIRED",
+        message: `the workspace is busy: directory ${app} is in use by another agent session (task task-2); only one session at a time works in a directory. Send your message again once it is free.`,
+      });
+      expect(next.state).toBe("TASK_STATE_INPUT_REQUIRED");
+      expect(sandboxes.created).toHaveLength(1);
+    });
+
+    it("frees the directory when the sandbox cannot be created", async () => {
+      const { root, app } = hostWithApp();
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] });
+      const failing = scriptedSandboxes();
+      const create = failing.api.create.bind(failing.api);
+      failing.api.create = () => Promise.reject(new Error("no sandbox today"));
+
+      await harness(failing.api).run(inDirectory("task-1", workspace), observe().observer);
+      failing.api.create = create;
+      const next = await harness(failing.api).run(inDirectory("task-2", workspace), observe().observer);
+
+      expect(next.state).toBe("TASK_STATE_COMPLETED");
+    });
+
+    it("fails the task without a sandbox when the directory no longer lies under a root, e.g. replaced by a link out of it", async () => {
+      const { root, app } = hostWithApp();
+      const outside = realpathSync.native(mkdtempSync(join(tmpdir(), "tend-outside-")));
+      const workspace = createDirectoryWorkspace({ name: "app", path: app }, { roots: [root] });
+      rmSync(app, { recursive: true });
+      symlinkSync(outside, app, "junction");
+      const sandboxes = scriptedSandboxes();
+
+      const result = await harness(sandboxes.api).run(inDirectory("task-1", workspace), observe().observer);
+
+      expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringMatching(/^workspace: directory .* is not under a workspace root/) });
+      expect(sandboxes.created).toEqual([]);
+    });
   });
 
-  it("fails the task when the workspace it asks for is malformed", async () => {
-    const sandboxes = scriptedSandboxes();
+  it("fails the task with the checkout's error output when the workspace cannot be checked out", async () => {
+    const sandboxes = scriptedSandboxes({}, () => ({ exitCode: 128, stdout: "", stderr: `fatal: could not read from ${workspaceToken}` }));
 
-    const result = await harness(sandboxes.api).run({ taskId: "task-1", message: withWorkspace({ branch: "x" }), profile: developer() }, observe().observer);
+    const result = await harness(sandboxes.api).run(inWorkspace(), observe().observer);
 
-    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("dev.tendworks/workspace") });
-    expect(sandboxes.created).toEqual([]);
+    expect(result).toMatchObject({ state: "TASK_STATE_FAILED", message: expect.stringContaining("fatal: could not read") });
+    expect(result.message).toContain(`cannot check out ${url} on tendworks/run-1`);
+    expect(result.message).not.toContain(workspaceToken);
+    expect(sandboxes.attached).toEqual([]);
+    expect(sandboxes.destroyed).toEqual(["sandbox1"]);
   });
 });

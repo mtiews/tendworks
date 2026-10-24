@@ -1,45 +1,34 @@
 import { describe, expect, it } from "vitest";
-import { decide, decideFor, type Policy } from "./policy.js";
+import { decideFor, type Policy } from "./policy.js";
 
-const policy = (merge: "auto" | "ask"): Policy => ({
+const policy = (name: string, actions: Policy["spec"]["actions"], workflows?: NonNullable<Policy["spec"]["workflows"]>): Policy => ({
   apiVersion: "tendworks.dev/v1",
   kind: "Policy",
-  metadata: { name: "merge-gate" },
-  spec: { merge },
+  metadata: { name },
+  spec: workflows ? { actions, workflows } : { actions },
 });
 
-describe("policy decision", () => {
-  it("allows merging a pull request right away with merge: auto", () => {
-    expect(decide(policy("auto"), { action: "merge" })).toBe("allow");
+describe("policy decision for a human step", () => {
+  it("asks when no policy applies", () => {
+    expect(decideFor([], { action: "deploy", workflow: "release-app" })).toEqual({ decision: "ask" });
   });
 
-  it("asks before merging a pull request with merge: ask", () => {
-    expect(decide(policy("ask"), { action: "merge" })).toBe("ask");
-  });
-});
+  it("allows an action a policy of the workflow allows", () => {
+    const policies = [policy("trusted", { deploy: "allow" }, ["release-app"])];
 
-describe("policy decision across the configured policies", () => {
-  const named = (name: string, merge: "auto" | "ask", workflows?: [string, ...string[]]): Policy => ({
-    ...policy(merge),
-    metadata: { name },
-    spec: workflows ? { merge, workflows } : { merge },
+    expect(decideFor(policies, { action: "deploy", workflow: "release-app" })).toEqual({ decision: "allow", policy: "trusted" });
   });
 
-  it("applies a policy without workflows to every workflow", () => {
-    expect(decideFor([named("everything", "auto")], { action: "merge", workflow: "any" })).toEqual({ decision: "allow", policy: "everything" });
+  it("ignores policies of other workflows and for other actions", () => {
+    const policies = [policy("other-workflow", { deploy: "allow" }, ["nightly-scan"]), policy("other-action", { "merge-pull-request": "allow" })];
+
+    expect(decideFor(policies, { action: "deploy", workflow: "release-app" })).toEqual({ decision: "ask" });
   });
 
-  it("applies a policy with workflows only to those", () => {
-    const policies = [named("careful", "ask", ["release"]), named("quick", "auto", ["develop-issue"])];
+  it("lets the strictest applicable policy win", () => {
+    const policies = [policy("lax", { deploy: "allow" }), policy("careful", { deploy: "ask" }, ["release-app"])];
 
-    expect(decideFor(policies, { action: "merge", workflow: "develop-issue" })).toEqual({ decision: "allow", policy: "quick" });
-    expect(decideFor(policies, { action: "merge", workflow: "other" })).toBeUndefined();
-  });
-
-  it("lets the strictest applicable policy win, whatever their order", () => {
-    const policies = [named("everything", "auto"), named("careful", "ask", ["develop-issue"]), named("also", "auto", ["develop-issue"])];
-
-    expect(decideFor(policies, { action: "merge", workflow: "develop-issue" })).toEqual({ decision: "ask", policy: "careful" });
-    expect(decideFor([...policies].reverse(), { action: "merge", workflow: "develop-issue" })).toEqual({ decision: "ask", policy: "careful" });
+    expect(decideFor(policies, { action: "deploy", workflow: "release-app" })).toEqual({ decision: "ask", policy: "careful" });
+    expect(decideFor(policies, { action: "deploy", workflow: "nightly-scan" })).toEqual({ decision: "allow", policy: "lax" });
   });
 });

@@ -16,14 +16,11 @@ import {
 import { createPostgresEventBus, migrateEventBus } from "@tendworks/event-bus";
 import {
   createApprovals,
-  createLoggingNotificationChannel,
-  createMergeGate,
   createPostgresApprovalStore,
-  toGatedRun,
-  createPullRequestIntegrations,
   createPostgresNotificationStore,
   createNotifier,
   migrateHumanInteractionStore,
+  notifierChannelsFor,
 } from "@tendworks/human-interaction";
 import {
   createControlPlaneRunStarter,
@@ -31,12 +28,15 @@ import {
   createTriggerGateway,
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
+  type TriggerGateway,
 } from "@tendworks/trigger-gateway";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
 import { migrateOrStop } from "@tendworks/platform/migrations";
 import { storeConnectionString } from "@tendworks/platform/store-connection";
+import { parseWorkspaceRoots, WorkspaceRootsError } from "@tendworks/platform/workspace-roots";
 import pg from "pg";
+import { TRIGGER_SOURCES } from "./trigger-sources.js";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name] ?? fallback;
@@ -46,18 +46,20 @@ const env = (name: string, fallback?: string): string => {
 
 let configuration: Configuration;
 try {
-  configuration = loadConfiguration(env("TEND_CONFIG_DIR"));
+  // Directory workspaces must lie under the operator's roots (ADR 0022), which the stack
+  // mounts read-only at the same path, so links and `..` resolve as on the sandbox host.
+  configuration = loadConfiguration(env("TEND_CONFIG_DIR"), { workspaceRoots: parseWorkspaceRoots(process.env.TEND_WORKSPACE_ROOTS) });
 } catch (error) {
   // Invalid configuration stops the platform before it accepts any request.
-  if (!(error instanceof ConfigurationError)) throw error;
+  if (!(error instanceof ConfigurationError) && !(error instanceof WorkspaceRootsError)) throw error;
   console.error(error.message);
   process.exit(1);
 }
 console.log(`configuration: workflows ${configuration.workflowNames.join(", ") || "none"}`);
 console.log(`configuration: trigger bindings ${configuration.triggerBindings.map((binding) => binding.metadata.name).join(", ") || "none"}`);
 
-// Secret references of the platform's integrations (trigger bindings, merging pull
-// requests): only TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
+// Secret references of the platform's integrations (trigger bindings, notification channels): only
+// TENDWORKS_PLATFORM_* variables resolve (ADR 0008). Never log values.
 const platformSecrets = createSecretResolver("platform", process.env);
 
 // Every operation but GET /status needs a token: the API token for anything, the
@@ -105,9 +107,13 @@ await migrateOrStop(
 );
 
 // Human interaction: run outcomes and approval requests from the event bus become
-// notifications, recorded before the notification channel (a log for now) delivers them.
+// notifications, recorded before each configured notification channel that selects them
+// delivers them (ADR 0025). Channels resolve their platform secrets at each delivery.
 const notifications = createPostgresNotificationStore(pool);
-const notifier = createNotifier({ store: notifications, channel: createLoggingNotificationChannel() });
+const notifier = createNotifier({ store: notifications, channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }) });
+console.log(
+  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration}: ${spec.events.join(", ")})`).join("; ") || "none"}`,
+);
 const bus = createPostgresEventBus({ pool });
 bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
 
@@ -116,39 +122,38 @@ const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
 // The agent runtime runs in the worker too; transcripts are read through its internal API.
 const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
-// Human interaction: the merge gate. It decides by orchestration's record of the run and
-// the policies of its workflow, never by what the caller claims; with `ask` it opens an
-// approval request (approval.requested goes onto the bus with it) and merges only once
-// that is approved. Merges go through the pull request integration configured for the
-// pull request's host, with the platform token only this bundle holds (ADR 0008).
+// Human interaction: approval requests; approval.requested and approval.decided go onto
+// the bus with each write. A workflow's human step asks here: the policies of the run's
+// workflow decide, by orchestration's record of the run, never by what the caller claims.
 const approvalStore = createPostgresApprovalStore({ pool, publisher: bus });
-const merges = createMergeGate({
+const approvals = createApprovals({
+  store: approvalStore,
   policies: configuration.policies,
-  runs: async (runId) => {
-    const run = await orchestration.get(runId);
-    return run && toGatedRun(run);
-  },
-  pullRequests: createPullRequestIntegrations({ integrations: configuration.pullRequestIntegrations, secrets: platformSecrets }),
-  approvals: approvalStore,
+  runs: (runId) => orchestration.get(runId),
 });
-const approvals = createApprovals({ store: approvalStore });
 console.log(`configuration: policies ${configuration.policies.map((policy) => policy.metadata.name).join(", ") || "none"}`);
-console.log(
-  `configuration: pull request integrations ${configuration.pullRequestIntegrations.map(({ metadata, spec }) => `${metadata.name} (${spec.integration} on ${spec.host})`).join(", ") || "none"}`,
-);
 
 // The domains in this bundle talk to each other only through their APIs, in process:
 // the trigger gateway starts runs through the public control plane API, and the control
 // plane reads triggers through the trigger gateway's internal API.
 const inProcess = (target: () => { fetch(request: Request): Promise<Response> }) => (request: Request) => target().fetch(request);
 
-const triggerGateway = createTriggerGateway({
-  bindings: configuration.triggerBindings,
-  // trigger.fired goes onto the event bus in the transaction that records the firing.
-  store: createPostgresFiringStore({ pool, publisher: bus }),
-  secrets: platformSecrets,
-  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
-});
+let triggerGateway: TriggerGateway;
+try {
+  triggerGateway = createTriggerGateway({
+    bindings: configuration.triggerBindings,
+    workspaces: configuration.workspaces,
+    sources: TRIGGER_SOURCES,
+    // trigger.fired goes onto the event bus in the transaction that records the firing.
+    store: createPostgresFiringStore({ pool, publisher: bus }),
+    secrets: platformSecrets,
+    runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
+  });
+} catch (error) {
+  // A binding whose trigger cannot be scheduled (e.g. an invalid cron expression) is a configuration error.
+  console.error(`invalid configuration: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 // The web UI's static build (ADR 0018): `pnpm build` puts it next to this bundle, in the image too.
 const webUiRoot = process.env.TEND_WEB_UI_DIR || fileURLToPath(new URL("../../web/dist/", import.meta.url));
@@ -159,7 +164,6 @@ const api = createControlPlaneApi({
   runs: orchestration,
   agentRuntime,
   notifications,
-  merges,
   approvals,
   triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.internal", fetch: inProcess(() => triggerGatewayApi) }),
   apiToken,
