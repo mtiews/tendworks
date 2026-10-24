@@ -10,7 +10,7 @@ export interface StartRun {
   input: Record<string, unknown>;
   /** W3C trace context the run joins: the trace of the trigger that fired. */
   traceparent?: string;
-  /** The binding and the issue that start the run. */
+  /** The binding, workspace and item that start the run. */
   startedBy?: RunOrigin;
 }
 

@@ -13,6 +13,8 @@
     "@tendworks/orchestration": "workspace:*",
     "@tendworks/platform": "workspace:*",
     "@tendworks/sandbox": "workspace:*",
-    "@tendworks/trigger-gateway": "workspace:*"
+    "@tendworks/trigger-gateway": "workspace:*",
+    "@tendworks/trigger-source-github-issues": "workspace:*",
+    "@tendworks/trigger-source-schedule": "workspace:*"
   }
 }

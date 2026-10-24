@@ -185,9 +185,10 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     if (!workflows.has(workflow)) {
       issues.push(`${file}: trigger binding '${binding.metadata.name}' starts workflow '${workflow}', but no workflow '${workflow}' is configured`);
     }
-    const workspace = binding.spec.input?.workspace;
-    if (isFixed(workspace) && !workspaces.has(workspace)) {
-      issues.push(`${file}: trigger binding '${binding.metadata.name}' starts its runs in workspace '${workspace}', but no workspace '${workspace}' is configured`);
+    for (const workspace of binding.spec.workspaces ?? []) {
+      if (!workspaces.has(workspace)) {
+        issues.push(`${file}: trigger binding '${binding.metadata.name}' starts runs in workspace '${workspace}', but no workspace '${workspace}' is configured`);
+      }
     }
   }
 

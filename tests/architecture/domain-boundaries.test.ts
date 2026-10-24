@@ -31,6 +31,26 @@ it("rejects a platform library that knows a domain", async () => {
   expect(violations.map((v) => [v.rule.name, v.to])).toEqual([["platform-libraries-are-leaves", "packages/beta/src/index.ts"]]);
 });
 
+it("allows a trigger source package only the trigger source port, generated types and the platform libraries", async () => {
+  expect(await violationsIn("packages/trigger-source-alpha/src/allowed.ts")).toEqual([]);
+});
+
+it("rejects a trigger source package importing the rest of the trigger gateway, a domain or another source", async () => {
+  const violations = await violationsIn("packages/trigger-source-alpha/src/violation.ts");
+
+  expect(violations.map((v) => [v.rule.name, v.to]).sort()).toEqual([
+    ["trigger-sources-use-only-the-port", "packages/beta/src/index.ts"],
+    ["trigger-sources-use-only-the-port", "packages/trigger-gateway/src/index.ts"],
+    ["trigger-sources-use-only-the-port", "packages/trigger-source-beta/src/index.ts"],
+  ]);
+});
+
+it("rejects the trigger gateway importing a trigger source package: it knows sources only through the registry it is given", async () => {
+  const violations = await violationsIn("packages/trigger-gateway/src/violation.ts");
+
+  expect(violations.map((v) => [v.rule.name, v.to])).toEqual([["no-cross-domain-imports", "packages/trigger-source-alpha/src/allowed.ts"]]);
+});
+
 it("allows the web app only generated types and the platform library", async () => {
   expect(await violationsIn("apps/web/src/index.tsx")).toEqual([]);
 });

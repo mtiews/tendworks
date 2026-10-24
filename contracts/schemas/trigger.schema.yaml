@@ -9,16 +9,25 @@ $defs:
     title: Trigger
     type: object
     additionalProperties: false
-    required: [name, workflow, schedule, nextExecutionAt]
+    required: [name, workflow, kind, workspaces, schedule, nextExecutionAt]
     properties:
       name:
         type: string
         description: Name of the trigger binding.
       workflow:
         type: string
-        description: Workflow each match starts.
+        description: Workflow each firing starts.
+      kind:
+        type: string
+        description: Kind of the binding's trigger source, e.g. `schedule`.
+      workspaces:
+        type: array
+        items:
+          type: string
+        description: Workspaces the binding starts runs in; empty when it starts runs without one.
       schedule:
         $ref: './trigger-binding.schema.yaml#/$defs/schedule'
+        description: When the trigger gateway checks the source.
       nextExecutionAt:
         type: string
         format: date-time
@@ -32,8 +41,8 @@ $defs:
     title: TriggerEvaluation
     description: >-
       How the binding's last check went. `failed` when its source could not be asked
-      (e.g. rate limit, API error, a secret that is not set) or a matching issue's run
-      could not be started; the message says why, naming secrets but never values.
+      for a workspace (e.g. rate limit, API error, a secret that is not set) or an item's
+      run could not be started; the message says why, naming secrets but never values.
       Absent until the binding was checked once.
     type: object
     additionalProperties: false

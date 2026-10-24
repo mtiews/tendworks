@@ -7,7 +7,7 @@ description: >-
 $defs:
   triggerFired:
     title: TriggerFiredEvent
-    description: A trigger binding matched an issue and started a run; `runid` is that run.
+    description: A trigger binding fired for an item and a workspace and started a run; `runid` is that run.
     allOf:
       - $ref: './cloudevent.schema.yaml'
       - $ref: './cloudevent.schema.yaml#/$defs/runScoped'
@@ -22,7 +22,7 @@ $defs:
     title: TriggerFiredEventData
     type: object
     additionalProperties: false
-    required: [binding, workflow, issue]
+    required: [binding, workflow, item]
     properties:
       binding:
         type: string
@@ -30,20 +30,21 @@ $defs:
       workflow:
         type: string
         description: Workflow the run executes.
-      issue:
-        $ref: '#/$defs/issueReference'
-  issueReference:
-    title: IssueReference
-    description: The issue that matched.
+      workspace:
+        type: string
+        description: Workspace the run works in; absent for a binding without workspaces.
+      item:
+        $ref: '#/$defs/itemReference'
+  itemReference:
+    title: ItemReference
+    description: The item the trigger source reported.
     type: object
     additionalProperties: false
-    required: [repository, number, url]
+    required: [key, title]
     properties:
-      repository:
+      key:
         type: string
-        description: Repository as `<owner>/<name>`.
-      number:
-        type: integer
+        description: The item's stable key, e.g. `acme/app#7` for an issue.
       title:
         type: string
       url:

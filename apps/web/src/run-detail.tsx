@@ -44,6 +44,10 @@ export function RunDetail({ runId }: { runId: string }) {
   }
 
   const costs = run.steps.flatMap((step) => (step.cost ? [step.cost] : []));
+  // The item a trigger started the run for, e.g. the issue, when it has a safe link.
+  const item = run.startedBy?.kind === "trigger" ? run.startedBy.item : undefined;
+  const itemHref = item?.url === undefined ? undefined : safeHref(item.url);
+  const itemLink = item && itemHref ? { href: itemHref, text: item.title || item.key } : undefined;
   const fields: [string, ReactNode][] = [
     ["Workflow", run.workflow],
     ["Status", <span className={`status status-${run.status}`}>{run.status}</span>],
@@ -72,10 +76,10 @@ export function RunDetail({ runId }: { runId: string }) {
           </div>
         ))}
       </dl>
-      {run.startedBy?.kind === "trigger" && safeHref(run.startedBy.issue.url) && (
+      {itemLink && (
         <p>
-          <a href={safeHref(run.startedBy.issue.url)} target="_blank" rel="noopener noreferrer">
-            {run.startedBy.issue.title ?? `${run.startedBy.issue.repository}#${run.startedBy.issue.number}`}
+          <a href={itemLink.href} target="_blank" rel="noopener noreferrer">
+            {itemLink.text}
           </a>
         </p>
       )}

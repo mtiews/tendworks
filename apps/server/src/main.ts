@@ -28,6 +28,7 @@ import {
   createTriggerGateway,
   createTriggerGatewayApi,
   migrateTriggerGatewayStore,
+  type TriggerGateway,
 } from "@tendworks/trigger-gateway";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { createSecretResolver } from "@tendworks/platform";
@@ -35,6 +36,7 @@ import { migrateOrStop } from "@tendworks/platform/migrations";
 import { storeConnectionString } from "@tendworks/platform/store-connection";
 import { parseWorkspaceRoots, WorkspaceRootsError } from "@tendworks/platform/workspace-roots";
 import pg from "pg";
+import { TRIGGER_SOURCES } from "./trigger-sources.js";
 
 const env = (name: string, fallback?: string): string => {
   const value = process.env[name] ?? fallback;
@@ -136,13 +138,22 @@ console.log(`configuration: policies ${configuration.policies.map((policy) => po
 // plane reads triggers through the trigger gateway's internal API.
 const inProcess = (target: () => { fetch(request: Request): Promise<Response> }) => (request: Request) => target().fetch(request);
 
-const triggerGateway = createTriggerGateway({
-  bindings: configuration.triggerBindings,
-  // trigger.fired goes onto the event bus in the transaction that records the firing.
-  store: createPostgresFiringStore({ pool, publisher: bus }),
-  secrets: platformSecrets,
-  runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
-});
+let triggerGateway: TriggerGateway;
+try {
+  triggerGateway = createTriggerGateway({
+    bindings: configuration.triggerBindings,
+    workspaces: configuration.workspaces,
+    sources: TRIGGER_SOURCES,
+    // trigger.fired goes onto the event bus in the transaction that records the firing.
+    store: createPostgresFiringStore({ pool, publisher: bus }),
+    secrets: platformSecrets,
+    runs: createControlPlaneRunStarter({ baseUrl: "http://control-plane.internal", apiToken, fetch: inProcess(() => api) }),
+  });
+} catch (error) {
+  // A binding whose trigger cannot be scheduled (e.g. an invalid cron expression) is a configuration error.
+  console.error(`invalid configuration: ${error instanceof Error ? error.message : String(error)}`);
+  process.exit(1);
+}
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 // The web UI's static build (ADR 0018): `pnpm build` puts it next to this bundle, in the image too.
 const webUiRoot = process.env.TEND_WEB_UI_DIR || fileURLToPath(new URL("../../web/dist/", import.meta.url));

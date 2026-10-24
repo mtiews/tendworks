@@ -1,0 +1,12 @@
+# A schedule over two workspaces, for the end-to-end tests: every 20 seconds the tick
+# starts one scheduled-noop run per workspace, each with its workspace's name as input.
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: schedule-over-two-workspaces
+spec:
+  workflow: scheduled-noop
+  workspaces: [fake-playground, scripted-playground]
+  trigger:
+    schedule:
+      every: { seconds: 20 }

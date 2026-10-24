@@ -144,7 +144,8 @@ describe("orchestration API", () => {
     const startedBy = {
       kind: "trigger",
       binding: "ready-issues",
-      issue: { repository: "acme/playground", number: 7, title: "Fix it", url: "https://issues.example/acme/playground/7" },
+      workspace: "playground",
+      item: { key: "acme/playground#7", title: "Fix it", url: "https://issues.example/acme/playground/7" },
     };
 
     const triggered = (await request("POST", "/runs", { workflow, startedBy })).body as Run;

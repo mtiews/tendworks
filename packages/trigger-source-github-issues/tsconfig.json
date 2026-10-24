@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.suite.ts", "src/**/*.stub.ts"],
+  "references": [
+    {
+      "path": "../../packages/platform"
+    },
+    {
+      "path": "../../packages/shared"
+    },
+    {
+      "path": "../../packages/trigger-gateway"
+    }
+  ]
+}

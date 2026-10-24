@@ -53,8 +53,8 @@ $defs:
     title: RunOrigin
     description: >-
       What started the run, as its starter declared it: `manual` (a client such as the
-      CLI or a script) or `trigger` (a trigger binding, for the issue it matched). Absent
-      for runs recorded before origins were.
+      CLI or a script) or `trigger` (a trigger binding, for the item it fired for and the
+      workspace the run works in).
     oneOf:
       - title: ManualRunOrigin
         type: object
@@ -66,27 +66,28 @@ $defs:
       - title: TriggerRunOrigin
         type: object
         additionalProperties: false
-        required: [kind, binding, issue]
+        required: [kind, binding, item]
         properties:
           kind:
             const: trigger
           binding:
             type: string
             description: Name of the trigger binding that fired.
-          issue:
-            $ref: '#/$defs/issueReference'
-  issueReference:
-    title: RunIssueReference
-    description: The issue a trigger matched.
+          workspace:
+            type: string
+            description: Workspace the run works in; absent for a binding without workspaces.
+          item:
+            $ref: '#/$defs/itemReference'
+  itemReference:
+    title: RunItemReference
+    description: The item a trigger fired for.
     type: object
     additionalProperties: false
-    required: [repository, number, url]
+    required: [key, title]
     properties:
-      repository:
+      key:
         type: string
-        description: Repository as `<owner>/<name>`.
-      number:
-        type: integer
+        description: The item's stable key, e.g. `acme/app#7` for an issue.
       title:
         type: string
       url:

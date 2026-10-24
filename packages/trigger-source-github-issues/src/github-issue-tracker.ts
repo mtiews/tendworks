@@ -1,4 +1,4 @@
-import type { Issue, IssueTracker } from "../issue-tracker.js";
+import type { Issue, IssueTracker } from "./issue-tracker.js";
 
 export interface GithubIssueTrackerOptions {
   /** Token that may read the repositories' issues. Never logged and never part of an error. */

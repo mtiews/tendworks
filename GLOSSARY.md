@@ -34,6 +34,12 @@ _Avoid_: sandbox profile, sandbox config
 What an agent session works on, declared once by name: a git repository on any host with its own credential, cloned into the sandbox at `/workspace`. Workflows and trigger bindings refer to it by name; agent profiles carry no repository credentials.
 _Avoid_: repository (one kind of workspace), project, checkout (what the agent runtime makes of a git workspace)
 
+**Trigger binding**:
+Starts a workflow when its trigger fires: one run per workspace it names and per item its trigger source reports, with the input `{ workspace, item }`. An item starts at most one run per binding and workspace. A suspended binding starts nothing.
+
+**Trigger source**:
+What fires a trigger binding, selected by its kind: `schedule` (cron or interval; the tick is the item) or `github-issues` (the issues of each workspace's repository). Each reports items with a stable key, a title and a link.
+
 **Isolation class**:
 How strongly a sandbox is separated from its host: `container`, `gvisor` or `microvm`. Chosen by the operator per sandbox template.
 _Avoid_: security level, sandbox type, runtime

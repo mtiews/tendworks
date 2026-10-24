@@ -22,11 +22,13 @@ export const triggerGatewayMigrations: readonly Migration[] = [
 create schema if not exists trigger_gateway;
 create table if not exists trigger_gateway.firings (
   binding    text not null,
+  -- empty for a binding without workspaces
+  workspace  text not null,
   item       text not null,
   run_id     text,
   claimed_at timestamptz not null default now(),
   fired_at   timestamptz,
-  primary key (binding, item)
+  primary key (binding, workspace, item)
 );
 create table if not exists trigger_gateway.evaluations (
   binding       text primary key,
@@ -83,25 +85,25 @@ export interface PostgresFiringStoreOptions {
 /** Firing store on Postgres. Call {@link migrateTriggerGatewayStore} once before use. */
 export function createPostgresFiringStore({ pool, publisher = createPostgresOutbox(pool) }: PostgresFiringStoreOptions): FiringStore {
   return {
-    async claim({ binding, item }) {
+    async claim({ binding, workspace, item }) {
       const result = await pool.query(
-        "insert into trigger_gateway.firings (binding, item) values ($1, $2) on conflict do nothing",
-        [binding, item],
+        "insert into trigger_gateway.firings (binding, workspace, item) values ($1, $2, $3) on conflict do nothing",
+        [binding, workspace, item],
       );
       return result.rowCount === 1;
     },
-    async release({ binding, item }) {
-      await pool.query("delete from trigger_gateway.firings where binding = $1 and item = $2 and run_id is null", [binding, item]);
+    async release({ binding, workspace, item }) {
+      await pool.query("delete from trigger_gateway.firings where binding = $1 and workspace = $2 and item = $3 and run_id is null", [binding, workspace, item]);
     },
-    async fired({ binding, item }, runId, event) {
+    async fired({ binding, workspace, item }, runId, event) {
       const client = await pool.connect();
       try {
         await client.query("begin");
         const result = await client.query(
-          `insert into trigger_gateway.firings (binding, item, run_id, fired_at) values ($1, $2, $3, now())
-           on conflict (binding, item) do update set run_id = excluded.run_id, fired_at = excluded.fired_at
+          `insert into trigger_gateway.firings (binding, workspace, item, run_id, fired_at) values ($1, $2, $3, $4, now())
+           on conflict (binding, workspace, item) do update set run_id = excluded.run_id, fired_at = excluded.fired_at
            where trigger_gateway.firings.run_id is null`,
-          [binding, item, runId],
+          [binding, workspace, item, runId],
         );
         if (result.rowCount === 1) await publisher.publish(client, event);
         await client.query("commit");

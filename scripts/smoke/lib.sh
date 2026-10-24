@@ -171,7 +171,7 @@ wait_triggered_run() {
     exit 1
   fi
   while [ $SECONDS -lt $deadline ]; do
-    id=$(api_get /runs | field "r.items.find((x) => x.startedBy?.kind === 'trigger' && x.startedBy.issue?.number === $issue && x.startedBy.issue?.repository === '$PLAYGROUND')?.id")
+    id=$(api_get /runs | field "r.items.find((x) => x.startedBy?.kind === 'trigger' && x.startedBy.item?.key === '$PLAYGROUND#$issue')?.id")
     [ -n "$id" ] && break
     sleep 10
   done

@@ -1197,7 +1197,7 @@ components:
           description: Workflow input; defaults to an empty object.
         startedBy:
           $ref: "../schemas/run.schema.yaml#/$defs/runOrigin"
-          description: What starts the run, e.g. a trigger binding for an issue; defaults to `manual`.
+          description: What starts the run, e.g. a trigger binding for an item; defaults to `manual`.
     RunList:
       type: object
       required: [items]

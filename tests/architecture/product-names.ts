@@ -61,15 +61,15 @@ export const ADAPTER_SELECTORS: readonly AdapterSelector[] = [
   },
   {
     file: "schemas/trigger-binding.schema.yaml",
-    under: "/$defs/issueSource",
+    under: "/$defs/trigger/properties/github-issues",
     product: "github",
-    reason: "`integration: github` selects the issue tracker adapter, configured under `github`",
+    reason: "the trigger kind `github-issues` selects the trigger source that reads issues on GitHub (ADR 0023)",
   },
   {
     file: "schemas/trigger-binding.schema.yaml",
-    under: "/$defs/githubIssueTracker",
+    under: "/$defs/githubIssuesTrigger",
     product: "github",
-    reason: "settings of the `github` issue tracker adapter",
+    reason: "settings of the `github-issues` trigger source",
   },
   {
     file: "schemas/notification-channel.schema.yaml",

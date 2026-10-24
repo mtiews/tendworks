@@ -1,0 +1,15 @@
+# A workflow without an agent for scheduled triggers: it completes at once with the
+# workspace and the tick it was started for, so a frequent schedule costs nothing.
+# Input: { workspace, item: { key, title, at } }, as a schedule trigger binding passes it.
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: scheduled-noop
+  version: '0.1.0'
+  summary: Completes at once with the workspace and the tick.
+do:
+  - done:
+      switch:
+        - always: { then: end }
+      output:
+        as: '${ { workspace, tick: .item.key } }'

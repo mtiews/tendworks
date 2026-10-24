@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeIssueTracker } from "../issue-tracker.suite.js";
+import { describeIssueTracker } from "./issue-tracker.suite.js";
 import { createGithubIssueTracker } from "./github-issue-tracker.js";
 
 // Opt-in: runs against the real GitHub API only with a token, and never writes.
