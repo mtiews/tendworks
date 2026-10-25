@@ -19,3 +19,6 @@ export function usePlatformStatus(): Polled<PlatformStatus> {
 
 /** The components that are not healthy. */
 export const unhealthyComponents = (status: PlatformStatus) => status.components.filter((component) => component.status !== "healthy");
+
+/** How healthy the platform is as far as known. */
+export const healthOf = (status: PlatformStatus | undefined): "unknown" | "healthy" | "unhealthy" => (status === undefined ? "unknown" : unhealthyComponents(status).length === 0 ? "healthy" : "unhealthy");
