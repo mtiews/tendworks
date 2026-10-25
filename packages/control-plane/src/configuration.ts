@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AgentProfile, NotificationChannel, Policy, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
+import type { AgentProfile, NotificationChannel, Policy, Subscription, TriggerBinding, Workflow, Workspace } from "@tendworks/shared";
 import { Ajv2020, type ErrorObject, type ValidateFunction } from "ajv/dist/2020.js";
 import { parse } from "yaml";
 import { enabledAssistant } from "@tendworks/platform";
@@ -18,6 +18,7 @@ const KINDS: Record<string, string> = {
   NotificationChannel: "notification-channel.schema.yaml",
   Policy: "policy.schema.yaml",
   SandboxTemplate: "sandbox-template.schema.json",
+  Subscription: "subscription.schema.yaml",
   TriggerBinding: "trigger-binding.schema.yaml",
   Workspace: "workspace.schema.yaml",
 };
@@ -42,13 +43,19 @@ export interface Configuration {
   workspaces: Workspace.Workspace[];
   /** Policies, ordered by name; they decide the human steps of workflows (ADR 0024). */
   policies: Policy.Policy[];
-  /** Notification channels, ordered by name; each receives the notifications it selects (ADR 0025). */
+  /** Notification channels, ordered by name; ways to reach someone, with no events of their own (ADR 0025). */
   notificationChannels: NotificationChannel.NotificationChannel[];
+  /** Subscriptions, ordered by name; each sends events of a workspace or the platform to channels (ADR 0026). */
+  subscriptions: Subscription.Subscription[];
 }
+
+/** The events a subscription may select, by scope (ADR 0026). Runs without a workspace belong to the platform scope. */
+export const WORKSPACE_EVENTS: readonly Subscription.SubscribableEvent[] = ["run.started", "run.completed", "run.failed", "approval.requested"];
+export const PLATFORM_EVENTS: readonly Subscription.SubscribableEvent[] = [...WORKSPACE_EVENTS, "platform.degraded", "platform.recovered"];
 
 /** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
 export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
-  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], ...overrides };
+  return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], subscriptions: [], ...overrides };
 }
 
 export interface LoadConfigurationOptions {
@@ -94,6 +101,7 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
   const workspaces = new Map<string, { file: string; workspace: Workspace.Workspace }>();
   const policies = new Map<string, { file: string; policy: Policy.Policy }>();
   const channels = new Map<string, { file: string; channel: NotificationChannel.NotificationChannel }>();
+  const subscriptions = new Map<string, { file: string; subscription: Subscription.Subscription }>();
 
   const check = (file: string, schemaFile: string, document: unknown): boolean => {
     const validate = validatorFor(schemaFile);
@@ -164,6 +172,13 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
       else channels.set(channel.metadata.name, { file, channel });
       continue;
     }
+    if (kind === "Subscription") {
+      const subscription = document as unknown as Subscription.Subscription;
+      const existing = subscriptions.get(subscription.metadata.name);
+      if (existing) issues.push(`${file}: subscription '${subscription.metadata.name}' is already defined in ${existing.file}`);
+      else subscriptions.set(subscription.metadata.name, { file, subscription });
+      continue;
+    }
     if (kind !== "TriggerBinding") continue;
     const binding = document as unknown as TriggerBinding.TriggerBinding;
     const existing = bindings.get(binding.metadata.name);
@@ -205,6 +220,23 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     }
   }
 
+  for (const { file, subscription } of subscriptions.values()) {
+    const { scope, events, channels: named } = subscription.spec;
+    const name = subscription.metadata.name;
+    if ("workspace" in scope && !workspaces.has(scope.workspace)) {
+      issues.push(`${file}: subscription '${name}' is for workspace '${scope.workspace}', but no workspace '${scope.workspace}' is configured`);
+    }
+    const catalog = "workspace" in scope ? WORKSPACE_EVENTS : PLATFORM_EVENTS;
+    for (const event of events) {
+      if (!catalog.includes(event)) {
+        issues.push(`${file}: subscription '${name}' selects event '${event}', which the ${"workspace" in scope ? `workspace scope` : "platform scope"} does not have (it has: ${catalog.join(", ")})`);
+      }
+    }
+    for (const channel of named) {
+      if (!channels.has(channel)) issues.push(`${file}: subscription '${name}' sends to channel '${channel}', but no notification channel '${channel}' is configured`);
+    }
+  }
+
   // A policy for a misspelt workflow would silently never apply, leaving the step to ask
   // or a laxer policy in charge.
   for (const { file, policy } of policies.values()) {
@@ -225,6 +257,7 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     workspaces: [...workspaces.values()].map(({ workspace }) => workspace).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
     policies: [...policies.values()].map(({ policy }) => policy).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
     notificationChannels: [...channels.values()].map(({ channel }) => channel).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
+    subscriptions: [...subscriptions.values()].map(({ subscription }) => subscription).sort((a, b) => a.metadata.name.localeCompare(b.metadata.name)),
   };
 }
 

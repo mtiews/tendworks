@@ -31,7 +31,7 @@ describe("notifications on the compose stack", () => {
       runId: started!.id,
       title: `Run ${started!.id} of hello-agent completed`,
       artifacts: [],
-      // The fixture channels (tests/fixtures/config/notifications): one delivers, one refuses.
+      // The fixture subscriptions (tests/fixtures/config/notifications) send a run without a workspace (platform scope) to two channels: one delivers, one refuses.
       deliveries: [
         { channel: "fake-log", status: "delivered", attemptedAt: expect.any(String) },
         { channel: "fake-refusing", status: "failed", attemptedAt: expect.any(String), error: "the fake channel refuses every notification" },

@@ -5,7 +5,7 @@ Notifications separate three things:
 - **The event catalog belongs to the platform.**
   - Per workspace: `run.started`, `run.completed`, `run.failed`, `approval.requested`.
   - For the platform: `platform.degraded`, `platform.recovered`.
-  - Runs without a workspace belong to the platform scope.
+  - Runs without a workspace belong to the platform scope: a platform subscription may also select the four run events, which then concern those runs only.
 - **A notification channel is how someone is reached:** an adapter (`pushover`, `fake`) with its credentials and a default priority. It selects no events.
 - **A subscription chooses** events of one scope (a workspace, or the platform) and sends them to channels, optionally with a priority.
 

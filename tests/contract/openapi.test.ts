@@ -683,15 +683,20 @@ describe("control plane: triggers, through the trigger gateway", () => {
 });
 
 describe("control plane: notifications", () => {
-  it("lists the notifications human interaction recorded, with the run's artifacts and the delivery status of each selecting channel", async () => {
+  it("lists the notifications human interaction recorded, with the run's artifacts and the delivery status of each channel a subscription names", async () => {
     const store = createInMemoryNotificationStore();
     const fake = (refuse = false) => createFakeNotificationDelivery({ refuse, log: () => {} });
     const channels = [
-      { name: "phone", events: ["run.completed", "run.failed"] as const, delivery: fake(true) },
-      { name: "log", events: ["run.completed"] as const, delivery: fake() },
-      { name: "pager", events: ["run.failed"] as const, delivery: fake() },
+      { name: "phone", delivery: fake(true) },
+      { name: "log", delivery: fake() },
+      { name: "pager", delivery: fake() },
     ];
-    await createNotifier({ store, channels, now: () => new Date("2026-10-19T10:00:01.000Z") }).handle({
+    const subscriptions = [
+      { scope: { platform: {} }, events: ["run.completed", "run.failed"] as ["run.completed", "run.failed"], channels: ["phone"] as [string] },
+      { scope: { workspace: "app" }, events: ["run.completed"] as ["run.completed"], channels: ["pager"] as [string] },
+      { scope: { platform: {} }, events: ["run.completed"] as ["run.completed"], channels: ["log"] as [string] },
+    ];
+    await createNotifier({ store, channels, subscriptions, now: () => new Date("2026-10-19T10:00:01.000Z") }).handle({
       specversion: "1.0",
       id: "r-1:run.completed",
       source: "/tendworks/orchestration",

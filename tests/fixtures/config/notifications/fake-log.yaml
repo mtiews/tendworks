@@ -5,4 +5,3 @@ metadata:
 spec:
   # Writes every notification to the server's log.
   integration: fake
-  events: [approval.requested, run.failed, run.completed]

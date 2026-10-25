@@ -14,9 +14,9 @@ export interface NotifierChannelsOptions {
   fetch?: typeof fetch;
 }
 
-/** The configured notification channels, each with the delivery its integration selects (ADR 0025). */
+/** The configured notification channels, each with its default priority and the delivery its integration selects (ADR 0025, 0026). */
 export function notifierChannelsFor(channels: readonly NotificationChannel.NotificationChannel[], options: NotifierChannelsOptions): NotifierChannel[] {
-  return channels.map(({ metadata, spec }) => ({ name: metadata.name, events: spec.events, delivery: deliveryFor(spec, options) }));
+  return channels.map(({ metadata, spec }) => ({ name: metadata.name, ...(spec.priority === undefined ? {} : { priority: spec.priority }), delivery: deliveryFor(spec, options) }));
 }
 
 function deliveryFor(spec: NotificationChannel.NotificationChannelSpec, { secrets, log, fetch }: NotifierChannelsOptions): NotificationDelivery {
@@ -27,7 +27,6 @@ function deliveryFor(spec: NotificationChannel.NotificationChannelSpec, { secret
   const resolve = ({ secretRef: { name } }: SecretRef) => secrets.require(name);
   return createPushoverNotificationDelivery({
     credentials: () => ({ token: resolve(settings.token), user: resolve(settings.user) }),
-    ...(settings.priority === undefined ? {} : { priority: settings.priority }),
     ...(fetch ? { fetch } : {}),
   });
 }

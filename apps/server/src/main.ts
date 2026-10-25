@@ -106,19 +106,35 @@ await migrateOrStop(
   },
 );
 
-// Human interaction: run outcomes and approval requests from the event bus become
-// notifications, recorded before each configured notification channel that selects them
-// delivers them (ADR 0025). Channels resolve their platform secrets at each delivery.
 const notifications = createPostgresNotificationStore(pool);
-const notifier = createNotifier({ store: notifications, channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }) });
-console.log(
-  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration}: ${spec.events.join(", ")})`).join("; ") || "none"}`,
-);
 const bus = createPostgresEventBus({ pool });
-bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
 
 const workerUrl = env("TEND_WORKER_URL");
 const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
+
+// Human interaction: run outcomes and approval requests from the event bus become
+// notifications, recorded before the subscriptions of their scope (the run's workspace, else the
+// platform) deliver them to channels (ADR 0025, 0026). Channels resolve their platform secrets at
+// each delivery. The workspace of a run is orchestration's record of it, a trigger's workspace
+// or else the first workspace a step handed to its agent.
+const notifier = createNotifier({
+  store: notifications,
+  channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }),
+  subscriptions: configuration.subscriptions.map(({ spec }) => spec),
+  workspaceOf: async (runId) => {
+    const run = await orchestration.get(runId);
+    const origin = run?.startedBy;
+    return (origin?.kind === "trigger" ? origin.workspace : undefined) ?? run?.steps.find((step) => step.workspace)?.workspace?.name;
+  },
+});
+console.log(
+  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration})`).join("; ") || "none"}`,
+);
+console.log(
+  `configuration: subscriptions ${configuration.subscriptions.map(({ metadata, spec }) => `${metadata.name} (${"workspace" in spec.scope ? `workspace ${spec.scope.workspace}` : "platform"}: ${spec.events.join(", ")} to ${spec.channels.join(", ")})`).join("; ") || "none"}`,
+);
+bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
+
 // The agent runtime runs in the worker too; transcripts are read through its internal API.
 const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 

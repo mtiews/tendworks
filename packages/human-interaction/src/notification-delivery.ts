@@ -10,7 +10,12 @@ export type Notification = ControlPlane.components["schemas"]["notification"];
  * @port
  */
 export interface NotificationDelivery {
-  deliver(notification: Notification): Promise<void>;
+  deliver(notification: Notification, options?: DeliveryOptions): Promise<void>;
+}
+
+export interface DeliveryOptions {
+  /** Message priority from -2 (no alert) to 1 (high), as the matching subscriptions and the channel decided; the receiver's default when absent. */
+  priority?: number;
 }
 
 export interface FakeNotificationDeliveryOptions {

@@ -1,0 +1,9 @@
+apiVersion: tendworks.dev/v1
+kind: Subscription
+metadata:
+  name: platform-refusing
+spec:
+  # Next to platform-log, so the end-to-end tests see a failed delivery beside a delivered one.
+  scope: { platform: {} }
+  events: [run.completed]
+  channels: [fake-refusing]

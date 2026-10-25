@@ -7,11 +7,10 @@ import { createPushoverNotificationDelivery } from "./pushover-notification-deli
 const TOKEN = "azGDORePK8gMaC0QOYAMyEEuzJnyUi"; // betterleaks:allow dummy Pushover application token for the stub
 const USER = "uQiRzpo4DXghDmr9QzzfQu27cmVRsG"; // betterleaks:allow dummy Pushover user key for the stub
 
-function setup({ priority, refuseWith, token = TOKEN }: { priority?: number; refuseWith?: number; token?: string } = {}) {
+function setup({ refuseWith, token = TOKEN }: { refuseWith?: number; token?: string } = {}) {
   const api = stubPushoverApi({ token: TOKEN, user: USER, ...(refuseWith === undefined ? {} : { refuseWith }) });
   const delivery = createPushoverNotificationDelivery({
     credentials: () => ({ token, user: USER }),
-    ...(priority === undefined ? {} : { priority }),
     fetch: api,
   });
   return { api, delivery };
@@ -82,12 +81,14 @@ describe("pushover notification delivery", () => {
     expect(api.messages[1]).not.toHaveProperty("url");
   });
 
-  it("sends the channel's priority", async () => {
-    const { api, delivery } = setup({ priority: 1 });
+  it("sends the priority the notifier resolved, and Pushover's default without one", async () => {
+    const { api, delivery } = setup();
 
+    await delivery.deliver(failed, { priority: 1 });
     await delivery.deliver(failed);
 
     expect(api.messages[0]?.priority).toBe(1);
+    expect(api.messages[1]).not.toHaveProperty("priority");
   });
 
   it("shortens a title and message over Pushover's limits instead of losing the notification", async () => {

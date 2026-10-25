@@ -58,7 +58,7 @@ A message to the human that needs no decision, e.g. that a run finished. It is r
 _Avoid_: alert, task, message (that is an agent's output)
 
 **Notification channel**:
-A declared way notifications reach the operator (`kind: NotificationChannel`, ADR 0025): the events it selects and the adapter that delivers them, e.g. Pushover. Each notification goes to every channel that selects it, with a delivery status per channel.
+A declared way someone is reached (`kind: NotificationChannel`, ADR 0025, 0026): the adapter that delivers, e.g. Pushover, its credentials and a default priority. It selects no events; subscriptions send events to it. The delivery status is recorded per channel.
 _Avoid_: notifier (that is human interaction's consumer of events), notification delivery (that is the port behind a channel)
 
 **Policy**:

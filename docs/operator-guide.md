@@ -199,7 +199,8 @@ Rules the loader enforces:
 | `Workspace` | `workspaces/*.yaml` | a repository (`spec.git`) or host directory (`spec.directory`) agents work in, its credential and its assistant: [Workspaces](#workspaces) | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.suspend`, `spec.trigger` (`schedule` or `github-issues`): [Trigger bindings](#trigger-bindings) | server |
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | the prompt text; new workflows calling `agent://<profile>` in a workspace; a [human step](#waiting-for-a-human-the-human-step-and-policies) `call: approval` where a workflow waits for you | server |
-| `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.events`, `spec.pushover.priority`: [Notifications](#notifications) | server |
+| `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.priority` (the default), `spec.pushover`: [Notifications](#notifications) | server |
+| `Subscription` | any `*.yaml`, e.g. `notifications/` | `spec.scope` (`workspace: <name>` or `platform: {}`), `spec.events`, `spec.channels`, `spec.priority`: [Notifications](#notifications) | server |
 | `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows`: [Waiting for a human](#waiting-for-a-human-the-human-step-and-policies) | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false`. No repository credential: the workspace brings it | server and worker |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
@@ -334,28 +335,30 @@ spec:
 
 ### Notifications
 
-Human interaction records a notification for every approval request (`approval.requested`) and every completed or failed run (`run.completed`, `run.failed`), then delivers it to each notification channel that selects its event (ADR 0025). Without a channel, notifications are only recorded.
+Human interaction records a notification for every approval request (`approval.requested`) and every completed or failed run (`run.completed`, `run.failed`), whether or not anyone subscribed. A **notification channel** only says how you are reached (Pushover with its credentials, a default priority). A **subscription** sends events of one scope to channels (ADR 0025, 0026). Without a matching subscription, a notification is only recorded and listed.
+
+- **Scope:** `workspace: <name>` is a project; its subscriptions apply to everyone working in it. `platform: {}` holds the events of runs without a workspace (e.g. started with `tend run start`) and, opt-in, the platform's own events. A run's workspace is the one its trigger binding started it in, else the first one a step handed to its agent.
+- **Events:** a workspace has `run.started`, `run.completed`, `run.failed`, `approval.requested`; the platform has the same for runs without a workspace, plus `platform.degraded` and `platform.recovered`. The server refuses, when it loads the configuration, a subscription with an unknown workspace or channel, an event outside its scope, or an empty `events` or `channels`.
+- **Matching:** a notification is delivered once per channel that any matching subscription names, with the highest `priority` of those subscriptions, else the channel's `priority`, else 0. `priority` goes from -2 (no alert) to 1 (high).
 
 - **Artifacts:** notifications of finished runs carry what the run's steps reported, e.g. `develop-issue`'s pull request; the first artifact is the message's link.
 - **Approval requests** list their answers and the `tend approval answer` command, and their links: a tap opens the first, e.g. the pull request to merge.
 - **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Notifications page of the web UI. A failed delivery is not retried.
-- **Several channels**, e.g. a second one for failures only with an alert that bypasses quiet hours:
+- **A subscription**, e.g. failures and approvals of the `playground` workspace high, completions normal:
 
   ```yaml
   apiVersion: tendworks.dev/v1
-  kind: NotificationChannel
+  kind: Subscription
   metadata:
-    name: phone-failures
+    name: playground-attention
   spec:
-    integration: pushover
-    events: [run.failed]
-    pushover:
-      token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
-      user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
-      priority: 1
+    scope: { workspace: playground }
+    events: [run.failed, approval.requested]
+    channels: [phone]
+    priority: 1
   ```
 
-  `priority` goes from -2 (no alert) to 1 (high); 0 is the default. A notification with two channels selecting it is delivered twice.
+  Templates for a project and the platform are next to `phone.yaml.example`.
 - `integration: fake` writes every notification to the server log instead (`docker compose -f deploy/compose.yaml logs server`), to try channels out without an account.
 
 #### Pushover on your phone
@@ -371,8 +374,8 @@ Human interaction records a notification for every approval request (`approval.r
    ```
 
    They are platform secrets: only the server holds them, never a sandbox.
-5. In your configuration, rename `notifications/phone.yaml.example` to `notifications/phone.yaml` (choose `events` and `priority` there).
-6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names it: `configuration: notification channels phone (pushover: approval.requested, run.failed, run.completed)`.
+5. In your configuration, rename `notifications/phone.yaml.example` to `notifications/phone.yaml` and `subscription-playground.yaml.example` to `notifications/subscription-playground.yaml` (choose `events` and `priority` there; a channel selects no events itself).
+6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names the channel and the subscription: `configuration: notification channels phone (pushover)`.
 7. Check the delivery: start `hello-developer` ([Everyday commands](#everyday-commands)). When it completes, the phone shows `Run <id> of hello-developer completed`, and `tend notification list` shows `phone delivered`. A failure shows there as `phone failed for <id>: …`: `secret TENDWORKS_PLATFORM_PUSHOVER_TOKEN is not set` (the secret did not reach the server: `up -d --wait`, not `restart`) or `Pushover refused the message (HTTP 400): …` with Pushover's reason (e.g. a wrong token or user key).
 8. Check the link, by hand: let `develop-issue` work an issue ([First test workloads](#first-test-workloads), 3). When the run completes, tap its message on the phone: it opens the pull request that `tend run get <id>` lists as `pullRequest` and under ARTIFACT.
 
@@ -803,7 +806,7 @@ docker network rm tendworks-sandboxes
 | issue labelled but no new run | | each issue fires once per binding and workspace, also after a failed run (ADR 0006); start it by hand ([Everyday commands](#everyday-commands), "Retry an issue") |
 | `tend notification list` shows `<channel> failed for <id>: secret TENDWORKS_PLATFORM_PUSHOVER_... is not set` | notifications | the Pushover secrets did not reach the server; set them in `deploy/.env`, `up -d --wait` |
 | `<channel> failed for <id>: Pushover refused the message (HTTP 4xx): ...` | notifications | Pushover's reason, e.g. an invalid application token or user key; fix it in `deploy/.env`, `up -d --wait` |
-| no notification on the phone, `no channel` in `tend notification list` | notifications | no channel selects that event; check `spec.events` and that the file ends in `.yaml` (`phone.yaml.example` is not read); the server log lists the channels at start |
+| no notification on the phone, `no channel` in `tend notification list` | notifications | no subscription matches that event; check its `spec.scope` (a run without a workspace is in `platform: {}`), `spec.events`, `spec.channels` and that the files end in `.yaml` (`*.yaml.example` is not read); the server log lists channels and subscriptions at start |
 | chat refused: `Unknown workspace` or `Chat not allowed` | `tend chat --workspace`, UI | no workspace of that name, or its assistant is not enabled (`spec.assistant.enabled: true`); `tend workspace list` |
 | chat answers `the workspace is busy: ...` | chat | a run works in the same directory workspace; send the message again once it ended |
 | run or chat fails: `directory ... is in use by another agent session (task ...)` | `tend run get`, chat | only one session at a time per directory workspace; wait for the other one, or use a git workspace for parallel work |

@@ -1,0 +1,15 @@
+# Template of the platform's subscription (ADR 0026), opt-in: whoever wants to know whether
+# the platform itself runs subscribes, like to a service's status page. Rename to
+# subscription-platform.yaml to use it.
+#
+# Events of the platform scope: platform.degraded, platform.recovered, and the run events
+# (run.started, run.completed, run.failed, approval.requested) of runs without a workspace.
+apiVersion: tendworks.dev/v1
+kind: Subscription
+metadata:
+  name: platform-health
+spec:
+  scope: { platform: {} }
+  events: [platform.degraded, platform.recovered]
+  channels: [phone]
+  priority: 1
