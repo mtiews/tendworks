@@ -1,5 +1,5 @@
 import type { PlatformEvents } from "@tendworks/shared";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createPlatformMonitor, type PlatformStatus } from "./platform-monitor.js";
 
 type Component = PlatformStatus["components"][number];
@@ -108,6 +108,30 @@ describe("the platform monitor", () => {
     await tick();
     await tick();
     expect(published.map((event) => event.data.components.map(({ name }) => name))).toEqual([["worker"], ["store", "worker"]]);
+  });
+
+  it("checks right away and then every interval until stopped, never two checks at once", async () => {
+    vi.useFakeTimers();
+    try {
+      let checks = 0;
+      const monitor = createPlatformMonitor({
+        check: async () => {
+          checks += 1;
+          return { status: "healthy", components: [], checkedAt: "2026-10-25T10:00:00Z" };
+        },
+        publisher: { publish: async () => {} },
+      });
+      monitor.start(60_000);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(checks).toBe(1);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(checks).toBe(3);
+      monitor.stop();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(checks).toBe(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("tries again at the next check when publishing failed", async () => {

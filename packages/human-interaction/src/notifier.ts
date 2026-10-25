@@ -58,7 +58,7 @@ export function createNotifier({ store, channels, subscriptions, runOf = async (
 
     async handle(event: NotifiedEvent): Promise<void> {
       // A platform event belongs to no run, so to the platform scope.
-      const { workspace, origin } = event.type === "dev.tendworks.platform.health-changed" ? {} as NotifierRun : await runOf(event.runid);
+      const { workspace, origin }: NotifierRun = event.type === "dev.tendworks.platform.health-changed" ? {} : await runOf(event.runid);
       const fresh = toNotification(event, now().toISOString(), { workspace, origin });
       const priorities = matching(subscriptions, workspace, fresh.kind);
       const notification = await store.record(`${event.source} ${event.id}`, {
