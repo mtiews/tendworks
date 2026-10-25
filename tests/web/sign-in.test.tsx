@@ -16,13 +16,12 @@ describe("signing in", () => {
 
     expect(await screen.findByText("Full access")).toBeTruthy();
     const navigation = screen.getByRole("navigation", { name: "Main" });
-    expect([...navigation.querySelectorAll("a")].map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["Status", "/ui/"],
+    expect([...navigation.querySelectorAll("a")].filter((link) => link.getAttribute("aria-label") !== "Tendworks").map((link) => [link.getAttribute("aria-label"), link.getAttribute("href")])).toEqual([
+      ["Overview", "/ui/overview"],
       ["Runs", "/ui/runs"],
-      ["Approval requests", "/ui/approval-requests"],
-      ["Notifications", "/ui/notifications"],
-      ["Subscriptions", "/ui/subscriptions"],
       ["Chats", "/ui/chats"],
+      ["Inbox", "/ui/notifications"],
+      ["More", "/ui/more"],
     ]);
   });
 
@@ -155,11 +154,11 @@ describe("the app shell", () => {
     const { user } = renderApp();
     await signIn(user, API_TOKEN);
 
-    await user.click(await screen.findByRole("link", { name: "Notifications" }));
+    await user.click(await screen.findByRole("link", { name: "Inbox" }));
 
     expect(screen.getByRole("heading", { name: "Notifications" })).toBeTruthy();
     expect(window.location.pathname).toBe("/ui/notifications");
-    expect(screen.getByRole("link", { name: "Notifications" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("link", { name: "Inbox" }).getAttribute("aria-current")).toBe("page");
     expect(document.title).toBe("Notifications · Tendworks");
   });
 
@@ -168,9 +167,9 @@ describe("the app shell", () => {
     await signIn(user, API_TOKEN);
     await screen.findByText("Full access");
 
-    for (const view of ["Runs", "Notifications", "Chats", "Status"]) {
-      await user.click(screen.getByRole("link", { name: view }));
-      expect(await screen.findByRole("heading", { name: view })).toBeTruthy();
+    for (const [entry, heading] of [["Runs", "Runs"], ["Inbox", "Notifications"], ["Chats", "Chats"], ["Overview", "Status"]] as const) {
+      await user.click(screen.getByRole("link", { name: entry }));
+      expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
     }
 
     expect(platform.requests.filter((request) => new URL(request.url).pathname === "/access")).toHaveLength(1);

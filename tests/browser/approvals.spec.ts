@@ -30,7 +30,8 @@ test("a run waiting on its human step continues after answering in the browser",
   await expect(page.getByRole("definition").filter({ hasText: /^completed$/ })).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole("table", { name: "Output" })).toContainText("followedUp");
 
-  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Approval requests" }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "More" }).click();
+  await page.getByRole("link", { name: "Approval requests" }).click();
   const row = page.getByRole("row").filter({ hasText: runId });
   await expect(row).toContainText("decided");
   await expect(row).toContainText("Merged – continue");

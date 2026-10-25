@@ -93,6 +93,7 @@ describe("polling", () => {
     showTab();
 
     expect(await screen.findByText("Run run-2 of hello-agent completed")).toBeTruthy();
-    expect(requestsTo(platform, "/notifications")).toBe(whileVisible + 1);
+    // The page's list and the shell's badge for failed deliveries both poll at once.
+    expect(requestsTo(platform, "/notifications")).toBe(whileVisible + 2);
   });
 });

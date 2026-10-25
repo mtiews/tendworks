@@ -1,4 +1,4 @@
-import { API_TOKEN, expect, expectNoHorizontalScroll, READ_TOKEN, signIn, test } from "./support/test.js";
+import { API_TOKEN, expect, expectNoHorizontalScroll, READ_TOKEN, signIn, signOut, test } from "./support/test.js";
 
 test("the platform's root address leads to sign-in, served under a strict content security policy", async ({ page }) => {
   const response = await page.goto("/");
@@ -9,6 +9,8 @@ test("the platform's root address leads to sign-in, served under a strict conten
   await expectNoHorizontalScroll(page);
 });
 
+const SECTIONS = ["Overview", "Runs", "Chats", "Inbox", "More"];
+
 test("signs in with the API token and shows full access and the navigation", async ({ page }) => {
   await page.goto("/ui/");
 
@@ -16,7 +18,9 @@ test("signs in with the API token and shows full access and the navigation", asy
 
   await expect(page.getByText("Full access")).toBeVisible();
   const navigation = page.getByRole("navigation", { name: "Main" });
-  for (const view of ["Status", "Runs", "Approval requests", "Notifications", "Chats"]) await expect(navigation.getByRole("link", { name: view })).toBeAttached();
+  for (const section of SECTIONS) await expect(navigation.getByRole("link", { name: section })).toBeVisible();
+  // The start page is the overview.
+  await expect(navigation.getByRole("link", { name: "Overview" })).toHaveAttribute("aria-current", "page");
   await navigation.getByRole("link", { name: "Runs" }).click();
   await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
   await expect(navigation.getByRole("link", { name: "Runs" })).toHaveAttribute("aria-current", "page");
@@ -24,27 +28,51 @@ test("signs in with the API token and shows full access and the navigation", asy
   await expectNoHorizontalScroll(page);
 });
 
-test("shows every navigation entry and sign-out at once, without scrolling sideways, at any width", async ({ page }, testInfo) => {
+test("shows the navigation as an icon rail on a desktop and as bottom tabs on a phone, with touch targets of 44px at any width", async ({ page }, testInfo) => {
   await page.goto("/ui/");
   await signIn(page, API_TOKEN);
   await expect(page.getByText("Full access")).toBeVisible();
 
   const navigation = page.getByRole("navigation", { name: "Main" });
-  const touchTargets = [...["Status", "Runs", "Approval requests", "Notifications", "Chats"].map((view) => navigation.getByRole("link", { name: view })), page.getByRole("button", { name: "Sign out" })];
-  for (const target of touchTargets) {
+  const phone = testInfo.project.name === "phone";
+  const targets = SECTIONS.map((section) => navigation.getByRole("link", { name: section }));
+  if (!phone) targets.push(page.getByRole("button", { name: "Sign out" }), navigation.getByRole("link", { name: "Tendworks" }));
+  for (const target of targets) {
     await expect(target).toBeInViewport({ ratio: 1 });
-    // At phone width the entries wrap into a grid and are big enough to tap.
-    if (testInfo.project.name === "phone") expect((await target.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const box = (await target.boundingBox())!;
+    expect(box.height).toBeGreaterThanOrEqual(44);
+    expect(box.width).toBeGreaterThanOrEqual(44);
   }
+  // Rail on the left edge, tabs along the bottom edge.
+  const viewport = page.viewportSize()!;
+  const first = (await targets[0]!.boundingBox())!;
+  if (phone) expect(first.y).toBeGreaterThan(viewport.height / 2);
+  else expect(first.x).toBeLessThan(viewport.width / 4);
   await expect(page.getByText("Full access")).toBeInViewport({ ratio: 1 });
-  // The navigation itself does not scroll sideways either.
-  // Runs in the page; this project's types have no DOM, so the element's layout is typed by hand.
-  const navigationOverflow = await navigation.evaluate((element) => {
-    const box = element as unknown as { scrollWidth: number; clientWidth: number };
-    return box.scrollWidth - box.clientWidth;
-  });
-  expect(navigationOverflow).toBeLessThanOrEqual(0);
   await expectNoHorizontalScroll(page);
+
+  // Every section fits the width, with the access scope in view.
+  for (const section of SECTIONS) {
+    await navigation.getByRole("link", { name: section }).click();
+    await expect(navigation.getByRole("link", { name: section })).toHaveAttribute("aria-current", "page");
+    await expect(page.getByText("Full access")).toBeInViewport({ ratio: 1 });
+    await expectNoHorizontalScroll(page);
+  }
+});
+
+test("lets the operator choose the start page under More, and keeps it over a reload", async ({ page }) => {
+  await page.goto("/ui/");
+  await signIn(page, API_TOKEN, { remember: true });
+  const navigation = page.getByRole("navigation", { name: "Main" });
+  await navigation.getByRole("link", { name: "More" }).click();
+
+  await page.getByRole("radio", { name: "Runs" }).check();
+  await page.goto("/ui/");
+
+  await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
+  await expect(navigation.getByRole("link", { name: "Runs" })).toHaveAttribute("aria-current", "page");
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Runs" })).toBeVisible();
 });
 
 test("signs in with the read-only token and shows that the UI only reads", async ({ page }) => {
@@ -53,6 +81,7 @@ test("signs in with the read-only token and shows that the UI only reads", async
   await signIn(page, READ_TOKEN);
 
   await expect(page.getByText("Read-only")).toBeVisible();
+  await expect(page.getByText("Read-only")).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole("heading", { name: "Chats" })).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
@@ -69,7 +98,7 @@ test("refuses a wrong token, and forgets a token on sign-out", async ({ page }) 
   await page.reload();
   await expect(page.getByText("Full access")).toBeVisible();
 
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();

@@ -54,7 +54,7 @@ a.button.primary {
   display: grid;
   gap: var(--space-3);
   position: sticky;
-  bottom: 0;
+  bottom: var(--bottom-inset, 0px);
   z-index: 1;
   padding: var(--space-3) 0 max(var(--space-3), env(safe-area-inset-bottom));
   background: var(--color-surface);

@@ -344,7 +344,7 @@ Human interaction records a notification for every started, completed or failed 
 
 - **Artifacts:** notifications of finished runs carry what the run's steps reported, e.g. `develop-issue`'s pull request; the first artifact is the message's link.
 - **Approval requests** list their answers and the `tend approval answer` command, and their links: a tap opens the first, e.g. the pull request to merge.
-- **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Notifications page of the web UI. A failed delivery is not retried.
+- **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Inbox of the web UI. A failed delivery is not retried.
 - **A subscription**, e.g. failures and approvals of the `playground` workspace high, completions normal:
 
   ```yaml
@@ -411,7 +411,7 @@ The platform merges nothing; `develop-issue` ends with the pull request, and you
 
 - `action` is a name of your choice that policies decide on; `question`, `links` and the answer labels may be expressions.
 - An answer with `outcome: continue` goes on with the next task; `stop` ends the workflow there, and the run completes.
-- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or on the Approvals page or the run's detail in the web UI. The `approval.requested` notification tells you a request waits.
+- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI under More → Approval requests, or on the run's detail. The `approval.requested` notification tells you a request waits.
 
 A **policy** decides per action and workflow whether the step asks (`ask`) or proceeds at once without a request (`allow`):
 

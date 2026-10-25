@@ -71,3 +71,10 @@ export async function expectNoHorizontalScroll(page: Page) {
   });
   expect(overflow).toBeLessThanOrEqual(0);
 }
+
+/** Signs out where the layout puts it: the rail's button on a desktop, the "More" page on a phone. */
+export async function signOut(page: Page) {
+  const button = page.getByRole("button", { name: "Sign out" });
+  if (!(await button.isVisible())) await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "More" }).click();
+  await button.click();
+}

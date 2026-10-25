@@ -1,7 +1,7 @@
 import { emptyConfiguration } from "@tendworks/control-plane";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { API_TOKEN, renderApp } from "./support/platform.js";
+import { API_TOKEN, renderApp, signedIn } from "./support/platform.js";
 import { rows } from "./support/table.js";
 
 function openSubscriptions(subscriptions = true) {
@@ -31,10 +31,13 @@ describe("subscriptions page", () => {
     ]);
   });
 
-  it("is in the navigation", async () => {
-    openSubscriptions();
+  it("is reached from More", async () => {
+    signedIn();
+    const { user } = renderApp({ path: "/ui/more" });
 
-    expect(await screen.findByRole("link", { name: "Subscriptions" })).toBeTruthy();
+    await user.click(await screen.findByRole("link", { name: "Subscriptions" }));
+
+    expect(await screen.findByRole("heading", { name: "Subscriptions" })).toBeTruthy();
   });
 
   it("says so when nothing is subscribed", async () => {
