@@ -36,9 +36,10 @@ describe("chats API", () => {
     const started = await call("POST", "/chats", { agent: "assistant", text: "Hello" });
     const got = await call("GET", `/chats/${started.body.id}`);
 
-    expect(started).toMatchObject({ status: 201, body: { agent: "assistant", status: "working" } });
+    expect(started).toMatchObject({ status: 201, body: { agent: "assistant", title: "Hello", status: "working" } });
     expect(started.headers.get("location")).toBe(`/chats/${started.body.id}`);
-    expect(got).toMatchObject({ status: 200, body: { id: started.body.id, status: "working" } });
+    expect(got).toMatchObject({ status: 200, body: { id: started.body.id, title: "Hello", status: "working" } });
+    expect(await call("GET", "/chats")).toMatchObject({ body: { items: [{ id: started.body.id, title: "Hello" }] } });
   });
 
   it("refuses a chat with a profile that does not allow chats, with the reason", async () => {

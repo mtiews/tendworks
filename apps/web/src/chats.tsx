@@ -4,7 +4,7 @@ import { useApi } from "./api.js";
 import { answer } from "./answers.js";
 import { Age } from "./approvals.js";
 import { ChatWindow } from "./chat-window.js";
-import { chatTitle, defaultChat, groupChats, matchesChatFilter, type Chat } from "./chat-summary.js";
+import { chatTitle, defaultChat, groupChats, matchesChatFilter, stateOf, type Chat } from "./chat-summary.js";
 import { NewChat } from "./new-chat.js";
 import { Pending } from "./pending.js";
 import { Link, useLocation } from "./router.js";
@@ -112,8 +112,7 @@ function ChatGroup({ level, title, chats, readAt, selected }: { level: 1 | 2; ti
 }
 
 function ChatItem({ chat, readAt, selected }: { chat: Chat; readAt: number; selected: boolean }) {
-  // At work, failed, else calm.
-  const state = chat.status === "working" ? "running" : chat.status === "failed" ? "failed" : "idle";
+  const state = stateOf(chat);
   const sub = [chat.agent, chat.workspace, chat.status === "failed" ? "failed" : undefined, chat.cost && formatCost(chat.cost)].filter(Boolean).join(" · ");
   return (
     <Link to={`/chats/${encodeURIComponent(chat.id)}`} current={selected} className={`item item-${state}`}>

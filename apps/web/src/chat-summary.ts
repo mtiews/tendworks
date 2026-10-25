@@ -21,7 +21,7 @@ export function groupChats(chats: readonly Chat[]): { open: Chat[]; ended: Chat[
 
 /** The chat a desktop workbench opens without one chosen: the newest open one, else the newest. */
 export function defaultChat(chats: readonly Chat[]): Chat | undefined {
-  return groupChats(chats).open[0] ?? chats[0];
+  return chats.find(isOpen) ?? chats[0];
 }
 
 /** Whether `filter` finds the chat by its title, agent, workspace or id (case-insensitive). */
@@ -30,3 +30,6 @@ export function matchesChatFilter(chat: Chat, filter: string): boolean {
   if (wanted === "") return true;
   return [chat.title, chat.agent, chat.workspace, chat.id].some((text) => text?.toLowerCase().includes(wanted));
 }
+
+/** What the list shows of a chat: at work, failed, else calm. */
+export const stateOf = (chat: Chat) => (chat.status === "working" ? "running" : chat.status === "failed" ? "failed" : "idle");
