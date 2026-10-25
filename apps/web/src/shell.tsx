@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useApi } from "./api.js";
 import { BrandMark } from "./brand-mark.js";
 import { Icon, type IconName } from "./icons.js";
-import { useNavigationBadges } from "./navigation-badges.js";
+import { useNavigationBadges, type NavigationBadges } from "./navigation-badges.js";
 import { resolve, type Section } from "./routes.js";
 import { Link, useLocation } from "./router.js";
 import { usePhone } from "./use-phone.js";
@@ -73,7 +73,7 @@ function BackLink({ to }: { to: string }) {
   );
 }
 
-function Navigation({ phone, section, badges, signOut }: { phone: boolean; section: Section | undefined; badges: { pending: number; failedDeliveries: number }; signOut: () => void }) {
+function Navigation({ phone, section, badges, signOut }: { phone: boolean; section: Section | undefined; badges: NavigationBadges; signOut: () => void }) {
   const badgeOf = (entry: Entry): { count: number; text: string } | undefined => {
     if (entry.section === "runs" && badges.pending > 0) return { count: badges.pending, text: `${badges.pending} approval ${badges.pending === 1 ? "request waits" : "requests wait"} for an answer` };
     if (entry.section === "inbox" && badges.failedDeliveries > 0)
