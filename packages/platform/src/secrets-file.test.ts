@@ -8,7 +8,7 @@ import { exportSecrets, readSecretsFile } from "./secrets-file.js";
 const file = () => join(mkdtempSync(join(tmpdir(), "tend-secrets-file-")), "agent-secrets.json");
 
 const environment = {
-  TENDWORKS_AGENT_GITHUB_TOKEN: "agent-token",
+  TENDWORKS_AGENT_PLAYGROUND_TOKEN: "agent-token",
   TENDWORKS_AGENT_NEW_TOKEN: "new-token",
   TENDWORKS_PLATFORM_GITHUB_TOKEN: "platform-token",
   TEND_API_TOKEN: "api-token",
@@ -19,7 +19,7 @@ describe("a secrets file", () => {
     const path = file();
     exportSecrets("agent", environment, path);
 
-    expect(readSecretsFile(path)).toEqual({ TENDWORKS_AGENT_GITHUB_TOKEN: "agent-token", TENDWORKS_AGENT_NEW_TOKEN: "new-token" });
+    expect(readSecretsFile(path)).toEqual({ TENDWORKS_AGENT_PLAYGROUND_TOKEN: "agent-token", TENDWORKS_AGENT_NEW_TOKEN: "new-token" });
     expect(readFileSync(path, "utf8")).not.toContain("platform-token");
     expect(readFileSync(path, "utf8")).not.toContain("api-token");
   });
@@ -47,7 +47,7 @@ describe("a secrets file", () => {
     exportSecrets("agent", environment, path);
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
-    expect(readSecretsFile(path)).toEqual({ TENDWORKS_AGENT_GITHUB_TOKEN: "agent-token", TENDWORKS_AGENT_NEW_TOKEN: "new-token" });
+    expect(readSecretsFile(path)).toEqual({ TENDWORKS_AGENT_PLAYGROUND_TOKEN: "agent-token", TENDWORKS_AGENT_NEW_TOKEN: "new-token" });
   });
 
   it("reads as empty while it does not exist yet", () => {

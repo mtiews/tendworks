@@ -87,7 +87,7 @@ All commands run from the repository root. Compose uses `deploy/` as its project
 
 3. **Fill in the rest of `deploy/.env`** ([Secrets](#secrets)) **before the first start**:
    - `TEND_CLAUDE_CODE_CREDENTIAL` and the matching `CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY`.
-   - The two GitHub tokens, as in [GitHub access](#before-the-first-real-run-github-access): the agent token of the workspace `playground` (`TENDWORKS_AGENT_GITHUB_TOKEN`) and the issues token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`).
+   - The two GitHub tokens, as in [GitHub access](#before-the-first-real-run-github-access): the agent token of the workspace `playground` (`TENDWORKS_AGENT_PLAYGROUND_TOKEN`) and the issues token (`TENDWORKS_PLATFORM_GITHUB_TOKEN`).
    - Optional: `TENDWORKS_PLATFORM_PUSHOVER_TOKEN` and `TENDWORKS_PLATFORM_PUSHOVER_USER` ([Pushover on your phone](#pushover-on-your-phone)).
 
 4. **Set up your own configuration** (directory or repository, [below](#your-own-configuration))
@@ -172,7 +172,7 @@ Running runs resume after either, and the worker takes up open chats again.
 | What | Starter |
 | --- | --- |
 | Agent profiles | `developer` (implements an issue and opens the pull request), `assistant` (the [platform assistant](#chats-and-assistants)), `workspace-assistant` (the default [workspace assistant](#workspace-assistants)) |
-| Workspace | `playground`: git, `https://github.com/mtiews/tendworks-playground.git`, credential `TENDWORKS_AGENT_GITHUB_TOKEN`, read-only assistant enabled |
+| Workspace | `playground`: git, `https://github.com/mtiews/tendworks-playground.git`, credential `TENDWORKS_AGENT_PLAYGROUND_TOKEN`, read-only assistant enabled |
 | Workflows | `develop-issue` (issue → pull request), `check-workspace` (build and test a workspace, report, change nothing), `hello-developer`, `restart-developer` (smoke tests) |
 | Trigger bindings | `playground-ready-for-agent` (`github-issues`), `playground-nightly-check` (`schedule`); both suspended |
 | Notification channel | `notifications/phone.yaml.example`: a Pushover template that does nothing until you rename it ([Pushover on your phone](#pushover-on-your-phone)) |
@@ -225,7 +225,7 @@ spec:
     url: https://github.com/mtiews/tendworks-playground.git
     defaultBranch: main
   credentials:
-    secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN }
+    secretRef: { name: TENDWORKS_AGENT_PLAYGROUND_TOKEN }
     env: GH_TOKEN
   assistant:
     enabled: true
@@ -241,7 +241,7 @@ spec:
 
 **Your own repository:**
 
-1. Create an agent token for it ([GitHub access](#before-the-first-real-run-github-access)) and add it to `deploy/.env`, e.g. `TENDWORKS_AGENT_MYAPP_TOKEN=<token>`.
+1. Create an agent token for it ([GitHub access](#before-the-first-real-run-github-access)) and add it to `deploy/.env`, e.g. `TENDWORKS_AGENT_MYAPP_TOKEN=<token>`. Check it with `scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env --token-var TENDWORKS_AGENT_MYAPP_TOKEN`.
 2. Add `workspaces/myapp.yaml` like the one above, with its `url`, `defaultBranch` and `secretRef: { name: TENDWORKS_AGENT_MYAPP_TOKEN }`.
 3. Add `myapp` to `spec.workspaces` of the bindings that should cover it, and its repository to the issues token's repositories if a `github-issues` binding names it.
 4. `docker compose -f deploy/compose.yaml up -d --wait` (the new secret), then `docker compose -f deploy/compose.yaml restart server worker` (the new files); `tend workspace list` lists it.
@@ -479,7 +479,7 @@ All secrets live in `deploy/.env`. Configuration only references them (ADR 0008)
 | `TEND_CLAUDE_CODE_CREDENTIAL` | selects `oauth-token` or `api-key`; only the selected variable enters a sandbox | worker | — | — | not a secret |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude Code with your subscription | worker → every Claude Code sandbox, in the agent process's environment | — | `claude setup-token` | model usage on your subscription |
 | `ANTHROPIC_API_KEY` | Claude Code with an API key, billed per use | worker → every Claude Code sandbox, as above | a key for this purpose only; spend limits in the Anthropic Console | Anthropic Console | spend on your API account |
-| `TENDWORKS_AGENT_GITHUB_TOKEN` | **agent token** of the `playground` workspace (one agent token per workspace, each its own `TENDWORKS_AGENT_*` variable): git clones and pushes with it, the `developer` agent opens the pull request with it (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of tasks in that workspace | that workspace's repository: Contents and Pull requests read and write ([GitHub access](#before-the-first-real-run-github-access)) | fine-grained token | push to any branch and open, edit or merge pull requests in its repository |
+| `TENDWORKS_AGENT_PLAYGROUND_TOKEN` | **agent token** of the `playground` workspace (one agent token per workspace, each its own `TENDWORKS_AGENT_*` variable): git clones and pushes with it, the `developer` agent opens the pull request with it (`GH_TOKEN` in the sandbox) | `agent-secrets` file → worker → sandboxes of tasks in that workspace | that workspace's repository: Contents and Pull requests read and write ([GitHub access](#before-the-first-real-run-github-access)) | fine-grained token | push to any branch and open, edit or merge pull requests in its repository |
 | `TENDWORKS_PLATFORM_GITHUB_TOKEN` | **issues token**: the `github-issues` trigger reads issues with it | server only, never a sandbox | the repositories of the bindings' workspaces: Issues read-only ([GitHub access](#before-the-first-real-run-github-access)) | fine-grained token | read issues in its repositories |
 | `TENDWORKS_PLATFORM_PUSHOVER_TOKEN`, `TENDWORKS_PLATFORM_PUSHOVER_USER` | API token of your Pushover application and your user key, for `pushover` notification channels | server only, never a sandbox | an application for Tendworks only | [Pushover on your phone](#pushover-on-your-phone) | messages to your devices in your name; reset the application's token at pushover.net |
 
@@ -495,7 +495,7 @@ Configuration never holds a value, only `{ secretRef: { name: <NAME> } }`, resol
 
 | Who references | May resolve | Example |
 | --- | --- | --- |
-| workspaces (`spec.credentials`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `credentials: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN }, env: GH_TOKEN }` |
+| workspaces (`spec.credentials`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `credentials: { secretRef: { name: TENDWORKS_AGENT_PLAYGROUND_TOKEN }, env: GH_TOKEN }` |
 | agent profiles (`spec.env`, handed into sandboxes) | only `TENDWORKS_AGENT_*` | `API_KEY: { secretRef: { name: TENDWORKS_AGENT_SEARCH_KEY } }` |
 | trigger bindings (`token` of `github-issues`) | only `TENDWORKS_PLATFORM_*` | `token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } }` |
 | notification channels (`spec.pushover`) | only `TENDWORKS_PLATFORM_*` | `user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }` |
@@ -549,7 +549,7 @@ scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env   
 scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env --write-tests  # also push tests, cleans up
 ```
 
-The script reads `TENDWORKS_AGENT_GITHUB_TOKEN`, the starter's agent token. For a workspace with another agent token, hand it over in the environment instead of `--env-file`: `TENDWORKS_AGENT_GITHUB_TOKEN="$(grep '^TENDWORKS_AGENT_MYAPP_TOKEN=' deploy/.env | cut -d= -f2-)" scripts/check-github-agent-access.sh --repo OWNER/NAME`.
+The script reads `TENDWORKS_AGENT_PLAYGROUND_TOKEN`, the starter's agent token. For another workspace, name its agent token with `--token-var`, e.g. `--token-var TENDWORKS_AGENT_MYAPP_TOKEN`.
 
 Every check must pass before you remove `suspend: true` from a binding. Later, `scripts/check-github-agent-access.sh --repo OWNER/NAME --audit 30` lists commits on `main` without a merged pull request.
 
@@ -794,7 +794,7 @@ docker network rm tendworks-sandboxes
 | `harness claude-code: TEND_CLAUDE_CODE_CREDENTIAL must be oauth-token or api-key but is not set; ...` | worker log, warning at start | set the selector and the matching variable, `up -d --wait` |
 | run fails: `no harness credential configured: ...` | `tend run get` | as above |
 | `TEND_CLAUDE_CODE_CREDENTIAL selects api-key, but ANTHROPIC_API_KEY is empty` | worker log | fill the selected variable |
-| run fails: `workspace: secret TENDWORKS_AGENT_GITHUB_TOKEN is not set` | `tend run get`, worker log warning | add the line to `deploy/.env` (not your shell), `up -d --wait` |
+| run fails: `workspace: secret TENDWORKS_AGENT_PLAYGROUND_TOKEN is not set` | `tend run get`, worker log warning | add the line to `deploy/.env` (not your shell), `up -d --wait` |
 | run fails: `no workspace 'NAME' is configured` | `tend run get` | the run's input names a workspace no `Workspace` document declares: add it or fix the name, `restart server worker` |
 | `... is not an agent secret: ... may only reference TENDWORKS_AGENT_* secrets` (or `... may only reference TENDWORKS_PLATFORM_* secrets`) | log, run | a reference outside its prefix; rename the variable |
 | `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the token did not reach the server; set it, `up -d --wait` (`restart` keeps the old environment) |

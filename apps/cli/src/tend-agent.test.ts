@@ -15,7 +15,7 @@ function configuration() {
     join(dir, "agents", "developer.md"),
     profile(
       "developer",
-      "  harness: claude-code\n  sandbox: claude-code\n  skills: [tdd]\n  env:\n    GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_GITHUB_TOKEN } }",
+      "  harness: claude-code\n  sandbox: claude-code\n  skills: [tdd]\n  env:\n    GH_TOKEN: { secretRef: { name: TENDWORKS_AGENT_PLAYGROUND_TOKEN } }",
     ),
   );
   return loadConfiguration(dir);
@@ -71,7 +71,7 @@ describe("tend agent list", () => {
         harness: "claude-code",
         sandbox: "claude-code",
         skills: ["tdd"],
-        secrets: ["TENDWORKS_AGENT_GITHUB_TOKEN"],
+        secrets: ["TENDWORKS_AGENT_PLAYGROUND_TOKEN"],
         sessions: [{ kind: "run-step", agent: "developer", taskId: step.taskId, status: "working", startedAt: step.startedAt, run: "run-1", step: "/do/0/implement" }],
       },
       {
