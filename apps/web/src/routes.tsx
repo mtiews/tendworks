@@ -8,6 +8,7 @@ import { match } from "./router.js";
 import { RunDetail } from "./run-detail.js";
 import { RunList } from "./runs.js";
 import { StatusPage } from "./status.js";
+import { SubscriptionsPage } from "./subscriptions.js";
 
 /*
  * The views of the UI (spec #38) and their paths below /ui; the navigation lists the views
@@ -30,6 +31,7 @@ export const routes: readonly Route[] = [
   { pattern: "/runs/:runId", title: "Run", section: "/runs", render: ({ runId = "" }) => <RunDetail key={runId} runId={runId} /> },
   { pattern: "/approval-requests", title: "Approval requests", section: "/approval-requests", nav: true, render: () => <ApprovalRequestsPage /> },
   { pattern: "/notifications", title: "Notifications", section: "/notifications", nav: true, render: () => <NotificationsPage /> },
+  { pattern: "/subscriptions", title: "Subscriptions", section: "/subscriptions", nav: true, render: () => <SubscriptionsPage /> },
   { pattern: "/chats", title: "Chats", section: "/chats", nav: true, render: () => <ChatList /> },
   { pattern: "/chats/new", title: "New chat", section: "/chats", render: () => <NewChat /> },
   { pattern: "/chats/:chatId", title: "Chat", section: "/chats", render: ({ chatId = "" }) => <ChatWindow key={chatId} chatId={chatId} /> },

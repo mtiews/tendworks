@@ -156,6 +156,7 @@ describe("control plane: a stopped platform", () => {
     ["GET", "/chats/c-1/transcript/stream", read],
     ["GET", "/agents", read],
     ["GET", "/workspaces", read],
+    ["GET", "/subscriptions", read],
     ["GET", "/triggers", read],
     ["GET", "/notifications", read],
     ["GET", "/approval-requests", read],
@@ -443,6 +444,17 @@ describe("control plane: chats, through the agent runtime", () => {
     ]);
   });
 
+  it("lists the subscriptions of the configuration with their scope, events, channels and priority", async () => {
+    const { data, response } = await controlPlane({}, { token: READ_TOKEN }).GET("/subscriptions");
+
+    expect(response.status).toBe(200);
+    expect(data?.items).toEqual([
+      { name: "fake-playground-log", scope: { workspace: "fake-playground" }, events: ["run.started", "run.completed", "run.failed", "approval.requested"], channels: ["fake-log", "fake-refusing"] },
+      { name: "platform-log", scope: { platform: {} }, events: ["run.started", "run.completed", "run.failed", "approval.requested", "platform.degraded", "platform.recovered"], channels: ["fake-log"], priority: 1 },
+      { name: "platform-refusing", scope: { platform: {} }, events: ["run.completed"], channels: ["fake-refusing"] },
+    ]);
+  });
+
   it("refuses an invalid request, a profile that does not allow chats and an unknown chat", async () => {
     const { client, of } = chatting();
     const { data: chat } = await client.POST("/chats", { body: { agent: "fake-assistant", text: "Hello" } });
@@ -597,6 +609,7 @@ describe("control plane: the API token", () => {
       client.GET("/runs/{runId}/tasks/{taskId}/transcript/stream", { params: { path: { runId: "r-1", taskId: "t-1" } } }),
       client.GET("/agents"),
       client.GET("/workspaces"),
+      client.GET("/subscriptions"),
       client.GET("/triggers"),
       client.GET("/notifications"),
       client.GET("/approval-requests"),
@@ -609,7 +622,7 @@ describe("control plane: the API token", () => {
       client.GET("/status"),
     ]);
 
-    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
+    expect(answers.map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 401, 200]);
   });
 
   it("serves reading with the read-only token", async () => {

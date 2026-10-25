@@ -354,6 +354,18 @@ export function createControlPlaneApi({
     return c.json({ items } satisfies Schemas["WorkspaceList"], 200);
   });
 
+  // Read-only view of the configured subscriptions (ADR 0026); they are configured in the configuration repository.
+  app.get("/subscriptions", (c) => {
+    const items = configuration.subscriptions.map(({ metadata, spec }): Schemas["SubscriptionSummary"] => ({
+      name: metadata.name,
+      scope: spec.scope,
+      events: [...spec.events],
+      channels: [...spec.channels],
+      ...(spec.priority === undefined ? {} : { priority: spec.priority }),
+    }));
+    return c.json({ items } satisfies Schemas["SubscriptionList"], 200);
+  });
+
   app.get("/triggers", async (c) => {
     let items;
     try {

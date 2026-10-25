@@ -131,7 +131,7 @@ All commands run from the repository root. Compose uses `deploy/` as its project
    | --- | --- |
    | `curl -s http://localhost:8080/status` | HTTP 200 and `"status":"healthy"`; 503 names the failing component. The only endpoint without a token |
    | `tend status` | `PLATFORM healthy`, `ACCESS full`, the components `store`, `execution-engine`, `sandbox-backend`, `sandbox-cleanup` |
-   | `tend agent list`, `tend trigger list`, `tend workspace list` | the profiles, trigger bindings and workspaces of your configuration |
+   | `tend agent list`, `tend trigger list`, `tend workspace list`, `tend subscription list` | the profiles, trigger bindings, workspaces and subscriptions of your configuration |
    | `http://localhost:8080/` in a browser on the host, or [from your devices](#access-from-your-devices) | redirects to `/ui/` and asks for a token; the API token signs in with full access |
 
    The starter configuration starts no run by itself: both its trigger bindings are suspended.
