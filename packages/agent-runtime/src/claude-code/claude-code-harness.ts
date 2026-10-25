@@ -76,6 +76,7 @@ When the operator does not answer for a while, the sandbox is removed and the se
 
 /** What every unattended session is told about the platform, after the profile's role description. */
 const PLATFORM_INSTRUCTIONS = `You work unattended in a sandbox; nobody answers questions during the session.
+Your task ends when your turn ends, and nothing wakes you up again: finish all work, including sub-agents and commands, before you end your turn, and never end it to wait for a result.
 When you produce a result others need to find, such as a pull request, record it in ${ARTIFACTS} (also in $TENDWORKS_ARTIFACTS) as a JSON array of {"name": "<lowercase-name>", "url": "<absolute URL>", "description": "<optional>"}, e.g. [{"name": "pull-request", "url": "https://..."}]. Write the whole array each time.`;
 
 /**
@@ -219,6 +220,9 @@ export function createClaudeCodeHarness({
         HOME,
         CLAUDE_CONFIG_DIR: CONFIG_DIR,
         DISABLE_AUTOUPDATER: "1", // versions are pinned in the image
+        // The task ends with the turn, so nothing would wake the agent for work it moved to
+        // the background: commands and sub-agents run in the foreground.
+        CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
         TENDWORKS_ARTIFACTS: ARTIFACTS,
         [CREDENTIAL_VARIABLES[credential.kind]]: credential.value,
         ...(baseUrl === undefined ? {} : { ANTHROPIC_BASE_URL: baseUrl }),
