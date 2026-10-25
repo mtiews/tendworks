@@ -211,6 +211,7 @@
 }
 
 .status-running,
+.status-working,
 .status-pending {
   color: var(--color-focus);
 }

@@ -12,7 +12,7 @@ $defs:
     title: Chat
     type: object
     additionalProperties: false
-    required: [id, agent, status, startedAt, lastActivityAt]
+    required: [id, agent, title, status, startedAt, lastActivityAt]
     properties:
       id:
         type: string
@@ -20,6 +20,12 @@ $defs:
       agent:
         type: string
         description: Name of the agent profile the chat is held with.
+      title:
+        type: string
+        minLength: 1
+        description: >-
+          What the chat is called: the human's first message as sent, set when the chat
+          starts and never changed. Clients shorten it for display.
       status:
         $ref: '#/$defs/chatStatus'
       startedAt:

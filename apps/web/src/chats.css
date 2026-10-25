@@ -82,3 +82,67 @@ a.button.primary {
 .chat-hint {
   font-size: var(--text-sm);
 }
+
+/* The chat in the workbench (spec #101) */
+
+.chat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-2) var(--space-3);
+}
+
+.chat-head h1 {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.list-action {
+  margin: 0 var(--space-3) var(--space-3);
+  text-align: center;
+}
+
+.shell-phone .list-action {
+  margin: 0 0 var(--space-3);
+}
+
+a.button.list-action {
+  display: block;
+  min-height: var(--touch-target);
+  line-height: calc(var(--touch-target) - 2 * var(--space-2) - 2px);
+}
+
+/*
+ * On a desktop the chat fills the pane: its transcript scrolls above the input, which stays in
+ * place at the bottom. On a phone the page scrolls and the input sticks to the bottom of the
+ * screen (`.chat-actions`).
+ */
+.shell-desktop .workbench-detail-chat {
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-desktop .chat-detail {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.shell-desktop .chat-detail > .chat {
+  flex: 1;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0;
+}
+
+.shell-desktop .chat-scroll {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.shell-desktop .chat-actions {
+  position: static;
+  padding-bottom: 0;
+}

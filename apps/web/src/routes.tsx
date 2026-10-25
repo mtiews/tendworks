@@ -1,8 +1,6 @@
 import type { ReactNode } from "react";
 import { ApprovalRequestsPage } from "./approvals.js";
-import { ChatWindow } from "./chat-window.js";
-import { ChatList } from "./chats.js";
-import { NewChat } from "./new-chat.js";
+import { ChatWorkbench } from "./chats.js";
 import { NotificationsPage } from "./notifications.js";
 import { MorePage } from "./more.js";
 import { match } from "./router.js";
@@ -42,9 +40,9 @@ export const routes: readonly Route[] = [
   { pattern: "/overview", title: "Overview", section: "overview", render: () => <StatusPage /> },
   { pattern: "/runs", title: "Runs", section: "runs", wide: true, render: (_, { phone }) => <RunWorkbench phone={phone} /> },
   { pattern: "/runs/:runId", title: "Run", section: "runs", back: "/runs", wide: true, render: ({ runId = "" }, { phone }) => <RunWorkbench runId={runId} phone={phone} /> },
-  { pattern: "/chats", title: "Chats", section: "chats", render: () => <ChatList /> },
-  { pattern: "/chats/new", title: "New chat", section: "chats", back: "/chats", render: () => <NewChat /> },
-  { pattern: "/chats/:chatId", title: "Chat", section: "chats", back: "/chats", render: ({ chatId = "" }) => <ChatWindow key={chatId} chatId={chatId} /> },
+  { pattern: "/chats", title: "Chats", section: "chats", wide: true, render: (_, { phone }) => <ChatWorkbench phone={phone} /> },
+  { pattern: "/chats/new", title: "New chat", section: "chats", back: "/chats", wide: true, render: (_, { phone }) => <ChatWorkbench creating phone={phone} /> },
+  { pattern: "/chats/:chatId", title: "Chat", section: "chats", back: "/chats", wide: true, render: ({ chatId = "" }, { phone }) => <ChatWorkbench chatId={chatId} phone={phone} /> },
   { pattern: "/notifications", title: "Notifications", section: "inbox", render: () => <NotificationsPage /> },
   { pattern: "/subscriptions", title: "Subscriptions", section: "more", back: "/more", render: () => <SubscriptionsPage /> },
   { pattern: "/approval-requests", title: "Approval requests", section: "more", back: "/more", render: () => <ApprovalRequestsPage /> },

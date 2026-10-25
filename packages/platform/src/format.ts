@@ -43,3 +43,9 @@ export function formatOrigin(origin: RunOrigin | undefined, { url = false }: { u
   const workspace = origin.workspace === undefined ? "" : ` in ${origin.workspace}`;
   return `trigger ${origin.binding}${workspace}: ${origin.item.key}${url && origin.item.url ? ` (${origin.item.url})` : ""}`;
 }
+
+/** A chat's title (its first message) on one line, cut after `max` characters with an ellipsis. */
+export function shortTitle(title: string, max = 60): string {
+  const line = title.replace(/\s+/g, " ").trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+}

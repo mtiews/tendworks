@@ -3,6 +3,7 @@ import {
   formatCost,
   formatOrigin,
   formatSchedule,
+  shortTitle,
   totalCost,
   TranscriptStreamRefusedError,
   TranscriptStreamUnreachableError,
@@ -319,7 +320,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
 
   chat
     .command("list")
-    .description("list chats, the most recently started first, with profile, status, start, last activity and cost")
+    .description("list chats, the most recently started first, with title, profile, status, start, last activity and cost")
     .addOption(outputOption())
     .action(async (options: { output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
@@ -441,8 +442,8 @@ function formatAgentList(list: AgentList): string {
 
 function formatChatList(list: ChatList): string {
   const rows = [
-    ["ID", "AGENT", "WORKSPACE", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
-    ...list.items.map((chat) => [chat.id, chat.agent, chat.workspace ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
+    ["ID", "TITLE", "AGENT", "WORKSPACE", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
+    ...list.items.map((chat) => [chat.id, shortTitle(chat.title), chat.agent, chat.workspace ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
   ];
   return table(rows);
 }
@@ -468,6 +469,7 @@ function onWorkspace(chat: Chat): string {
 function formatChat(chat: Chat): string {
   const fields = [
     ["CHAT", chat.id],
+    ["TITLE", shortTitle(chat.title, Infinity)],
     ["AGENT", chat.agent],
     ...(chat.workspace ? [["WORKSPACE", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`]] : []),
     ["STATUS", chat.status],

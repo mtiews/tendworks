@@ -1,8 +1,7 @@
 import { createInMemoryAgentRuntime, emptyConfiguration, type Configuration } from "@tendworks/control-plane";
-import { fireEvent, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
-import { rows } from "./support/table.js";
+import { phoneWidth, READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
 
 type AgentProfile = Configuration["agentProfiles"][number];
 
@@ -55,26 +54,106 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("chats page", () => {
-  it("lists open and ended chats with profile, workspace, status, start, last activity and cost, like `tend chat list`", async () => {
+/** The chats a group of the chat list shows, by the text of each entry. */
+const group = (name: string) =>
+  within(screen.getByRole("list", { name }))
+    .getAllByRole("link")
+    .map((link) => link.textContent);
+
+describe("chat list", () => {
+  it("names chats by their first message and groups them into open and ended, with agent, workspace and cost", async () => {
     const { agentRuntime, configuration } = platform();
     const ended = await agentRuntime.startChat({ agent: "reviewer", text: "Review it" });
     agentRuntime.finishTurn(ended.id, "Looks good", USD(0.05));
     await agentRuntime.endChat(ended.id);
-    const open = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
+    const open = await agentRuntime.startChat({ workspace: "app", text: "What does the README say?" });
     agentRuntime.finishTurn(open.id, "Hi", USD(0.01));
-    const chat = (id: string) => agentRuntime.chats.get(id)!;
+    signedIn();
+    renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
+
+    await screen.findByRole("list", { name: "Open" });
+
+    expect(group("Open")).toEqual([expect.stringMatching(/^What does the README say\?.*workspace-assistant · app · 0\.01 USD$/)]);
+    expect(group("Ended")).toEqual([expect.stringMatching(/^Review it.*reviewer · 0\.05 USD$/)]);
+    expect(screen.getByRole("link", { name: /What does the README say/ }).getAttribute("href")).toBe(`/ui/chats/${open.id}`);
+    expect(screen.getByRole("link", { name: "New chat" }).getAttribute("href")).toBe("/ui/chats/new");
+  });
+
+  it("shortens a long, multi-line first message in the list", async () => {
+    const { agentRuntime, configuration } = platform();
+    await agentRuntime.startChat({ agent: "assistant", text: `Why did the nightly run fail?\n${"And what should I change? ".repeat(10)}` });
+    signedIn();
+    renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
+
+    await screen.findByRole("list", { name: "Open" });
+
+    const [entry] = group("Open");
+    expect(entry).toMatch(/^Why did the nightly run fail\? And what should I change\?.*…/);
+    expect(entry).not.toContain("\n");
+    expect(entry!.length).toBeLessThan(200);
+  });
+
+  it("opens the newest open chat when a desktop shows the chats without one chosen, else the newest", async () => {
+    const { agentRuntime, configuration } = platform();
+    const old = await agentRuntime.startChat({ agent: "assistant", text: "Old question" });
+    await agentRuntime.endChat(old.id);
+    const open = await agentRuntime.startChat({ agent: "reviewer", text: "Open question" });
     signedIn();
     renderApp({ path: "/ui/chats", agentRuntime, configuration });
 
-    const table = await screen.findByRole("table", { name: "Chats" });
-    expect(rows(table)).toEqual([
-      ["Chat", "Agent", "Workspace", "Status", "Started", "Last activity", "Cost"],
-      [open.id, "workspace-assistant", "app", "input-required", open.startedAt, chat(open.id).lastActivityAt, "0.01 USD"],
-      [ended.id, "reviewer", "", "ended", ended.startedAt, chat(ended.id).lastActivityAt, "0.05 USD"],
-    ]);
-    expect(within(table).getByRole("link", { name: open.id }).getAttribute("href")).toBe(`/ui/chats/${open.id}`);
-    expect(screen.getByRole("link", { name: "New chat" }).getAttribute("href")).toBe("/ui/chats/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "Open question" })).toBeTruthy();
+    expect(window.location.pathname).toBe(`/ui/chats/${open.id}`);
+    expect(screen.getByRole("link", { name: /Open question/ }).getAttribute("aria-current")).toBe("page");
+
+    cleanup();
+    await agentRuntime.endChat(open.id);
+    renderApp({ path: "/ui/chats", agentRuntime, configuration });
+    expect(await screen.findByRole("heading", { level: 1, name: "Open question" })).toBeTruthy();
+  });
+
+  it("shows the selected chat next to the list and moves between chats without losing the list", async () => {
+    const { agentRuntime, configuration } = platform();
+    const first = await agentRuntime.startChat({ agent: "assistant", text: "First question" });
+    agentRuntime.finishTurn(first.id, "First answer", USD(0.01));
+    const second = await agentRuntime.startChat({ agent: "reviewer", text: "Second question" });
+    agentRuntime.finishTurn(second.id, "Second answer", USD(0.01));
+    signedIn();
+    const { user } = renderApp({ path: `/ui/chats/${second.id}`, agentRuntime, configuration });
+    await within(await screen.findByRole("region", { name: "Conversation" })).findByText("Second answer");
+
+    await user.click(screen.getByRole("link", { name: /First question/ }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "First question" })).toBeTruthy();
+    await within(screen.getByRole("region", { name: "Conversation" })).findByText("First answer");
+    expect(screen.getByRole("link", { name: /Second question/ })).toBeTruthy();
+  });
+
+  it("filters the chats by title, agent, workspace or id", async () => {
+    const { agentRuntime, configuration } = platform();
+    const open = await agentRuntime.startChat({ workspace: "app", text: "What does the README say?" });
+    const other = await agentRuntime.startChat({ agent: "reviewer", text: "Review it" });
+    await agentRuntime.endChat(other.id);
+    signedIn();
+    const { user } = renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
+    await screen.findByRole("list", { name: "Ended" });
+    const filter = screen.getByRole("searchbox", { name: "Filter chats" });
+
+    await user.type(filter, "READme");
+    expect(screen.queryByRole("list", { name: "Ended" })).toBeNull();
+    expect(group("Open")).toEqual([expect.stringMatching(/^What does the README say/)]);
+
+    await user.clear(filter);
+    await user.type(filter, "reviewer");
+    expect(screen.queryByRole("list", { name: "Open" })).toBeNull();
+    expect(group("Ended")).toEqual([expect.stringMatching(/^Review it/)]);
+
+    await user.clear(filter);
+    await user.type(filter, open.id);
+    expect(group("Open")).toHaveLength(1);
+
+    await user.clear(filter);
+    await user.type(filter, "nothing like it");
+    expect(screen.getByText("No chat matches “nothing like it”.")).toBeTruthy();
   });
 
   it("says when there are no chats yet, and when the agent runtime cannot be reached", async () => {
@@ -95,10 +174,48 @@ describe("chats page", () => {
     renderApp({ path: "/ui/chats", agentRuntime, configuration });
     await screen.findByText("No chats yet.");
 
-    const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
+    await agentRuntime.startChat({ agent: "assistant", text: "Hello there" });
     await vi.advanceTimersByTimeAsync(5_000);
 
-    expect(await screen.findByRole("link", { name: chat.id })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: /Hello there/ })).toBeTruthy();
+  });
+});
+
+describe("chats on a phone", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("shows the chat list on its own and the chat after it, with a way back", async () => {
+    phoneWidth(true);
+    const { agentRuntime, configuration } = platform();
+    const chat = await agentRuntime.startChat({ agent: "assistant", text: "Is an agent running?" });
+    agentRuntime.finishTurn(chat.id, "No.", USD(0.01));
+    signedIn();
+    const { user } = renderApp({ path: "/ui/chats", agentRuntime, configuration });
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Chats" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/ui/chats");
+    expect(screen.queryByRole("region", { name: "Conversation" })).toBeNull();
+
+    await user.click(await screen.findByRole("link", { name: /Is an agent running/ }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Is an agent running?" })).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Conversation" })).toBeTruthy();
+    expect(screen.queryByRole("searchbox", { name: "Filter chats" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/ui/chats");
+  });
+
+  it("starts a new chat from the list", async () => {
+    phoneWidth(true);
+    const { agentRuntime, configuration } = platform();
+    signedIn();
+    const { user } = renderApp({ path: "/ui/chats", agentRuntime, configuration });
+
+    await user.click(await screen.findByRole("link", { name: "New chat" }));
+
+    expect(await screen.findByRole("textbox", { name: "Message" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/ui/chats");
   });
 });
 
@@ -135,7 +252,7 @@ describe("new chat", () => {
     await user.click(screen.getByRole("button", { name: "Start chat" }));
 
     const [chat] = [...agentRuntime.chats.values()];
-    expect(await screen.findByRole("heading", { name: `Chat ${chat!.id}` })).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 1, name: "What does the README say?" })).toBeTruthy();
     expect(window.location.pathname).toBe(`/ui/chats/${chat!.id}`);
     expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "app", text: "What does the README say?" });
     expect(chat).toMatchObject({ agent: "workspace-assistant", workspace: "app", write: false });
@@ -149,7 +266,7 @@ describe("new chat", () => {
     await user.type(await screen.findByRole("textbox", { name: "Message" }), "Hello");
     await user.click(screen.getByRole("button", { name: "Start chat" }));
 
-    await screen.findByRole("heading", { name: /^Chat / });
+    await screen.findByRole("heading", { level: 1, name: "Hello" });
     expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "Hello" });
   });
 
@@ -174,7 +291,7 @@ describe("new chat", () => {
 
     await user.type(newChatInput(), "Hello{Enter}");
 
-    await screen.findByRole("heading", { name: /^Chat / });
+    await screen.findByRole("heading", { level: 1, name: "Hello" });
     expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "Hello" });
   });
 
@@ -183,7 +300,7 @@ describe("new chat", () => {
 
     await user.type(newChatInput(), "Hello{Control>}{Enter}{/Control}");
 
-    await screen.findByRole("heading", { name: /^Chat / });
+    await screen.findByRole("heading", { level: 1, name: "Hello" });
     expect(posts(running.requests, "/chats")).toHaveLength(1);
   });
 
@@ -218,7 +335,7 @@ describe("new chat", () => {
     fireEvent.change(newChatInput(), { target: { value: "Hello" } });
     fireEvent.keyDown(newChatInput(), { key: "Enter" });
     fireEvent.keyDown(newChatInput(), { key: "Enter" });
-    await screen.findByRole("heading", { name: /^Chat / });
+    await screen.findByRole("heading", { level: 1, name: "Hello" });
     expect(posts(running.requests, "/chats")).toHaveLength(1);
   });
 
@@ -241,7 +358,7 @@ describe("new chat", () => {
       expect(posts(running.requests, "/chats")).toHaveLength(0);
 
       await user.click(screen.getByRole("button", { name: "Start chat" }));
-      await screen.findByRole("heading", { name: /^Chat / });
+      await screen.findByRole("heading", { level: 1, name: "First second" });
       expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "First\nsecond" });
     } finally {
       vi.unstubAllGlobals();
@@ -263,11 +380,11 @@ describe("new chat", () => {
 describe("chats in read-only mode", () => {
   it("lists chats but offers no new chat", async () => {
     const { agentRuntime, configuration } = platform();
-    const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
+    await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
     signedIn(READ_TOKEN);
     renderApp({ path: "/ui/chats", agentRuntime, configuration });
 
-    expect(await screen.findByRole("link", { name: chat.id })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: /Hello/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "New chat" })).toBeNull();
   });
 
@@ -313,7 +430,7 @@ describe("chat window", () => {
   it("shows the history, then the agent's output live, and takes the next message only while the agent waits", async () => {
     const { user, agentRuntime, chat } = await openChat();
 
-    expect(screen.getByRole("heading", { name: `Chat ${chat.id}` })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Is an agent running?" })).toBeTruthy();
     expect(field("Agent")).toBe("assistant");
     expect(field("Status")).toBe("input-required");
     expect(transcriptItems()).toEqual(["Task for assistant: Is an agent running?", "No, none is running.", "Waiting for the next message · turn 0.01 USD · 0.01 USD so far"]);
@@ -595,30 +712,37 @@ describe("chat window", () => {
 });
 
 /**
- * A page with layout, which jsdom lacks: each transcript item is 200px high under a 400px
- * head, the viewport 600px. `window.scrollTo` moves at once, as the browser does at the end
- * of a smooth scroll, and both it and the operator's scrolling fire `scroll`.
+ * A scrolled area with layout, which jsdom lacks: the page on a phone, else the chat's
+ * transcript pane. Each transcript item is 200px high under a 400px head, the viewport 600px.
+ * `scrollTo` moves at once, as the browser does at the end of a smooth scroll, and both it
+ * and the operator's scrolling fire `scroll`.
  */
-function pageWithLayout({ reducedMotion = false } = {}) {
+function pageWithLayout({ reducedMotion = false, phone = false } = {}) {
   const viewport = 600;
-  const root = document.documentElement;
+  const root = phone ? document.documentElement : undefined;
   const height = () => 400 + 200 * document.querySelectorAll('[aria-label="Transcript"] > *').length;
   let top = 0;
   const behaviors: (ScrollBehavior | undefined)[] = [];
+  // The pane is found when it is first scrolled or asked: it exists once the chat is shown.
+  const target = (): HTMLElement | Window => root ?? (document.querySelector<HTMLElement>(".chat-scroll")!);
   const moveTo = (to: number) => {
     top = Math.max(0, Math.min(to, height() - viewport));
-    window.dispatchEvent(new Event("scroll"));
+    (root ? window : target()).dispatchEvent(new Event("scroll"));
   };
-  Object.defineProperty(root, "scrollHeight", { configurable: true, get: height });
-  Object.defineProperty(root, "clientHeight", { configurable: true, get: () => viewport });
-  Object.defineProperty(root, "scrollTop", { configurable: true, get: () => top });
-  vi.stubGlobal("matchMedia", (query: string) => ({ matches: reducedMotion && query === "(prefers-reduced-motion: reduce)", media: query }));
-  vi.spyOn(window, "scrollTo").mockImplementation(((options: ScrollToOptions) => {
+  const area = root ?? (Element.prototype as HTMLElement);
+  const define = (object: object, property: string, get: () => number) => Object.defineProperty(object, property, { configurable: true, get });
+  define(area, "scrollHeight", height);
+  define(area, "clientHeight", () => viewport);
+  define(area, "scrollTop", () => top);
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: (reducedMotion && query === "(prefers-reduced-motion: reduce)") || (phone && query.includes("max-width: 759")), media: query, addEventListener: () => undefined, removeEventListener: () => undefined }));
+  const scrolled = ((options: ScrollToOptions) => {
     behaviors.push(options.behavior);
     moveTo(options.top ?? top);
-  }) as typeof window.scrollTo);
+  }) as typeof window.scrollTo;
+  vi.spyOn(window, "scrollTo").mockImplementation(scrolled);
+  vi.spyOn(Element.prototype, "scrollTo").mockImplementation(scrolled);
   return {
-    /** How far the operator is from the end of the page. */
+    /** How far the operator is from the end of the scrolled area. */
     belowView: () => height() - viewport - top,
     /** The operator scrolls to `to`. */
     scrollTo: moveTo,
@@ -628,7 +752,7 @@ function pageWithLayout({ reducedMotion = false } = {}) {
 
 describe("chat window scrolling", () => {
   afterEach(() => {
-    for (const property of ["scrollHeight", "clientHeight", "scrollTop"]) Reflect.deleteProperty(document.documentElement, property);
+    for (const object of [document.documentElement, Element.prototype]) for (const property of ["scrollHeight", "clientHeight", "scrollTop"]) Reflect.deleteProperty(object, property);
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -687,5 +811,25 @@ describe("chat window scrolling", () => {
     await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("From the CLI"));
     expect(page.belowView()).toBe(0);
     expect(page.behaviors).not.toContain("smooth");
+  });
+});
+
+describe("chat window scrolling on a phone", () => {
+  afterEach(() => {
+    for (const object of [document.documentElement, Element.prototype]) for (const property of ["scrollHeight", "clientHeight", "scrollTop"]) Reflect.deleteProperty(object, property);
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("scrolls the page, not the transcript, to follow the agent's output", async () => {
+    const page = pageWithLayout({ phone: true });
+    const { agentRuntime, chat } = await openChat();
+    expect(page.belowView()).toBe(0);
+
+    await agentRuntime.sendChatMessage(chat.id, "From the CLI");
+
+    await vi.waitFor(() => expect(transcriptItems().at(-1)).toBe("From the CLI"));
+    expect(page.belowView()).toBe(0);
+    expect(Element.prototype.scrollTo).not.toHaveBeenCalled();
   });
 });

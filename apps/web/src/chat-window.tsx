@@ -1,7 +1,7 @@
-import type { ControlPlane } from "@tendworks/shared";
-import { useCallback, useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
+import { chatTitle, isOpen, type Chat } from "./chat-summary.js";
 import { Confirmation } from "./confirm.js";
 import { useEnterToSend } from "./enter-to-send.js";
 import { formatCost } from "@tendworks/platform";
@@ -12,10 +12,7 @@ import { useFollowEnd } from "./use-follow-end.js";
 import { usePolling } from "./use-polling.js";
 import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
 
-type Chat = ControlPlane.components["schemas"]["chat"];
-
 const messageOf = (error: unknown) => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
-const isOpen = (chat: Chat) => chat.status === "working" || chat.status === "input-required";
 
 /**
  * Where a chat's turn stands by its transcript, which arrives live while the polled chat
@@ -35,18 +32,20 @@ export function turnOf(entries: readonly TranscriptEntry[]): Turn {
 }
 
 /**
- * One chat (ADR 0015, `tend chat attach`): its profile, status and total cost, its history and
- * then the agent's output live, the input while the agent waits for the next message, and
+ * One chat in the workbench (ADR 0015, `tend chat attach`): named by its first message, with
+ * its profile, status and total cost, its history and then the agent's output live, the input while the agent waits for the next message, and
  * ending it after a confirmation. Several windows on one chat behave like several `tend`
- * clients: all state is on the platform. Read-only access shows the chat without actions.
+ * clients: all state is on the platform. Read-only access shows the chat without actions. On a
+ * desktop the transcript scrolls above the input; on a phone the page scrolls and the input
+ * stays at the bottom of the screen.
  */
-export function ChatWindow({ chatId }: { chatId: string }) {
+export function ChatWindow({ chatId, phone }: { chatId: string; phone: boolean }) {
   const { client } = useApi();
   const { data: chat, error, refresh } = usePolling(useCallback(() => answer(client.GET("/chats/{chatId}", { params: { path: { chatId } } })), [client, chatId]));
 
   if (!chat) {
     return (
-      <>
+      <article className="chat-detail">
         <h1>Chat {chatId}</h1>
         {error instanceof AnswerError && error.status === 404 ? (
           <p className="muted">There is no chat {chatId}.</p>
@@ -57,7 +56,7 @@ export function ChatWindow({ chatId }: { chatId: string }) {
         ) : (
           <p className="muted">Loading…</p>
         )}
-      </>
+      </article>
     );
   }
 
@@ -72,8 +71,11 @@ export function ChatWindow({ chatId }: { chatId: string }) {
   ];
 
   return (
-    <>
-      <h1>Chat {chat.id}</h1>
+    <article className="chat-detail">
+      <header className="chat-head">
+        <h1>{chatTitle(chat)}</h1>
+        <span className={`status status-${chat.status}`}>{chat.status}</span>
+      </header>
       {error !== undefined && <p className="message message-error">{messageOf(error)}</p>}
       <dl className="fields">
         {fields.map(([label, value]) => (
@@ -83,21 +85,22 @@ export function ChatWindow({ chatId }: { chatId: string }) {
           </div>
         ))}
       </dl>
-      <Conversation chat={chat} changed={refresh} />
-    </>
+      <Conversation chat={chat} changed={refresh} phone={phone} />
+    </article>
   );
 }
 
 /** The chat's transcript, live while the chat is open, and what the operator can do in it. */
-function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
+function Conversation({ chat, changed, phone }: { chat: Chat; changed: () => void; phone: boolean }) {
   const { client, canChange } = useApi();
   const chatId = chat.id;
   const read = useCallback(async () => (await answer(client.GET("/chats/{chatId}/transcript", { params: { path: { chatId } } }))).items, [client, chatId]);
   const open = useCallback<OpenTranscriptStream>((header) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream" }), [client, chatId]);
   const view = useTranscript({ read, open, live: isOpen(chat), onEnded: changed });
   const turn = turnOf(view.phase === "shown" ? view.entries : []);
-  // The page follows the transcript's end while the operator is there; the input stays in view (`chats.css`).
-  const toEnd = useFollowEnd(view.phase === "shown" ? view.entries : undefined, view.phase === "shown");
+  // The transcript (the page on a phone) follows its end while the operator is there; the input stays in view (`chats.css`).
+  const scroller = useRef<HTMLDivElement>(null);
+  const toEnd = useFollowEnd(view.phase === "shown" ? view.entries : undefined, view.phase === "shown", phone ? undefined : scroller);
 
   // A turn that starts or ends changes the chat's status and cost: read it again at once.
   useEffect(() => {
@@ -106,7 +109,9 @@ function Conversation({ chat, changed }: { chat: Chat; changed: () => void }) {
 
   return (
     <section className="chat panel" aria-label="Conversation">
-      <TranscriptOf view={view} missing="No transcript was found for this chat." />
+      <div className="chat-scroll" ref={scroller}>
+        <TranscriptOf view={view} missing="No transcript was found for this chat." />
+      </div>
       {/* The transcript may show the end before the chat is read again: the input goes at once. */}
       {!isOpen(chat) || turn.state === "ended" ? (
         <p className="muted">This chat has ended.</p>
