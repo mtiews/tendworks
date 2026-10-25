@@ -44,7 +44,8 @@ export function NewChat() {
     }, [client]),
   );
   const [picked, setPicked] = useState("");
-  const [text, setText] = useState("");
+  // A first message suggested by the link that opened the form, e.g. "Ask the platform assistant" on a failed run.
+  const [text, setText] = useState(() => new URLSearchParams(window.location.search).get("text") ?? "");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
   const ids = { chatWith: useId(), text: useId() };

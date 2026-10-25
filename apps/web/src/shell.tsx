@@ -49,7 +49,7 @@ export function Shell({ signOut }: { signOut: () => void }) {
         {scope}
       </header>
       <Navigation phone={phone} section={found?.route.section} badges={badges} signOut={signOut} />
-      <main className="content">
+      <main className={found?.route.wide ? "content content-wide" : "content"}>
         {found ? (
           found.route.render(found.parameters, { signOut, phone })
         ) : (

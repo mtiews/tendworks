@@ -411,7 +411,7 @@ The platform merges nothing; `develop-issue` ends with the pull request, and you
 
 - `action` is a name of your choice that policies decide on; `question`, `links` and the answer labels may be expressions.
 - An answer with `outcome: continue` goes on with the next task; `stop` ends the workflow there, and the run completes.
-- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI under More → Approval requests, or on the run's detail. The `approval.requested` notification tells you a request waits.
+- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI on the run itself (Runs, where runs waiting for you come first under "Needs you"; on a phone the question sits at the bottom of the screen), or under More → Approval requests. The `approval.requested` notification tells you a request waits.
 
 A **policy** decides per action and workflow whether the step asks (`ask`) or proceeds at once without a request (`allow`):
 
@@ -651,7 +651,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 
 - **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; start it again by hand ([Everyday commands](#everyday-commands), "Retry an issue").
 - Revert configuration changes after the tests, or keep them deliberately.
-- Watch a run live: `tend run logs <id> --follow`, or the run detail in the UI.
+- Watch a run live: `tend run logs <id> --follow`, or the run in the UI's Runs.
 
 ## Operations
 

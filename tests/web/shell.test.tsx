@@ -1,7 +1,7 @@
 import { createInMemoryApprovals, type ApprovalRequest, type Notification } from "@tendworks/control-plane";
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
+import { READ_TOKEN, renderApp, signedIn, phoneWidth } from "./support/platform.js";
 
 const pending: ApprovalRequest = {
   id: "5e1f-approval-pending",
@@ -25,16 +25,6 @@ const failedDelivery: Notification = {
   artifacts: [],
   deliveries: [{ channel: "phone", status: "failed", attemptedAt: "2026-10-18T11:00:03.000Z", error: "refused" }],
 };
-
-/** Makes the window as wide as a phone, as the browser's media query would. */
-function phoneWidth(phone: boolean) {
-  window.matchMedia = ((query: string) => ({
-    matches: phone && query.includes("max-width: 759"),
-    media: query,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-  })) as unknown as typeof window.matchMedia;
-}
 
 afterEach(() => {
   vi.restoreAllMocks();

@@ -6,8 +6,7 @@ import { NewChat } from "./new-chat.js";
 import { NotificationsPage } from "./notifications.js";
 import { MorePage } from "./more.js";
 import { match } from "./router.js";
-import { RunDetail } from "./run-detail.js";
-import { RunList } from "./runs.js";
+import { RunWorkbench } from "./runs.js";
 import { startPage } from "./start-page.js";
 import { StatusPage } from "./status.js";
 import { SubscriptionsPage } from "./subscriptions.js";
@@ -33,14 +32,16 @@ export interface Route {
   title: string;
   section: Section;
   back?: string;
+  /** The view uses the whole width beside the navigation (the workbench), not the reading width. */
+  wide?: boolean;
   render(parameters: Record<string, string>, shell: ShellActions): ReactNode;
 }
 
 export const routes: readonly Route[] = [
   { pattern: "/more", title: "More", section: "more", render: (_, { signOut, phone }) => <MorePage signOut={signOut} showSignOut={phone} /> },
   { pattern: "/overview", title: "Overview", section: "overview", render: () => <StatusPage /> },
-  { pattern: "/runs", title: "Runs", section: "runs", render: () => <RunList /> },
-  { pattern: "/runs/:runId", title: "Run", section: "runs", back: "/runs", render: ({ runId = "" }) => <RunDetail key={runId} runId={runId} /> },
+  { pattern: "/runs", title: "Runs", section: "runs", wide: true, render: (_, { phone }) => <RunWorkbench phone={phone} /> },
+  { pattern: "/runs/:runId", title: "Run", section: "runs", back: "/runs", wide: true, render: ({ runId = "" }, { phone }) => <RunWorkbench runId={runId} phone={phone} /> },
   { pattern: "/chats", title: "Chats", section: "chats", render: () => <ChatList /> },
   { pattern: "/chats/new", title: "New chat", section: "chats", back: "/chats", render: () => <NewChat /> },
   { pattern: "/chats/:chatId", title: "Chat", section: "chats", back: "/chats", render: ({ chatId = "" }) => <ChatWindow key={chatId} chatId={chatId} /> },
