@@ -4,7 +4,7 @@
 # and reports it, and the run completes with it. The platform merges nothing; the pull
 # request stays open for a human.
 #
-# Before: TENDWORKS_PLATFORM_GITHUB_TOKEN (issues read) and TENDWORKS_AGENT_GITHUB_TOKEN in
+# Before: TENDWORKS_PLATFORM_GITHUB_TOKEN (issues read) and TENDWORKS_AGENT_PLAYGROUND_TOKEN in
 # deploy/.env; in the configuration (TEND_CONFIG_PATH, by default examples/config)
 # `suspend: true` removed from triggers/playground-ready-for-agent.yaml; server restarted
 # after config changes.

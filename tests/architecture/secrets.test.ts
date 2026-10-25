@@ -63,7 +63,7 @@ it("gives agent secrets only to the worker, which reads them from the exporter's
 it("lets agent profiles reference only the agent secrets of deploy/.env", () => {
   const agentSecrets = createSecretResolver("agent", operatorVariables);
 
-  expect(Object.keys(operatorVariables).filter((name) => agentSecrets.resolve(name) !== undefined)).toEqual(["TENDWORKS_AGENT_GITHUB_TOKEN"]);
+  expect(Object.keys(operatorVariables).filter((name) => agentSecrets.resolve(name) !== undefined)).toEqual(["TENDWORKS_AGENT_PLAYGROUND_TOKEN"]);
 });
 
 it("never lets an agent profile hand the worker's API token into a sandbox", () => {

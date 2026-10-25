@@ -3,7 +3,7 @@
 # develop-issue run in that workspace (the developer agent implements it, opens a pull
 # request and reports it; the run ends with it). Suspended, because it needs the
 # issues token TENDWORKS_PLATFORM_GITHUB_TOKEN in deploy/.env (issues read only), the
-# agent token of the playground workspace (TENDWORKS_AGENT_GITHUB_TOKEN,
+# agent token of the playground workspace (TENDWORKS_AGENT_PLAYGROUND_TOKEN,
 # workspaces/playground.yaml) and the agent's harness credential. To use it, set those
 # and remove `suspend: true` (docs/platform-implementation.md, pull request smoke test).
 # An issue fires once per binding and workspace, also after a failed run; retry with
