@@ -499,14 +499,31 @@ The platform has no pull request integration. Agents open pull requests themselv
 - A scheduled workflow runs over the workspace.
 - A workspace assistant with `write: false` answers about the repository and cannot push.
 
+**Milestone 4 – notifications as subscriptions (design review of 25 Oct 2026, spec #87)**
+
+Notifications separate what happens from who wants to know (ADR 0026 (notifications-are-subscriptions-per-workspace-or-platform)):
+
+- **Event catalog:** run started, completed and failed and approval requested per workspace; platform degraded and recovered for the platform.
+- **Channels:** only how someone is reached (Pushover).
+- **Subscriptions:** choose events of a workspace (binding for the project) or of the platform (opt-in, like a status page) and send them to channels with a priority.
+- **Platform health:** checked periodically and debounced by the control plane.
+- **Heartbeat:** lets an external monitor alarm when the platform is down.
+
+**Success criterion (milestone 4):**
+
+- An issue in a subscribed workspace sends a start push and a completion push to the operator's phone.
+- A stopped worker sends platform degraded, then recovered.
+- A stopped server makes the external heartbeat monitor alarm.
+
 1. **Walking skeleton.** Milestone 1: automated path (GitHub issue → trigger → workflow → A2A task to `developer` → Claude Code via ACP in a sandbox → PR reported as an artifact → notification). Milestone 1b: chat path, as refined above. Milestone 1c: first web UI. Every boundary already uses its standard, every implementation as simple as possible. Runs via docker compose up on the laptop from day one. Build order: see "Tendworks – Implementation".
 2. **Clean single-host deployment on Linux (milestone 2).** As refined below: tagged releases, secure defaults, schema migrations, backup and restore, sandbox clean-up, the platform MCP server on Linux, access from the operator's devices through a TLS layer.
 3. **Generic platform: workspaces, triggers, notifications (milestone 3).** As refined below: named workspaces (git, directory) with their own credentials, trigger bindings over workspaces with pluggable sources, no pull request integration, a generic human step, notification channels with Pushover, workspace assistants.
-4. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
-5. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
-6. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
-7. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
-8. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
+4. **Notifications as subscriptions (milestone 4).** As refined below: the event catalog with run starts and platform health, channels as delivery only, subscriptions per workspace or for the platform, a heartbeat for an external monitor.
+5. **Visibility and intervention.** UI with run list, live stream of agent output, chat into running sessions, cost display. Milestone 1c delivered the first three.
+6. **Gates and recovery.** Approval inbox, OPA policies, checkpoints per step, resume from step N, automated backup restore test.
+7. **Second harness, second model.** Codex or Gemini CLI via ACP behind the same profile type. This is the first real replaceability test.
+8. **Meta-agent.** MCP server on the control plane API, validation, dry run, proposal as PR.
+9. **Roles.** Profiles for Product Owner, Architect, Developer, Reviewer, QA, Ops; artifact types and gates in between. This is where the software factory begins.
 
 **Fitness functions (run in CI, protect openness)**
 

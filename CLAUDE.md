@@ -2,7 +2,7 @@
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform: agents are started by triggers, run isolated and recoverable in sandboxes, can be controlled via web UI, chat and the `tend` CLI, and only call on the human when a policy says so. Core idea: agents run reliably while the human is away.
 
-**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0021) is done and accepted (#66; release `v0.2.0`, notes: `docs/releases/v0.2.0.md`). Milestone 3 (generic platform: workspaces, triggers, notifications; spec: issue #71, ADR 0022–0025) is implemented; its acceptance on the operator's host (#82) is pending, then release `v0.3.0` (notes: `docs/releases/v0.3.0.md`).
+**Current state:** the walking skeleton is done: milestones 1 (spec: issue #1), 1b (chat path, spec: issue #24) and 1c (web UI, spec: issue #38). Milestone 2 (clean single-host deployment on Linux, spec: issue #54, ADR 0019–0021) is done and accepted (#66; release `v0.2.0`, notes: `docs/releases/v0.2.0.md`). Milestone 3 (generic platform: workspaces, triggers, notifications; spec: issue #71, ADR 0022–0025) is implemented; its acceptance on the operator's host (#82) is pending, then release `v0.3.0` (notes: `docs/releases/v0.3.0.md`). Milestone 4 (notifications as subscriptions; spec: issue #87, ADR 0026) is designed; its tickets follow.
 
 ## Commands
 
