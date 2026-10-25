@@ -30,6 +30,8 @@ $defs:
       artifacts:
         type: array
         description: >-
+          For a started run (`run.started`): the trigger origin's link (`key` as `name`,
+          `title` as `description`), absent for a manual run or an origin without a link.
           For a finished run (`run.completed`, `run.failed`): the artifacts its steps
           reported, in step order, e.g. the pull request the agent opened. For
           `approval.requested`: the request's links (`title` as `name`). Channels that can
@@ -50,7 +52,7 @@ $defs:
     title: NotificationKind
     description: What the notification is about.
     type: string
-    enum: [run.completed, run.failed, approval.requested]
+    enum: [run.started, run.completed, run.failed, approval.requested]
   delivery:
     title: ChannelDelivery
     description: Outcome of the latest attempt to deliver the notification through one channel.

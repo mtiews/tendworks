@@ -335,7 +335,7 @@ spec:
 
 ### Notifications
 
-Human interaction records a notification for every approval request (`approval.requested`) and every completed or failed run (`run.completed`, `run.failed`), whether or not anyone subscribed. A **notification channel** only says how you are reached (Pushover with its credentials, a default priority). A **subscription** sends events of one scope to channels (ADR 0025, 0026). Without a matching subscription, a notification is only recorded and listed.
+Human interaction records a notification for every started, completed or failed run (`run.started`, `run.completed`, `run.failed`) and every approval request (`approval.requested`), whether or not anyone subscribed. A **notification channel** only says how you are reached (Pushover with its credentials, a default priority). A **subscription** sends events of one scope to channels (ADR 0025, 0026). Without a matching subscription, a notification is only recorded and listed.
 
 - **Scope:** `workspace: <name>` is a project; its subscriptions apply to everyone working in it. `platform: {}` holds the events of runs without a workspace (e.g. started with `tend run start`) and, opt-in, the platform's own events. A run's workspace is the one its trigger binding started it in, else the first one a step handed to its agent.
 - **Events:** a workspace has `run.started`, `run.completed`, `run.failed`, `approval.requested`; the platform has the same for runs without a workspace, plus `platform.degraded` and `platform.recovered`. The server refuses, when it loads the configuration, a subscription with an unknown workspace or channel, an event outside its scope, or an empty `events` or `channels`.

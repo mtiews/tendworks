@@ -121,10 +121,10 @@ const notifier = createNotifier({
   store: notifications,
   channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }),
   subscriptions: configuration.subscriptions.map(({ spec }) => spec),
-  workspaceOf: async (runId) => {
+  runOf: async (runId) => {
     const run = await orchestration.get(runId);
     const origin = run?.startedBy;
-    return (origin?.kind === "trigger" ? origin.workspace : undefined) ?? run?.steps.find((step) => step.workspace)?.workspace?.name;
+    return { workspace: (origin?.kind === "trigger" ? origin.workspace : undefined) ?? run?.steps.find((step) => step.workspace)?.workspace?.name, origin };
   },
 });
 console.log(

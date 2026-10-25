@@ -5,5 +5,5 @@ metadata:
 spec:
   # The chain test's trigger starts runs in this workspace (workspace scope).
   scope: { workspace: fake-playground }
-  events: [run.completed, run.failed, approval.requested]
+  events: [run.started, run.completed, run.failed, approval.requested]
   channels: [fake-log, fake-refusing]

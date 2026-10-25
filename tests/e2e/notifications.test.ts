@@ -23,7 +23,7 @@ describe("notifications on the compose stack", () => {
 
     const notification = await waitFor<Notification>("notification for the run", async () => {
       const { data } = await client.GET("/notifications");
-      return data?.items.find((item) => item.runId === started!.id && item.deliveries.every(({ status }) => status !== "pending"));
+      return data?.items.find((item) => item.runId === started!.id && item.kind === "run.completed" && item.deliveries.every(({ status }) => status !== "pending"));
     });
 
     expect(notification).toMatchObject({
@@ -39,5 +39,28 @@ describe("notifications on the compose stack", () => {
     });
     const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId: started!.id } } });
     expect(run?.status).toBe("completed");
+  });
+
+  it("delivers a run's start and its completion, in that order", { timeout: 60_000 }, async () => {
+    const { data: started } = await client.POST("/runs", {
+      body: { workflow: "hello-agent", input: { item: { key: "notify-start", title: "Notify me twice", number: 10 } } },
+    });
+    expect(started).toBeDefined();
+
+    const both = await waitFor<Notification[]>("the start and the completion of the run", async () => {
+      const { data } = await client.GET("/notifications");
+      const items = (data?.items ?? []).filter((item) => item.runId === started!.id);
+      return items.length === 2 && items.every((item) => item.deliveries.every(({ status }) => status !== "pending")) ? items : undefined;
+    });
+
+    // The fixture subscription of the platform scope selects run.started and run.completed for fake-log.
+    const [first, second] = [...both].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    expect(first).toMatchObject({
+      kind: "run.started",
+      title: `Run ${started!.id} of hello-agent started`,
+      detail: "Started by: manual",
+      deliveries: [{ channel: "fake-log", status: "delivered" }],
+    });
+    expect(second).toMatchObject({ kind: "run.completed", deliveries: [{ channel: "fake-log", status: "delivered" }, { channel: "fake-refusing", status: "failed" }] });
   });
 });

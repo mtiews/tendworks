@@ -50,7 +50,7 @@ describe("the automated chain on the compose stack, with fakes", () => {
 
     const notification = await waitFor<Notification>("the run's notification", async () => {
       const { data } = await client.GET("/notifications");
-      return data?.items.find((item) => item.runId === run.id && item.deliveries.every(({ status }) => status !== "pending"));
+      return data?.items.find((item) => item.runId === run.id && item.kind === "run.completed" && item.deliveries.every(({ status }) => status !== "pending"));
     });
     // The fixture subscription of the workspace sends it to both channels: fake-log delivers, fake-refusing refuses (tests/fixtures/config/notifications).
     expect(notification).toMatchObject({

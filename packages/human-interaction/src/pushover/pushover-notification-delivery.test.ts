@@ -70,6 +70,20 @@ describe("pushover notification delivery", () => {
     });
   });
 
+  it("links a started run's origin, titled by what started it", async () => {
+    const { api, delivery } = setup();
+
+    await delivery.deliver({
+      ...SUITE_NOTIFICATION,
+      kind: "run.started",
+      title: "Run run-1 of develop-issue started",
+      detail: "Workspace: app. Started by: Fix the login (acme/app#7)",
+      artifacts: [{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
+    });
+
+    expect(api.messages[0]).toMatchObject({ title: "Run run-1 of develop-issue started", url: "https://git.example/acme/app/issues/7", url_title: "Fix the login" });
+  });
+
   it("names the artifact as the link's title when it has no description, and sends the title as message without detail or artifacts", async () => {
     const { api, delivery } = setup();
 

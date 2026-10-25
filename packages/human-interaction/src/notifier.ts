@@ -1,8 +1,8 @@
-import type { ApprovalEvents, RunEvents, Subscription } from "@tendworks/shared";
+import type { ApprovalEvents, ControlPlane, RunEvents, Subscription } from "@tendworks/shared";
 import type { Notification, NotificationDelivery } from "./notification-delivery.js";
 import type { NotificationStore } from "./notification-store.js";
 
-type NotifiedEvent = RunEvents.RunCompletedEvent | RunEvents.RunFailedEvent | ApprovalEvents.ApprovalRequestedEvent;
+type NotifiedEvent = RunEvents.RunStartedEvent | RunEvents.RunCompletedEvent | RunEvents.RunFailedEvent | ApprovalEvents.ApprovalRequestedEvent;
 export type NotificationKind = Notification["kind"];
 
 /** A configured notification channel: its name, its default priority, and how it delivers. It selects no events. */
@@ -16,6 +16,13 @@ export interface NotifierChannel {
 /** What a subscription asks of the notifier (ADR 0026): events of one scope, to channels by name. */
 export type NotifierSubscription = Subscription.SubscriptionSpec;
 
+/** What the notifier needs to know of a run beyond its events: where it works and what started it. */
+export interface NotifierRun {
+  /** The workspace the run works in; none puts its events in the platform scope. */
+  workspace?: string | undefined;
+  origin?: ControlPlane.components["schemas"]["runOrigin"] | undefined;
+}
+
 export interface NotifierOptions {
   store: NotificationStore;
   /** Every configured channel. */
@@ -23,17 +30,17 @@ export interface NotifierOptions {
   /** Every configured subscription; a notification goes to the channels its matching subscriptions name. */
   subscriptions: readonly NotifierSubscription[];
   /**
-   * The workspace a run works in (orchestration's record of the run); none for a run without
-   * one, whose events belong to the platform scope. A rejection fails the event, so the bus
+   * Orchestration's record of a run: its workspace (none for a run without one, whose events
+   * belong to the platform scope) and its origin. A rejection fails the event, so the bus
    * delivers it again.
    */
-  workspaceOf?: (runId: string) => Promise<string | undefined>;
+  runOf?: (runId: string) => Promise<NotifierRun>;
   now?: () => Date;
 }
 
 /**
- * Consumer of run outcomes and approval requests: records a notification for every
- * completed or failed run and every new approval request, then delivers it through the
+ * Consumer of run starts and outcomes and approval requests: records a notification for every
+ * started, completed or failed run and every new approval request, then delivers it through the
  * subscriptions of its scope (the run's workspace, else the platform) that select its kind:
  * once per channel they name, with the highest of their priorities, else the channel's
  * default. Without a matching subscription the notification is only recorded. The outcome
@@ -42,15 +49,15 @@ export interface NotifierOptions {
  * delivers only to the channels still pending. A failing channel is recorded on the
  * notification and fails neither the event nor the other channels.
  */
-export function createNotifier({ store, channels, subscriptions, workspaceOf = async () => undefined, now = () => new Date() }: NotifierOptions) {
+export function createNotifier({ store, channels, subscriptions, runOf = async () => ({}), now = () => new Date() }: NotifierOptions) {
   const byName = new Map(channels.map((channel) => [channel.name, channel]));
   return {
     /** Event types the notifier consumes. */
-    types: ["dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"],
+    types: ["dev.tendworks.run.started", "dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"],
 
     async handle(event: NotifiedEvent): Promise<void> {
-      const fresh = toNotification(event, now().toISOString());
-      const workspace = await workspaceOf(event.runid);
+      const { workspace, origin } = await runOf(event.runid);
+      const fresh = toNotification(event, now().toISOString(), { workspace, origin });
       const priorities = matching(subscriptions, workspace, fresh.kind);
       const notification = await store.record(`${event.source} ${event.id}`, {
         ...fresh,
@@ -92,7 +99,7 @@ function matching(subscriptions: readonly NotifierSubscription[], workspace: str
   return channels;
 }
 
-function toNotification(event: NotifiedEvent, createdAt: string): Notification {
+function toNotification(event: NotifiedEvent, createdAt: string, run: NotifierRun): Notification {
   const base = { id: crypto.randomUUID(), runId: event.runid, createdAt, deliveries: [] };
   if (event.type === "dev.tendworks.approval.requested") {
     const { id, question, answers, links } = event.data;
@@ -104,6 +111,19 @@ function toNotification(event: NotifiedEvent, createdAt: string): Notification {
       detail: `Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"`,
       // The request's links, so a channel that links one opens the first, like a run's first artifact.
       ...(links.length > 0 ? { artifacts: links.map(({ title, url }) => ({ name: title, url })) } : {}),
+    };
+  }
+  if (event.type === "dev.tendworks.run.started") {
+    const { workspace, origin } = run;
+    const item = origin?.kind === "trigger" ? origin.item : undefined;
+    const startedBy = item ? `${item.title} (${item.key})` : "manual";
+    return {
+      ...base,
+      kind: "run.started",
+      title: `Run ${event.runid} of ${event.data.workflow} started`,
+      detail: `${workspace ? `Workspace: ${workspace}. ` : ""}Started by: ${startedBy}`,
+      // The origin's link, so a channel that links one opens e.g. the issue.
+      ...(item?.url ? { artifacts: [{ name: item.key, url: item.url, description: item.title }] } : {}),
     };
   }
   const { artifacts } = event.data;

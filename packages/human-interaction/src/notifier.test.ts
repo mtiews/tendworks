@@ -4,7 +4,7 @@ import { approvalRequested } from "./approvals/approval-events.js";
 import type { ApprovalRequest } from "./approvals/approval-store.js";
 import { createFakeNotificationDelivery, type Notification, type NotificationDelivery } from "./notification-delivery.js";
 import { createInMemoryNotificationStore } from "./notification-store.js";
-import { createNotifier, type NotifierChannel, type NotifierSubscription } from "./notifier.js";
+import { createNotifier, type NotifierChannel, type NotifierRun, type NotifierSubscription } from "./notifier.js";
 
 const envelope = {
   specversion: "1.0" as const,
@@ -79,18 +79,69 @@ const project = (workspace: string, channels: NotifierSubscription["channels"], 
 function setup(
   channels: NotifierChannel[] = [{ name: "log", delivery: quiet() }],
   subscriptions: NotifierSubscription[] = channels.map(({ name }) => platform([name])),
-  workspaceOf?: (runId: string) => Promise<string | undefined>,
+  runOf?: (runId: string) => Promise<NotifierRun>,
 ) {
   const store = createInMemoryNotificationStore();
-  const notifier = createNotifier({ store, channels, subscriptions, ...(workspaceOf ? { workspaceOf } : {}), now: () => new Date("2026-10-18T10:00:03.000Z") });
+  const notifier = createNotifier({ store, channels, subscriptions, ...(runOf ? { runOf } : {}), now: () => new Date("2026-10-18T10:00:03.000Z") });
   return { store, notifier };
 }
 
 const delivered = (channel: string) => ({ channel, status: "delivered", attemptedAt: "2026-10-18T10:00:03.000Z" });
 
 describe("notifier", () => {
-  it("subscribes to run.completed, run.failed and approval.requested", () => {
-    expect(setup().notifier.types).toEqual(["dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"]);
+  it("subscribes to run.started, run.completed, run.failed and approval.requested", () => {
+    expect(setup().notifier.types).toEqual(["dev.tendworks.run.started", "dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"]);
+  });
+
+  describe("run.started", () => {
+    const started: RunEvents.RunStartedEvent = { ...envelope, id: "run-1:run.started", type: "dev.tendworks.run.started", data: { workflow: "develop-issue" } };
+    const issue = { kind: "trigger" as const, binding: "ready-issues", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://git.example/acme/app/issues/7" } };
+
+    it("names the workflow, the workspace and the origin's title, and links the origin", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.started"])], async () => ({ workspace: "app", origin: issue }));
+
+      await notifier.handle(started);
+
+      const [notification] = await store.list();
+      expect(notification).toMatchObject({
+        kind: "run.started",
+        runId: "run-1",
+        title: "Run run-1 of develop-issue started",
+        detail: "Workspace: app. Started by: Fix the login (acme/app#7)",
+        artifacts: [{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
+        deliveries: [delivered("log")],
+      });
+      expect(delivery.delivered).toHaveLength(1);
+    });
+
+    it("says that a manual run was started manually, and links nothing", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { kind: "manual" } }));
+
+      await notifier.handle(started);
+
+      const [notification] = await store.list();
+      expect(notification?.detail).toBe("Started by: manual");
+      expect(notification).not.toHaveProperty("artifacts");
+    });
+
+    it("links nothing when the origin has no link", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { ...issue, item: { key: issue.item.key, title: issue.item.title } } }));
+
+      await notifier.handle(started);
+
+      expect((await store.list())[0]).not.toHaveProperty("artifacts");
+    });
+
+    it("only lists a start nobody subscribed to", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.completed"])], async () => ({ workspace: "app", origin: issue }));
+
+      await notifier.handle(started);
+
+      expect(await store.list()).toEqual([expect.objectContaining({ kind: "run.started", deliveries: [] })]);
+      expect(delivery.delivered).toEqual([]);
+    });
   });
 
   it("records a completed run's notification with the artifacts its steps reported, and delivers it", async () => {
@@ -192,7 +243,7 @@ describe("notifier", () => {
         { name: "health", delivery: health },
       ],
       [project("app", ["mine"]), project("other", ["theirs"]), platform(["health"])],
-      async () => "app",
+      async () => ({ workspace: "app" }),
     );
 
     await notifier.handle(completed);
@@ -210,7 +261,7 @@ describe("notifier", () => {
         { name: "health", delivery: health },
       ],
       [project("app", ["mine"]), platform(["health"])],
-      async () => undefined,
+      async () => ({}),
     );
 
     await notifier.handle(completed);
@@ -219,9 +270,9 @@ describe("notifier", () => {
     expect([mine.delivered.length, health.delivered.length]).toEqual([0, 1]);
   });
 
-  it("asks for the workspace of the run the event is about", async () => {
+  it("asks for the run the event is about", async () => {
     const asked: string[] = [];
-    const { notifier } = setup(undefined, undefined, async (runId) => void asked.push(runId));
+    const { notifier } = setup(undefined, undefined, async (runId) => (asked.push(runId), {}));
 
     await notifier.handle(completed);
 
@@ -235,7 +286,7 @@ describe("notifier", () => {
     const { store, notifier } = setup(
       [{ name: "phone", delivery }],
       [project("app", ["phone"], ["run.completed"], -1), project("app", ["phone"], ["run.completed", "run.failed"], 1), project("app", ["phone"], ["run.completed"])],
-      async () => "app",
+      async () => ({ workspace: "app" }),
     );
 
     await notifier.handle(completed);
