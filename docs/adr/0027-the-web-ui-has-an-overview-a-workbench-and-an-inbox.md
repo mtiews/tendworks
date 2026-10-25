@@ -11,7 +11,7 @@ The pieces arrive ticket by ticket (spec #101); until a page exists, its navigat
 
 ## Shell
 
-- **Desktop:** an icon rail with the brand mark, the sections Overview, Runs, Chats, Inbox and More, and sign-out. Every entry has an accessible name and `aria-current` marks the current section.
+- **Desktop:** an icon rail with the brand mark, the sections Overview, Runs, Chats, Inbox, Triggers, Agents, Workspaces and More, and sign-out. Every entry has an accessible name and `aria-current` marks the current section.
 - **Phone (below 760 px):** a top bar with the brand mark and the access scope (a back button on a detail view) and bottom tabs: Overview, Runs, Chats, Inbox, More. "More" holds the remaining sections, the start page choice, the access scope and sign-out. The layout is chosen in script from the viewport, so one navigation is in the page at a time.
 - **Badges** on the navigation: the pending approval requests (Runs) and the notifications with a failed delivery (Inbox). They are numbers with an accessible description, not colors alone.
 - **Access scope** (full or read-only) stays visible in the shell on both layouts.
