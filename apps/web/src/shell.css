@@ -219,7 +219,7 @@
   gap: 2px;
   min-height: var(--tabs-height);
   border-radius: 0;
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
 }
 
 .tabs .nav-entry[aria-current="page"] {
@@ -259,4 +259,19 @@
 
 .choice .checkbox {
   min-height: var(--touch-target);
+}
+
+/* Views that use the whole width beside the navigation (the workbench, route flag `wide`). */
+.content-wide {
+  max-width: none;
+}
+
+/* The desktop shell then fills the window exactly, so the view's panes scroll on their own. */
+.shell-desktop:has(.content-wide) {
+  height: 100vh;
+}
+
+.shell-desktop .content-wide {
+  min-height: 0;
+  padding: 0;
 }

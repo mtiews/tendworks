@@ -3,23 +3,9 @@
  * on its own; on a phone one after another, the page scrolling as a whole. Tokens only.
  */
 
-.content-wide {
-  max-width: none;
-}
-
-/* The desktop shell fills the window exactly, so the list and the run scroll on their own. */
-.shell-desktop:has(.content-wide) {
-  height: 100vh;
-}
-
-.shell-desktop .content-wide {
-  min-height: 0;
-  padding: 0;
-}
-
 .workbench {
   display: grid;
-  grid-template-columns: minmax(16rem, 22rem) minmax(0, 1fr);
+  grid-template-columns: minmax(var(--list-min-width), var(--list-width)) minmax(0, 1fr);
   height: 100%;
 }
 
@@ -85,9 +71,9 @@
 
 .group-heading {
   margin: var(--space-3) var(--space-3) var(--space-1);
-  font-size: 0.6875rem;
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
   color: var(--color-muted);
 }
@@ -115,11 +101,11 @@
 .item {
   display: grid;
   grid-template-columns: var(--space-2) minmax(0, 1fr) auto;
-  gap: 2px var(--space-3);
+  gap: var(--space-1) var(--space-3);
   align-items: baseline;
   min-height: var(--touch-target);
   padding: var(--space-2) var(--space-3);
-  border-left: 3px solid transparent;
+  border-left: var(--border-strong) solid transparent;
   color: var(--color-text);
   text-decoration: none;
 }
@@ -274,15 +260,14 @@
 }
 
 .banner-error .failure {
-  flex: 1;
-  min-width: 12rem;
+  flex: 1 1 auto;
   margin: 0;
   overflow-wrap: anywhere;
 }
 
 .banner-ask {
   display: block;
-  background: var(--color-read-only-bg);
+  background: var(--color-warn-bg);
   border-color: var(--color-warn);
 }
 
@@ -308,7 +293,7 @@
 }
 
 .stepper li {
-  flex: 1 0 8rem;
+  flex: 1 0 var(--step-min-width);
   min-width: 0;
 }
 
@@ -324,7 +309,7 @@
   padding: var(--space-2) var(--space-3);
   border: 0;
   border-radius: 0;
-  border-bottom: 3px solid var(--color-border);
+  border-bottom: var(--border-strong) solid var(--color-border);
   background: transparent;
   text-align: left;
 }
@@ -350,8 +335,8 @@
 }
 
 .step-number {
-  font-size: 0.6875rem;
-  letter-spacing: 0.08em;
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
   text-transform: uppercase;
   color: var(--color-muted);
 }
@@ -380,7 +365,7 @@
   min-height: var(--touch-target);
   padding: 0;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--border-medium) solid transparent;
   border-radius: 0;
   background: transparent;
   color: var(--color-muted);
@@ -423,7 +408,7 @@ code.value {
   right: 0;
   bottom: var(--bottom-inset);
   z-index: 1;
-  max-height: 60vh;
+  max-height: var(--bar-max-height);
   overflow-y: auto;
   margin: 0;
   padding: var(--space-3);
@@ -437,7 +422,7 @@ code.value {
 
 .approval-bar .decision-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(var(--answer-min-width), 1fr));
 }
 
 .approval-bar .decision-actions button,
@@ -447,5 +432,5 @@ code.value {
 
 /* Room below the run for the bar, so the end of the transcript can scroll above it. */
 .run:has(.approval-bar) {
-  padding-bottom: 50vh;
+  padding-bottom: var(--bar-max-height);
 }

@@ -6,7 +6,8 @@ import { Artifacts } from "./artifacts.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
-import { defaultStep, duration, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
+import { Age } from "./approvals.js";
+import { defaultStep, duration, runArtifacts, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
 import { Link } from "./router.js";
 import { Time } from "./time.js";
 import { usePolling } from "./use-polling.js";
@@ -25,7 +26,7 @@ const messageOf = (error: unknown) => (error instanceof Error ? error.message : 
  * the artifacts. It opens on its agent step.
  */
 export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
-  const { client } = useApi();
+  const { client, canChange } = useApi();
   const { data: run, error, refresh } = usePolling(
     useCallback(async () => ({ run: await answer(client.GET("/runs/{runId}", { params: { path: { runId } } })), readAt: Date.now() }), [client, runId]),
   );
@@ -52,6 +53,7 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
   const { run: current, readAt } = run;
   const { title, key } = runTitle(current);
   const step = current.steps.find((candidate) => candidate.reference === chosenStep) ?? defaultStep(current);
+  const artifacts = runArtifacts(current);
   const tab = chosenTab ?? (current.steps.some((candidate) => candidate.taskId !== undefined) ? "transcript" : "output");
 
   return (
@@ -62,7 +64,11 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
         </h1>
         <span className={`status status-${current.status}`}>{current.status}</span>
       </header>
-      {error !== undefined && <p className="message message-error">{messageOf(error)}</p>}
+      {error !== undefined && (
+        <p className="message message-error" role="alert">
+          {messageOf(error)}
+        </p>
+      )}
       <Facts run={current} readAt={readAt} />
       <ItemLink run={current} />
       {current.error && (
@@ -70,9 +76,11 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
           <p className="failure" role="alert">
             Failed at {current.error.instance}: {describeError(current.error)}
           </p>
-          <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
-            Ask the platform assistant
-          </Link>
+          {canChange && (
+            <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
+              Ask the platform assistant
+            </Link>
+          )}
         </div>
       )}
       <RunApprovalRequest runId={current.id} bar={phone} />
@@ -92,32 +100,34 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
       <Tabs
         tab={tab}
         choose={chooseTab}
-        artifacts={current.steps.flatMap((candidate) => candidate.artifacts ?? []).length}
+        artifacts={artifacts.length}
         panels={{
           transcript: step ? <StepPanel runId={current.id} step={step} ended={refresh} /> : <p className="muted">No steps yet.</p>,
           output: <Output output={current.output} />,
-          artifacts: <AllArtifacts steps={current.steps} />,
+          artifacts: artifacts.length === 0 ? <p className="muted">No artifacts.</p> : <Artifacts artifacts={artifacts} />,
         }}
       />
     </article>
   );
 }
 
+/** A fact of the run, left out while it has no value (e.g. `Finished` while it runs). */
+type Fact = [label: string, value: ReactNode];
+const fact = (label: string, value: ReactNode | undefined): Fact[] => (value === undefined || value === "" ? [] : [[label, value]]);
+
 function Facts({ run, readAt }: { run: Run; readAt: number }) {
-  const workspace = runWorkspace(run);
-  const cost = runCost(run);
-  const took = duration(run.startedAt, run.finishedAt, readAt);
-  const fields: [string, ReactNode][] = [
-    ["Run", run.id],
-    ["Workflow", run.workflow],
-    ...(workspace ? [["Workspace", workspace] as [string, ReactNode]] : []),
-    ["Status", run.status],
-    ...(run.startedBy ? [["Started by", formatOrigin(run.startedBy)] as [string, ReactNode]] : []),
-    ["Created", <Time value={run.createdAt} />],
-    ...(run.startedAt ? [["Started", <Time value={run.startedAt} />] as [string, ReactNode]] : []),
-    ...(run.finishedAt ? [["Finished", <Time value={run.finishedAt} />] as [string, ReactNode]] : []),
-    ...(took ? [["Duration", took] as [string, ReactNode]] : []),
-    ...(cost ? [["Cost", cost] as [string, ReactNode]] : []),
+  const fields: Fact[] = [
+    ...fact("Run", run.id),
+    ...fact("Workflow", run.workflow),
+    ...fact("Workspace", runWorkspace(run)),
+    ...fact("Status", run.status),
+    ...fact("Started by", run.startedBy && formatOrigin(run.startedBy)),
+    ...fact("Created", <Time value={run.createdAt} />),
+    ...fact("Age", <Age value={run.createdAt} now={readAt} />),
+    ...fact("Started", run.startedAt && <Time value={run.startedAt} />),
+    ...fact("Finished", run.finishedAt && <Time value={run.finishedAt} />),
+    ...fact("Duration", duration(run.startedAt, run.finishedAt, readAt)),
+    ...fact("Cost", runCost(run)),
   ];
   return (
     <dl className="fields">
@@ -183,9 +193,11 @@ function Tabs({ tab, choose, artifacts, panels }: { tab: Tab; choose: (tab: Tab)
             tabIndex={tab === name ? 0 : -1}
             onClick={() => choose(name)}
             onKeyDown={(event) => {
-              const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-              if (step === 0) return;
-              const next = order[(order.indexOf(name) + step + order.length) % order.length]!;
+              const index = order.indexOf(name);
+              const target = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: order.length - 1 }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              const next = order[(target + order.length) % order.length]!;
               choose(next);
               document.getElementById(`${id}-${next}`)?.focus();
             }}
@@ -194,7 +206,7 @@ function Tabs({ tab, choose, artifacts, panels }: { tab: Tab; choose: (tab: Tab)
           </button>
         ))}
       </div>
-      <div className="run-panel" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${tab}`}>
+      <div className="run-panel" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${tab}`} tabIndex={0}>
         {panels[tab]}
       </div>
     </>
@@ -263,7 +275,3 @@ function Output({ output }: { output: unknown }) {
   );
 }
 
-function AllArtifacts({ steps }: { steps: Step[] }) {
-  const artifacts = steps.flatMap((step) => step.artifacts ?? []);
-  return artifacts.length === 0 ? <p className="muted">No artifacts.</p> : <Artifacts artifacts={artifacts} />;
-}

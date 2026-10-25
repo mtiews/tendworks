@@ -41,7 +41,10 @@ export function duration(startedAt: string | undefined, finishedAt: string | und
   return `${Math.floor(minutes / 60)} h${rest === 0 ? "" : ` ${rest} min`}`;
 }
 
-export const stateOf = (run: Run, waiting: ReadonlySet<string>): RunState => (waiting.has(run.id) ? "waiting" : run.status);
+/** What the run needs: an answer when it has a pending approval request (`waiting` holds those runs), else its own status. */
+export function stateOf(run: Run, waiting: ReadonlySet<string>): RunState {
+  return waiting.has(run.id) ? "waiting" : run.status;
+}
 
 /** The runs by what they need: waiting for an answer, still at work, done; each group in the API's order (newest first). */
 export function groupRuns(runs: readonly Run[], waiting: ReadonlySet<string>): { needsYou: Run[]; running: Run[]; finished: Run[] } {
@@ -58,6 +61,11 @@ export function groupRuns(runs: readonly Run[], waiting: ReadonlySet<string>): {
 export function defaultRun(runs: readonly Run[], waiting: ReadonlySet<string>): Run | undefined {
   const { needsYou, running } = groupRuns(runs, waiting);
   return needsYou[0] ?? running[0] ?? runs[0];
+}
+
+/** Everything the run's steps reported as results, in step order. */
+export function runArtifacts(run: Run): NonNullable<Step["artifacts"]> {
+  return run.steps.flatMap((step) => step.artifacts ?? []);
 }
 
 /** Whether `filter` finds the run by its title, item key, workspace, workflow or id (case-insensitive). */

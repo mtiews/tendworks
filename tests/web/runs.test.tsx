@@ -1,7 +1,7 @@
 import { createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, emptyConfiguration, type ApprovalRequest, type Run, type TranscriptEntry } from "@tendworks/control-plane";
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { phoneWidth, renderApp, signedIn } from "./support/platform.js";
+import { phoneWidth, READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
 import { rows as tableRows } from "./support/table.js";
 
 const time = "2026-10-19T10:00:00.000Z";
@@ -340,6 +340,14 @@ describe("run detail", () => {
     expect((await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value).toBe("Why did run run-3 fail?");
   });
 
+  it("offers no assistant to ask with read-only access", async () => {
+    signedIn(READ_TOKEN);
+    renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime: createInMemoryAgentRuntime() });
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Ask the platform assistant" })).toBeNull();
+  });
+
   it("opens from the run list and works as a deep link after a reload", async () => {
     signedIn();
     const runs = runsOf(manualRun, failedRun);
@@ -380,13 +388,12 @@ describe("runs on a phone", () => {
     expect(screen.getByRole("link", { name: "Back" }).getAttribute("href")).toBe("/ui/runs");
   });
 
-  it("shows the pending approval request as a bar with its answers", async () => {
+  it("shows the pending approval request with its answers (the browser test checks it sits at the bottom)", async () => {
     phoneWidth(true);
     signedIn();
     renderApp({ path: "/ui/runs/run-5", runs: runsOf(waitingRun), approvals: createInMemoryApprovals([pendingOfWaitingRun]) });
 
     const request = await screen.findByRole("region", { name: "Approval request" });
-    expect(request.classList.contains("approval-bar")).toBe(true);
     expect(within(request).getByRole("button", { name: "Merged – continue" })).toBeTruthy();
   });
 });

@@ -9,9 +9,11 @@
 
   --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, Consolas, monospace;
+  --text-xs: 0.6875rem;
   --text-sm: 0.8125rem;
   --text-md: 0.9375rem;
   --text-lg: 1.25rem;
+  --tracking-caps: 0.08em;
 
   --space-1: 0.25rem;
   --space-2: 0.5rem;
@@ -22,6 +24,13 @@
   --content-width: 72rem;
   --touch-target: 44px;
   --rail-width: 64px;
+  --border-strong: 3px;
+  --border-medium: 2px;
+  --list-width: 22rem;
+  --list-min-width: 16rem;
+  --step-min-width: 8rem;
+  --answer-min-width: 8rem;
+  --bar-max-height: 60vh;
 
   --color-bg: #0b0f0d;
   --color-surface: #121815;
@@ -42,6 +51,7 @@
   --color-error-bg: #3a1f1d;
   --color-read-only: #f0b44c;
   --color-read-only-bg: #3a2f17;
+  --color-warn-bg: #3a2f17;
 }
 
 @media (prefers-color-scheme: light) {
@@ -65,6 +75,7 @@
     --color-error-bg: #fbeceb;
     --color-read-only: #8a5a00;
     --color-read-only-bg: #fdf3dc;
+    --color-warn-bg: #fdf3dc;
   }
 }
 

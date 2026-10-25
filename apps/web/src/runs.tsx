@@ -4,7 +4,7 @@ import { answer } from "./answers.js";
 import { Age } from "./approvals.js";
 import { Pending } from "./pending.js";
 import { RunDetail } from "./run-detail.js";
-import { defaultRun, groupRuns, matchesFilter, runTitle, runWorkspace, stateOf, type Run } from "./run-summary.js";
+import { defaultRun, groupRuns, matchesFilter, runTitle, runWorkspace, stateOf, type Run, type RunState } from "./run-summary.js";
 import { Link, useLocation } from "./router.js";
 import { usePolling } from "./use-polling.js";
 
@@ -104,7 +104,7 @@ function RunGroup({ level, title, runs, data, selected }: { level: 1 | 2; title:
   );
 }
 
-const NOTE: Partial<Record<ReturnType<typeof stateOf>, string>> = { waiting: "Waiting for you", failed: "Failed" };
+const NOTE: Partial<Record<RunState, string>> = { waiting: "Waiting for you", failed: "Failed" };
 
 function RunItem({ run, data, selected }: { run: Run; data: RunListData; selected: boolean }) {
   const { title, key } = runTitle(run);
