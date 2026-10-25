@@ -52,7 +52,7 @@ describe("the automated chain on the compose stack, with fakes", () => {
       const { data } = await client.GET("/notifications");
       return data?.items.find((item) => item.runId === run.id && item.deliveries.every(({ status }) => status !== "pending"));
     });
-    // The fixture channels: fake-log delivers, fake-refusing refuses (tests/fixtures/config/notifications).
+    // The fixture subscription of the workspace sends it to both channels: fake-log delivers, fake-refusing refuses (tests/fixtures/config/notifications).
     expect(notification).toMatchObject({
       kind: "run.completed",
       artifacts: [{ name: "pull-request", url: "https://git.example/example/playground/pull/1" }],
