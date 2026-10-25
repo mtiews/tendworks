@@ -16,7 +16,7 @@ describe("signing in", () => {
 
     expect(await screen.findByText("Full access")).toBeTruthy();
     const navigation = screen.getByRole("navigation", { name: "Main" });
-    expect([...navigation.querySelectorAll("a")].filter((link) => link.getAttribute("aria-label") !== "Tendworks").map((link) => [link.getAttribute("aria-label"), link.getAttribute("href")])).toEqual([
+    expect([...navigation.querySelectorAll("a")].filter((link) => link.getAttribute("aria-label") !== "Tendworks" && !link.getAttribute("aria-label")?.startsWith("Platform ")).map((link) => [link.getAttribute("aria-label"), link.getAttribute("href")])).toEqual([
       ["Overview", "/ui/overview"],
       ["Runs", "/ui/runs"],
       ["Chats", "/ui/chats"],
@@ -167,7 +167,7 @@ describe("the app shell", () => {
     await signIn(user, API_TOKEN);
     await screen.findByText("Full access");
 
-    for (const [entry, heading] of [["Runs", "Runs"], ["Inbox", "Inbox"], ["Chats", "Chats"], ["Overview", "Status"]] as const) {
+    for (const [entry, heading] of [["Runs", "Runs"], ["Inbox", "Inbox"], ["Chats", "Chats"], ["Overview", "Overview"]] as const) {
       await user.click(screen.getByRole("link", { name: entry }));
       expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
     }

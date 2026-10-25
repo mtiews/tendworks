@@ -6,7 +6,7 @@ import { MorePage } from "./more.js";
 import { match } from "./router.js";
 import { RunWorkbench } from "./runs.js";
 import { startPage } from "./start-page.js";
-import { StatusPage } from "./status.js";
+import { OverviewPage } from "./overview.js";
 import { SubscriptionsPage } from "./subscriptions.js";
 
 /*
@@ -37,7 +37,7 @@ export interface Route {
 
 export const routes: readonly Route[] = [
   { pattern: "/more", title: "More", section: "more", render: (_, { signOut, phone }) => <MorePage signOut={signOut} showSignOut={phone} /> },
-  { pattern: "/overview", title: "Overview", section: "overview", render: () => <StatusPage /> },
+  { pattern: "/overview", title: "Overview", section: "overview", render: (_, { phone }) => <OverviewPage phone={phone} /> },
   { pattern: "/runs", title: "Runs", section: "runs", wide: true, render: (_, { phone }) => <RunWorkbench phone={phone} /> },
   { pattern: "/runs/:runId", title: "Run", section: "runs", back: "/runs", wide: true, render: ({ runId = "" }, { phone }) => <RunWorkbench runId={runId} phone={phone} /> },
   { pattern: "/chats", title: "Chats", section: "chats", wide: true, render: (_, { phone }) => <ChatWorkbench phone={phone} /> },

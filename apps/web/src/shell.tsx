@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useApi } from "./api.js";
 import { BrandMark } from "./brand-mark.js";
 import { Icon, type IconName } from "./icons.js";
+import { unhealthyComponents, usePlatformStatus } from "./platform-status.js";
 import { useNavigationBadges, type NavigationBadges } from "./navigation-badges.js";
 import { resolve, type Section } from "./routes.js";
 import { Link, useLocation } from "./router.js";
@@ -107,11 +108,24 @@ function Navigation({ phone, section, badges, signOut }: { phone: boolean; secti
           </Link>
         );
       })}
+      {!phone && <HealthIndicator />}
       {!phone && (
         <button type="button" className="nav-entry rail-sign-out" aria-label="Sign out" title="Sign out" onClick={signOut}>
           <Icon name="signOut" />
         </button>
       )}
     </nav>
+  );
+}
+
+/** The platform's health in the rail: a light that leads to the overview, named by the state and the unhealthy components. */
+function HealthIndicator() {
+  const { data } = usePlatformStatus();
+  const unhealthy = data && unhealthyComponents(data);
+  const label = data === undefined ? "Platform health unknown" : unhealthy!.length === 0 ? `Platform healthy: all ${data.components.length} components` : `Platform unhealthy: ${unhealthy!.map((component) => component.name).join(", ")}`;
+  return (
+    <Link to="/overview" className="nav-entry rail-health" label={label}>
+      <span className={`led led-${data === undefined ? "unknown" : unhealthy!.length === 0 ? "healthy" : "unhealthy"}`} aria-hidden="true" />
+    </Link>
   );
 }

@@ -194,8 +194,23 @@
   margin-bottom: var(--space-3);
 }
 
-.rail-sign-out {
+.rail-health {
   margin-top: auto;
+}
+
+.led {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-muted);
+}
+
+.led-healthy {
+  background: var(--color-ok);
+}
+
+.led-unhealthy {
+  background: var(--color-error);
 }
 
 /* Phone: bottom tabs */
