@@ -499,6 +499,16 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     expect(sandboxes.attached[0]?.request.env).toMatchObject({ TENDWORKS_ARTIFACTS: "/session/artifacts.json" });
   });
 
+  it("keeps the agent's work in its turn: background tasks are off and the instructions say the turn ends the task", async () => {
+    const sandboxes = scriptedSandboxes();
+
+    await harness(sandboxes.api).run(task(), observe().observer);
+
+    expect(sandboxes.attached[0]?.request.env).toMatchObject({ CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1" });
+    const append = (sandboxes.observed.newSession?._meta?.systemPrompt as { append?: string } | undefined)?.append ?? "";
+    expect(append).toContain("Your task ends when your turn ends");
+  });
+
   it("ignores a malformed artifacts file and records why", async () => {
     const sandboxes = scriptedSandboxes({ artifacts: '{"url": "not a list"}' });
     const { observer, entries } = observe();
