@@ -161,7 +161,8 @@ Running runs resume after either, and the worker takes up open chats again.
 | `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; change it only for a second stack on the same engine (with other ports) |
 | `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it unset |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
-| `TEND_WORKSPACE_ROOTS` | empty (no directory workspaces) | absolute host directory that directory workspaces must lie under ([Directory workspaces](#directory-workspaces)) |
+| `TEND_WORKSPACE_ROOTS` | empty (no directory workspaces) | absolute host directory that directory workspaces must lie under ([directory workspaces](#directory-workspaces)) |
+| `TEND_HEARTBEAT_URL` | empty (no heartbeat) | URL the server calls about every five minutes while the platform is healthy ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)) |
 
 `TEND_SANDBOX_IMAGES` and `TEND_INSTALLATION` are set by compose itself; don't set them.
 
@@ -378,6 +379,17 @@ Human interaction records a notification for every started, completed or failed 
 6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names the channel and the subscription: `configuration: notification channels phone (pushover)`.
 7. Check the delivery: start `hello-developer` ([Everyday commands](#everyday-commands)). When it completes, the phone shows `Run <id> of hello-developer completed`, and `tend notification list` shows `phone delivered`. A failure shows there as `phone failed for <id>: …`: `secret TENDWORKS_PLATFORM_PUSHOVER_TOKEN is not set` (the secret did not reach the server: `up -d --wait`, not `restart`) or `Pushover refused the message (HTTP 400): …` with Pushover's reason (e.g. a wrong token or user key).
 8. Check the link, by hand: let `develop-issue` work an issue ([First test workloads](#first-test-workloads), 3). When the run completes, tap its message on the phone: it opens the pull request that `tend run get <id>` lists as `pullRequest` and under ARTIFACT.
+
+#### Heartbeat: when the platform itself is down
+
+A stopped server cannot notify anyone, so let an external monitor notice the silence. While `GET /status` is healthy, the server calls `TEND_HEARTBEAT_URL` with a plain `GET` about every five minutes; while the platform is degraded, or without the variable, it calls nothing. The call carries no secrets and no state. A failed ping is logged (`heartbeat failed: ...`) and tried again at the next interval.
+
+Point it at a **push monitor**, which alarms when the pings stop:
+
+1. [healthchecks.io](https://healthchecks.io): create a check with period 5 minutes and grace time 5 to 10 minutes, add the Pushover integration and copy the check's ping URL.
+2. Or Uptime Kuma: add a monitor of type *Push* with heartbeat interval 300 seconds plus a retry or two, attach a Pushover notification, and copy the push URL.
+3. Put the URL into `deploy/.env`: `TEND_HEARTBEAT_URL=https://hc-ping.com/<uuid>`, then `docker compose -f deploy/compose.yaml up -d --wait`.
+4. Check it: the monitor shows the first ping within seconds. `docker compose -f deploy/compose.yaml stop server` makes it alarm after the grace time.
 
 ### Waiting for a human: the human step and policies
 

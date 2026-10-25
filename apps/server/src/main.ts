@@ -7,6 +7,7 @@ import {
   createAgentRuntimeClient,
   checkPlatform,
   createControlPlaneApi,
+  createHeartbeat,
   createPlatformMonitor,
   createOrchestrationClient,
   createStoppedControlPlaneApi,
@@ -211,8 +212,18 @@ const platformMonitor = createPlatformMonitor({
 });
 platformMonitor.start();
 
+// While GET /status is healthy, the server calls TEND_HEARTBEAT_URL about every five minutes,
+// so an external monitor alarms when it stops (ADR 0026). Unset: no heartbeat.
+const heartbeat = createHeartbeat({
+  url: process.env.TEND_HEARTBEAT_URL,
+  check: () => checkPlatform(probes, bundles, undefined),
+  onError: (error) => console.error("heartbeat failed:", error),
+});
+heartbeat.start();
+
 async function shutdown() {
   platformMonitor.stop();
+  heartbeat.stop();
   await triggerGateway.stop();
   const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.

@@ -23,6 +23,7 @@ export {
   type DecisionOutcome,
 } from "./approvals.js";
 export { ConfigurationError, emptyConfiguration, loadConfiguration, type Configuration } from "./configuration.js";
+export { createHeartbeat, type Heartbeat, type HeartbeatOptions } from "./heartbeat.js";
 export { createPlatformMonitor, type PlatformEventPublisher, type PlatformHealthChangedEvent, type PlatformMonitor, type PlatformMonitorOptions } from "./platform-monitor.js";
 export type { Notification, NotificationsPort } from "./notifications.js";
 export {
