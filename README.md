@@ -1,4 +1,9 @@
-# Tendworks
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/logo-horizontal-dark.svg">
+    <img alt="Tendworks" src="docs/brand/logo-horizontal.svg" width="320">
+  </picture>
+</h1>
 
 Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform. Agents are started by triggers and run isolated and recoverable in sandboxes. You control them through the web UI, chat and the `tend` CLI, and they only call on you when a policy says so. The core idea: agents run reliably while you are away.
 
