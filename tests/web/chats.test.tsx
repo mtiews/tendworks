@@ -104,6 +104,17 @@ describe("chats page", () => {
 
 const posts = (requests: Request[], path: string) => requests.filter((request) => request.method === "POST" && new URL(request.url).pathname === path);
 
+const newChatInput = () => screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" });
+
+/** Opens the new chat form on the platform above. */
+async function openNewChat() {
+  const { agentRuntime, configuration } = platform();
+  signedIn();
+  const rendered = renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
+  await screen.findByRole("textbox", { name: "Message" });
+  return { ...rendered, agentRuntime };
+}
+
 describe("new chat", () => {
   it("offers the profiles that allow chats except workspace assistants' profiles, and every workspace with an assistant, and starts a chat with the one chosen", async () => {
     const { agentRuntime, configuration } = platform();
@@ -156,6 +167,85 @@ describe("new chat", () => {
     );
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Message" }).value).toBe("Hello");
     expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("starts the chat with Enter", async () => {
+    const { user, platform: running } = await openNewChat();
+
+    await user.type(newChatInput(), "Hello{Enter}");
+
+    await screen.findByRole("heading", { name: /^Chat / });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "Hello" });
+  });
+
+  it("starts the chat with Ctrl+Enter", async () => {
+    const { user, platform: running } = await openNewChat();
+
+    await user.type(newChatInput(), "Hello{Control>}{Enter}{/Control}");
+
+    await screen.findByRole("heading", { name: /^Chat / });
+    expect(posts(running.requests, "/chats")).toHaveLength(1);
+  });
+
+  it("inserts a line break with Shift+Enter instead of starting the chat", async () => {
+    const { user, platform: running } = await openNewChat();
+
+    await user.type(newChatInput(), "First{Shift>}{Enter}{/Shift}second");
+
+    expect(newChatInput().value).toBe("First\nsecond");
+    expect(posts(running.requests, "/chats")).toHaveLength(0);
+  });
+
+  it("does not start the chat with the Enter that ends an input method's composition", async () => {
+    const { user, platform: running } = await openNewChat();
+    await user.type(newChatInput(), "日本");
+
+    fireEvent.keyDown(newChatInput(), { key: "Enter", isComposing: true });
+    fireEvent.keyDown(newChatInput(), { key: "Enter", keyCode: 229 });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(posts(running.requests, "/chats")).toHaveLength(0);
+    expect(newChatInput().value).toBe("日本");
+  });
+
+  it("does not start a chat with an empty message, nor a second one while the first starts", async () => {
+    const { user, platform: running } = await openNewChat();
+
+    await user.type(newChatInput(), "   {Enter}");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(posts(running.requests, "/chats")).toHaveLength(0);
+
+    fireEvent.change(newChatInput(), { target: { value: "Hello" } });
+    fireEvent.keyDown(newChatInput(), { key: "Enter" });
+    fireEvent.keyDown(newChatInput(), { key: "Enter" });
+    await screen.findByRole("heading", { name: /^Chat / });
+    expect(posts(running.requests, "/chats")).toHaveLength(1);
+  });
+
+  it("says next to Start chat how Enter works, as the message's description", async () => {
+    await openNewChat();
+
+    expect(description(newChatInput())).toBe("Enter to send · Shift+Enter for a new line");
+  });
+
+  it("inserts a line break with Enter on a touch screen and starts the chat with the button, without the Enter hint", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", media: query }));
+    try {
+      const { user, platform: running } = await openNewChat();
+      expect(description(newChatInput())).toBe("");
+      expect(screen.queryByText(/Enter to send/)).toBeNull();
+
+      await user.type(newChatInput(), "First{Enter}second");
+      await vi.advanceTimersByTimeAsync(100);
+      expect(newChatInput().value).toBe("First\nsecond");
+      expect(posts(running.requests, "/chats")).toHaveLength(0);
+
+      await user.click(screen.getByRole("button", { name: "Start chat" }));
+      await screen.findByRole("heading", { name: /^Chat / });
+      expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ agent: "assistant", text: "First\nsecond" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("says so when no profile allows chats", async () => {
