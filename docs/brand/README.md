@@ -18,7 +18,7 @@ They match the web UI's accent colors (`apps/web/src/styles.css`).
 | --- | --- |
 | `mark.svg`, `mark-dark.svg` | the mark alone, on light or dark backgrounds |
 | `mark-mono.svg` | single color in `currentColor`, colored by CSS |
-| `logo-horizontal.svg`, `logo-horizontal-dark.svg` | mark with the wordmark, for websites and headers |
+| `logo-horizontal.svg`, `logo-horizontal-dark.svg` | mark with the wordmark on a transparent background, for light or dark pages (the repository README) |
 | `favicon.svg` | browser tab, 32 px and up |
 | `favicon-16.svg` | browser tab at 16 px, with less padding |
 | `app-icon.svg` | app icon with rounded corners (PWA 192/512) |
