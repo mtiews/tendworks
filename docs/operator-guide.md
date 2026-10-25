@@ -161,7 +161,7 @@ Running runs resume after either, and the worker takes up open chats again.
 | `COMPOSE_PROJECT_NAME` | `tendworks` | the installation name; change it only for a second stack on the same engine (with other ports) |
 | `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it unset |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
-| `TEND_WORKSPACE_ROOTS` | empty (no directory workspaces) | absolute host directory that directory workspaces must lie under ([directory workspaces](#directory-workspaces)) |
+| `TEND_WORKSPACE_ROOTS` | empty (no directory workspaces) | absolute host directory that directory workspaces must lie under ([Directory workspaces](#directory-workspaces)) |
 | `TEND_HEARTBEAT_URL` | empty (no heartbeat) | URL the server calls about every five minutes while the platform is healthy ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)) |
 
 `TEND_SANDBOX_IMAGES` and `TEND_INSTALLATION` are set by compose itself; don't set them.

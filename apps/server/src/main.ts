@@ -205,8 +205,10 @@ triggerGateway.start();
 // The control plane checks the components behind GET /status about every minute and publishes
 // platform.health-changed after two equal results in a row (ADR 0026); human interaction
 // turns it into platform.degraded or platform.recovered.
+// The one check behind GET /status that monitor and heartbeat share.
+const checkStatus = () => checkPlatform(probes, bundles, undefined);
 const platformMonitor = createPlatformMonitor({
-  check: () => checkPlatform(probes, bundles, undefined),
+  check: checkStatus,
   publisher: { publish: (event) => bus.publish(pool, event) },
   onError: (error) => console.error("platform health check failed:", error),
 });
@@ -216,7 +218,7 @@ platformMonitor.start();
 // so an external monitor alarms when it stops (ADR 0026). Unset: no heartbeat.
 const heartbeat = createHeartbeat({
   url: process.env.TEND_HEARTBEAT_URL,
-  check: () => checkPlatform(probes, bundles, undefined),
+  check: checkStatus,
   onError: (error) => console.error("heartbeat failed:", error),
 });
 heartbeat.start();
