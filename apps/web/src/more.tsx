@@ -40,7 +40,7 @@ export function MorePage({ signOut, showSignOut }: { signOut: () => void; showSi
       </fieldset>
       <section className="section" aria-labelledby="more-access">
         <h2 id="more-access">Access</h2>
-        <p>{canChange ? "Signed in with the API token: full access." : "Signed in with the read-only token: the UI only shows."}</p>
+        <p>{canChange ? "Signed in with the API token." : "Signed in with the read-only token: the UI only shows."}</p>
         {showSignOut && (
           <button type="button" onClick={signOut}>
             Sign out
