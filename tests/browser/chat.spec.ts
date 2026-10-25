@@ -70,6 +70,6 @@ test("a chat followed in two tabs is written from both, cancelled and ended", as
 
   // The ended chat sits in the list of ended chats, beside the chat on a desktop and after it on a phone.
   if (testInfo.project.name === "phone") await page.getByRole("link", { name: "Back" }).click();
-  await expect(page.getByRole("list", { name: "Ended" }).getByRole("link", { name: /chat: My name is Ada\./ })).toBeVisible();
+  await expect(page.getByRole("list", { name: "Ended" }).getByRole("link", { name: /chat: My name is Ada\./ }).first()).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
