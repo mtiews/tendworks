@@ -1,0 +1,56 @@
+$id: https://tendworks.dev/schemas/v1/events/platform-events.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: PlatformEvents
+description: >-
+  Events about the platform itself (ADR 0026), emitted by the control plane. Each `$defs`
+  entry is the complete schema of one event type: the envelope from cloudevent.schema.yaml
+  narrowed to its `type` and `data`. They belong to no run: they carry no `runid` and
+  `stepid` and name their aspect in `subject` (`platform/health`).
+$defs:
+  platformHealthChanged:
+    title: PlatformHealthChangedEvent
+    description: >-
+      The platform became unhealthy or healthy again. The control plane publishes it after
+      two equal check results in a row that differ from the last published state, so a
+      single failed check publishes nothing.
+    allOf:
+      - $ref: './cloudevent.schema.yaml'
+    type: object
+    required: [type, subject, data]
+    properties:
+      type:
+        const: dev.tendworks.platform.health-changed
+      data:
+        $ref: '#/$defs/platformHealthChangedData'
+  platformHealthChangedData:
+    title: PlatformHealthChangedEventData
+    type: object
+    additionalProperties: false
+    required: [status, components]
+    properties:
+      status:
+        type: string
+        enum: [healthy, unhealthy]
+        description: The platform's state now.
+      components:
+        type: array
+        description: >-
+          The affected components. For `unhealthy`: those that are unhealthy now. For
+          `healthy`: those that were unhealthy before and recovered.
+        items:
+          $ref: '#/$defs/affectedComponent'
+  affectedComponent:
+    title: AffectedComponent
+    type: object
+    additionalProperties: false
+    required: [name, status]
+    properties:
+      name:
+        type: string
+        description: Component name as in `GET /status`, e.g. `store` or `worker`.
+      status:
+        type: string
+        enum: [healthy, unhealthy]
+      message:
+        type: string
+        description: Why the component is unhealthy.

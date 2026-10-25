@@ -11,7 +11,7 @@ $defs:
     description: A message to the human that needs no decision, e.g. that a run finished or that an approval request waits.
     type: object
     additionalProperties: false
-    required: [id, kind, runId, title, createdAt, deliveries]
+    required: [id, kind, title, createdAt, deliveries]
     properties:
       id:
         type: string
@@ -20,7 +20,7 @@ $defs:
         $ref: '#/$defs/notificationKind'
       runId:
         type: string
-        description: Run the notification is about.
+        description: Run the notification is about; absent for a notification about the platform (`platform.degraded`, `platform.recovered`).
       title:
         type: string
         description: One line for the human, e.g. "Run 1f3c… of hello-agent completed".
@@ -52,7 +52,7 @@ $defs:
     title: NotificationKind
     description: What the notification is about.
     type: string
-    enum: [run.started, run.completed, run.failed, approval.requested]
+    enum: [run.started, run.completed, run.failed, approval.requested, platform.degraded, platform.recovered]
   delivery:
     title: ChannelDelivery
     description: Outcome of the latest attempt to deliver the notification through one channel.

@@ -18,7 +18,7 @@ create table human_interaction.notifications (
   id         text primary key,
   cause      text not null unique,
   kind       text not null,
-  run_id     text not null,
+  run_id     text,
   title      text not null,
   detail     text,
   artifacts  jsonb,
@@ -58,7 +58,7 @@ export function migrateHumanInteractionStore(pool: pg.Pool): Promise<{ from: num
 interface NotificationRow {
   id: string;
   kind: Notification["kind"];
-  run_id: string;
+  run_id: string | null;
   title: string;
   detail: string | null;
   artifacts: NonNullable<Notification["artifacts"]> | null;
@@ -77,7 +77,7 @@ export function createPostgresNotificationStore(pool: pg.Pool): NotificationStor
           notification.id,
           cause,
           notification.kind,
-          notification.runId,
+          notification.runId ?? null,
           notification.title,
           notification.detail ?? null,
           notification.artifacts === undefined ? null : JSON.stringify(notification.artifacts),
@@ -115,7 +115,7 @@ function toNotification(row: NotificationRow): Notification {
   return {
     id: row.id,
     kind: row.kind,
-    runId: row.run_id,
+    ...(row.run_id === null ? {} : { runId: row.run_id }),
     title: row.title,
     ...(row.detail === null ? {} : { detail: row.detail }),
     ...(row.artifacts === null ? {} : { artifacts: row.artifacts }),

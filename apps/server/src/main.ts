@@ -5,7 +5,9 @@ import {
   apiTokenProblems,
   ConfigurationError,
   createAgentRuntimeClient,
+  checkPlatform,
   createControlPlaneApi,
+  createPlatformMonitor,
   createOrchestrationClient,
   createStoppedControlPlaneApi,
   createStoreProbe,
@@ -173,9 +175,11 @@ try {
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 // The web UI's static build (ADR 0018): `pnpm build` puts it next to this bundle, in the image too.
 const webUiRoot = process.env.TEND_WEB_UI_DIR || fileURLToPath(new URL("../../web/dist/", import.meta.url));
+const probes = [createStoreProbe(databaseUrl)];
+const bundles = [{ name: "worker", baseUrl: workerUrl }];
 const api = createControlPlaneApi({
-  probes: [createStoreProbe(databaseUrl)],
-  bundles: [{ name: "worker", baseUrl: workerUrl }],
+  probes,
+  bundles,
   configuration,
   runs: orchestration,
   agentRuntime,
@@ -197,7 +201,18 @@ const port = Number(env("PORT", "8080"));
 const server = serve({ fetch: (request) => (new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : api.fetch(request)), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
+// The control plane checks the components behind GET /status about every minute and publishes
+// platform.health-changed after two equal results in a row (ADR 0026); human interaction
+// turns it into platform.degraded or platform.recovered.
+const platformMonitor = createPlatformMonitor({
+  check: () => checkPlatform(probes, bundles, undefined),
+  publisher: { publish: (event) => bus.publish(pool, event) },
+  onError: (error) => console.error("platform health check failed:", error),
+});
+platformMonitor.start();
+
 async function shutdown() {
+  platformMonitor.stop();
   await triggerGateway.stop();
   const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.

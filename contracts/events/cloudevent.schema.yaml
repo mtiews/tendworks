@@ -6,18 +6,19 @@ description: >-
   extension attributes `runid`, `stepid` and `traceparent` (W3C Trace Context, CloudEvents
   distributed tracing extension). Each event type narrows `type` and `data`. Events of a
   run carry `runid` (and `stepid` for a step); chat events (`dev.tendworks.chat.*`)
-  belong to no run, so they carry neither and name the chat in `subject` (`chats/<id>`).
+  belong to no run, so they carry neither and name the chat in `subject` (`chats/<id>`);
+  so do platform events (`dev.tendworks.platform.*`), which name `platform/<aspect>`.
 type: object
 required: [specversion, id, source, type, time, datacontenttype, traceparent, data]
 if:
   properties:
     type:
-      pattern: ^dev\.tendworks\.chat\.
+      pattern: ^dev\.tendworks\.(chat|platform)\.
 then:
   required: [subject]
   properties:
     subject:
-      pattern: ^chats/
+      pattern: ^(chats|platform)/
   not:
     anyOf:
       - required: [runid]

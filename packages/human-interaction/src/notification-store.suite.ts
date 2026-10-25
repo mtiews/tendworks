@@ -37,6 +37,13 @@ export function describeNotificationStore(name: string, setup: () => Promise<Not
       expect(await store.list()).toContainEqual(recorded);
     });
 
+    it("records a notification about the platform, which has no run", async () => {
+      const { runId: _, ...platformWide } = notification({ kind: "platform.degraded", title: "Platform degraded: worker" });
+
+      expect(await store.record(cause(), platformWide)).toEqual(platformWide);
+      expect(await store.list()).toContainEqual(platformWide);
+    });
+
     it("keeps the first notification when the same event is recorded again", async () => {
       const event = cause();
       const first = notification();

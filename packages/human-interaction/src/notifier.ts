@@ -1,8 +1,9 @@
-import type { ApprovalEvents, ControlPlane, RunEvents, Subscription } from "@tendworks/shared";
+import type { ApprovalEvents, ControlPlane, PlatformEvents, RunEvents, Subscription } from "@tendworks/shared";
 import type { Notification, NotificationDelivery } from "./notification-delivery.js";
 import type { NotificationStore } from "./notification-store.js";
 
-type NotifiedEvent = RunEvents.RunStartedEvent | RunEvents.RunCompletedEvent | RunEvents.RunFailedEvent | ApprovalEvents.ApprovalRequestedEvent;
+type RunNotifiedEvent = RunEvents.RunStartedEvent | RunEvents.RunCompletedEvent | RunEvents.RunFailedEvent | ApprovalEvents.ApprovalRequestedEvent;
+type NotifiedEvent = RunNotifiedEvent | PlatformEvents.PlatformHealthChangedEvent;
 export type NotificationKind = Notification["kind"];
 
 /** A configured notification channel: its name, its default priority, and how it delivers. It selects no events. */
@@ -53,10 +54,11 @@ export function createNotifier({ store, channels, subscriptions, runOf = async (
   const byName = new Map(channels.map((channel) => [channel.name, channel]));
   return {
     /** Event types the notifier consumes. */
-    types: ["dev.tendworks.run.started", "dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"],
+    types: ["dev.tendworks.run.started", "dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested", "dev.tendworks.platform.health-changed"],
 
     async handle(event: NotifiedEvent): Promise<void> {
-      const { workspace, origin } = await runOf(event.runid);
+      // A platform event belongs to no run, so to the platform scope.
+      const { workspace, origin } = event.type === "dev.tendworks.platform.health-changed" ? {} as NotifierRun : await runOf(event.runid);
       const fresh = toNotification(event, now().toISOString(), { workspace, origin });
       const priorities = matching(subscriptions, workspace, fresh.kind);
       const notification = await store.record(`${event.source} ${event.id}`, {
@@ -100,6 +102,19 @@ function matching(subscriptions: readonly NotifierSubscription[], workspace: str
 }
 
 function toNotification(event: NotifiedEvent, createdAt: string, run: NotifierRun): Notification {
+  if (event.type === "dev.tendworks.platform.health-changed") {
+    const { status, components } = event.data;
+    const names = components.map(({ name }) => name).join(", ");
+    const messages = components.flatMap(({ name, message }) => (message ? [`${name}: ${message}`] : [])).join("; ");
+    return {
+      id: crypto.randomUUID(),
+      createdAt,
+      deliveries: [],
+      kind: status === "unhealthy" ? "platform.degraded" : "platform.recovered",
+      title: `Platform ${status === "unhealthy" ? "degraded" : "recovered"}: ${names}`,
+      ...(messages ? { detail: messages } : {}),
+    };
+  }
   const base = { id: crypto.randomUUID(), runId: event.runid, createdAt, deliveries: [] };
   if (event.type === "dev.tendworks.approval.requested") {
     const { id, question, answers, links } = event.data;

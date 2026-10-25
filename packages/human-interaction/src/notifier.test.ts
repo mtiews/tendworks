@@ -1,4 +1,4 @@
-import type { RunEvents } from "@tendworks/shared";
+import type { PlatformEvents, RunEvents } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { approvalRequested } from "./approvals/approval-events.js";
 import type { ApprovalRequest } from "./approvals/approval-store.js";
@@ -89,8 +89,83 @@ function setup(
 const delivered = (channel: string) => ({ channel, status: "delivered", attemptedAt: "2026-10-18T10:00:03.000Z" });
 
 describe("notifier", () => {
-  it("subscribes to run.started, run.completed, run.failed and approval.requested", () => {
-    expect(setup().notifier.types).toEqual(["dev.tendworks.run.started", "dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"]);
+  it("subscribes to run.started, run.completed, run.failed, approval.requested and platform.health-changed", () => {
+    expect(setup().notifier.types).toEqual([
+      "dev.tendworks.run.started",
+      "dev.tendworks.run.completed",
+      "dev.tendworks.run.failed",
+      "dev.tendworks.approval.requested",
+      "dev.tendworks.platform.health-changed",
+    ]);
+  });
+
+  describe("platform.health-changed", () => {
+    const healthEvent = (id: string, data: PlatformEvents.PlatformHealthChangedEvent["data"]): PlatformEvents.PlatformHealthChangedEvent => ({
+      specversion: "1.0",
+      id,
+      source: "/tendworks/control-plane",
+      subject: "platform/health",
+      time: "2026-10-18T10:00:02.000Z",
+      datacontenttype: "application/json",
+      traceparent: envelope.traceparent,
+      type: "dev.tendworks.platform.health-changed",
+      data,
+    });
+    const degraded = healthEvent("health-changed:1", {
+      status: "unhealthy",
+      components: [
+        { name: "worker", status: "unhealthy", message: "connection refused" },
+        { name: "store", status: "unhealthy", message: "timeout" },
+      ],
+    });
+    const recovered = healthEvent("health-changed:2", { status: "healthy", components: [{ name: "worker", status: "healthy" }] });
+
+    it("turns an unhealthy platform into platform.degraded naming the components and their messages, and delivers it to the platform's subscribers", async () => {
+      const delivery = quiet();
+      const runOf = async () => {
+        throw new Error("a platform event belongs to no run");
+      };
+      const { store, notifier } = setup([{ name: "log", delivery }], [platform(["log"], ["platform.degraded", "platform.recovered"], 1)], runOf);
+
+      await notifier.handle(degraded);
+
+      const [notification] = await store.list();
+      expect(notification).toMatchObject({
+        kind: "platform.degraded",
+        title: "Platform degraded: worker, store",
+        detail: "worker: connection refused; store: timeout",
+        deliveries: [delivered("log")],
+      });
+      expect(notification).not.toHaveProperty("runId");
+      expect(delivery.delivered).toHaveLength(1);
+    });
+
+    it("turns a healthy platform into platform.recovered naming the components that recovered", async () => {
+      const { store, notifier } = setup([{ name: "log", delivery: quiet() }], [platform(["log"], ["platform.recovered"])]);
+
+      await notifier.handle(recovered);
+
+      expect((await store.list())[0]).toMatchObject({ kind: "platform.recovered", title: "Platform recovered: worker", deliveries: [delivered("log")] });
+    });
+
+    it("only lists the change when no platform subscription selects it, and never delivers it to a workspace's subscribers", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.failed"]), platform(["log"], ["platform.recovered"])]);
+
+      await notifier.handle(degraded);
+
+      expect((await store.list())[0]).toMatchObject({ kind: "platform.degraded", deliveries: [] });
+      expect(delivery.delivered).toEqual([]);
+    });
+
+    it("records a redelivered event once", async () => {
+      const { store, notifier } = setup([{ name: "log", delivery: quiet() }], [platform(["log"], ["platform.degraded"])]);
+
+      await notifier.handle(degraded);
+      await notifier.handle(degraded);
+
+      expect(await store.list()).toHaveLength(1);
+    });
   });
 
   describe("run.started", () => {

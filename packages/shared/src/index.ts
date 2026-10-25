@@ -5,6 +5,7 @@ export type * as ApprovalEvents from "./generated/approval-events.js";
 export type * as ApprovalRequest from "./generated/approval-request.js";
 export type * as Chat from "./generated/chat.js";
 export type * as ChatEvents from "./generated/chat-events.js";
+export type * as PlatformEvents from "./generated/platform-events.js";
 export type * as ControlPlane from "./generated/control-plane.js";
 export type * as Health from "./generated/health.js";
 export type * as NotificationChannel from "./generated/notification-channel.js";

@@ -1036,7 +1036,7 @@ function formatNotificationList(list: NotificationList): string {
     ...list.items.map((n) => [
       n.createdAt,
       n.kind,
-      n.runId,
+      n.runId ?? "-",
       n.artifacts?.[0]?.url ?? "-",
       n.deliveries.map(({ channel, status }) => `${channel} ${status}`).join(", ") || "no channel",
       n.title,

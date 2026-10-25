@@ -23,6 +23,7 @@ export {
   type DecisionOutcome,
 } from "./approvals.js";
 export { ConfigurationError, emptyConfiguration, loadConfiguration, type Configuration } from "./configuration.js";
+export { createPlatformMonitor, type PlatformEventPublisher, type PlatformHealthChangedEvent, type PlatformMonitor, type PlatformMonitorOptions } from "./platform-monitor.js";
 export type { Notification, NotificationsPort } from "./notifications.js";
 export {
   createInMemoryRuns,
@@ -34,5 +35,6 @@ export {
 } from "./runs.js";
 export { createInMemoryTriggers, createTriggerGatewayClient, type Trigger, type TriggersPort } from "./triggers.js";
 export type { ComponentStatus, HealthProbe, PlatformStatus, RuntimeBundle } from "./status.js";
+export { checkPlatform } from "./status.js";
 export { createStoppedControlPlaneApi, type StoppedControlPlaneApiOptions } from "./stopped.js";
 export type { WebUiOptions } from "./web-ui.js";

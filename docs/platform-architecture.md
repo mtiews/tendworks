@@ -128,11 +128,12 @@ From the start, the model is built as "steps that consume and produce artifacts,
 - `agent.input_required` — agent needs an answer
 - `approval.requested`, `approval.decided`, `approval.expired`
 - `chat.started`, `chat.ended` — a human started or ended a chat (ADR 0015 (a-chat-is-an-a2a-task-without-a-run)); no output of the agent
+- `platform.health-changed` — the platform became unhealthy or healthy again (ADR 0026): the control plane checks the components behind `/status` about every minute, including the worker's, and publishes after two equal results in a row that differ from the last published state; `data` names the affected components with status and message. Human interaction turns it into the notifications `platform.degraded` and `platform.recovered`.
 - `artifact.created`
 - `sandbox.created`, `sandbox.snapshotted`, `sandbox.destroyed`
 - `config.change_proposed`, `config.change_applied`
 
-Every event of a run carries `runid` (and `stepid` for a step) as CloudEvents extension attributes plus the W3C `traceparent`. This lets events, logs and traces of a run be joined without knowing their producers. A chat belongs to no run: its events carry neither `runid` nor `stepid`, name the chat in the CloudEvents `subject` (`chats/<chatId>`) and share the trace the chat started.
+Every event of a run carries `runid` (and `stepid` for a step) as CloudEvents extension attributes plus the W3C `traceparent`. This lets events, logs and traces of a run be joined without knowing their producers. A chat belongs to no run: its events carry neither `runid` nor `stepid`, name the chat in the CloudEvents `subject` (`chats/<chatId>`) and share the trace the chat started. Platform events (`platform.*`) belong to no run either and name their aspect in `subject` (`platform/health`).
 
 **Additions from the factory validation**
 
