@@ -44,11 +44,11 @@ describe("desktop shell", () => {
     expect(navigation.querySelectorAll("[aria-current]")).toHaveLength(1);
   });
 
-  it("marks the section of a detail view and of the pages behind More", async () => {
+  it("marks the section of a detail view and of the inbox tabs", async () => {
     signedIn();
     renderApp({ path: "/ui/subscriptions" });
 
-    expect(await screen.findByRole("link", { name: "More", current: "page" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Inbox", current: "page" })).toBeTruthy();
   });
 
   it("badges Runs with the pending approval requests and Inbox with notifications that failed to deliver", async () => {

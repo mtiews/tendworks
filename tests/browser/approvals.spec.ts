@@ -39,11 +39,10 @@ test("a run waiting on its human step continues after answering in the browser",
   await page.getByRole("tab", { name: "Output" }).click();
   await expect(page.getByRole("table", { name: "Output" })).toContainText("followedUp");
 
-  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "More" }).click();
-  await page.getByRole("link", { name: "Approval requests" }).click();
-  const row = page.getByRole("row").filter({ hasText: runId });
-  await expect(row).toContainText("decided");
-  await expect(row).toContainText("Merged – continue");
-  await expect(row.getByRole("button")).toHaveCount(0);
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Inbox" }).click();
+  await page.getByRole("navigation", { name: "Inbox" }).getByRole("link", { name: "Approval requests" }).click();
+  const card = page.getByRole("listitem").filter({ hasText: runId });
+  await expect(card).toContainText("Merged – continue");
+  await expect(card.getByRole("button")).toHaveCount(0);
   await expectNoHorizontalScroll(page);
 });

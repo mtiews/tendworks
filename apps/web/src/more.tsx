@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useApi } from "./api.js";
-import { Link } from "./router.js";
 import { chooseStartPage, startPage, type StartPage } from "./start-page.js";
 
 /** The sections without a place in the tabs, the start page choice, the access scope and sign-out. */
@@ -15,17 +14,6 @@ export function MorePage({ signOut, showSignOut }: { signOut: () => void; showSi
   return (
     <>
       <h1>More</h1>
-      <section className="section" aria-labelledby="more-sections">
-        <h2 id="more-sections">Sections</h2>
-        <ul className="link-list">
-          <li>
-            <Link to="/subscriptions">Subscriptions</Link>
-          </li>
-          <li>
-            <Link to="/approval-requests">Approval requests</Link>
-          </li>
-        </ul>
-      </section>
       <fieldset className="section choice">
         <legend>Start page</legend>
         <label className="checkbox">

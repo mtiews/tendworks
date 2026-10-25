@@ -53,7 +53,7 @@ describe("status page: platform health", () => {
     ]);
     const overview = screen.getByRole("region", { name: "Overview" });
     expect(await within(overview).findByRole("link", { name: "2 active runs" })).toBeTruthy();
-    expect(within(overview).getByRole("link", { name: "1 pending approval request" }).getAttribute("href")).toBe("/ui/approval-requests");
+    expect(within(overview).getByRole("link", { name: "1 pending approval request" }).getAttribute("href")).toBe("/ui/runs");
   });
 
   it("says which numbers are unknown when runs and approval requests cannot be read", async () => {

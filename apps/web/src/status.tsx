@@ -48,7 +48,7 @@ export function StatusPage() {
             ) : pending === undefined ? (
               "Pending approval requests unknown: approval requests cannot be read."
             ) : (
-              <Link to="/approval-requests">{count(pending, "pending approval request")}</Link>
+              <Link to="/runs">{count(pending, "pending approval request")}</Link>
             )}
           </li>
         </ul>

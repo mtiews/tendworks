@@ -44,8 +44,8 @@ export const routes: readonly Route[] = [
   { pattern: "/chats/new", title: "New chat", section: "chats", back: "/chats", wide: true, render: (_, { phone }) => <ChatWorkbench creating phone={phone} /> },
   { pattern: "/chats/:chatId", title: "Chat", section: "chats", back: "/chats", wide: true, render: ({ chatId = "" }, { phone }) => <ChatWorkbench chatId={chatId} phone={phone} /> },
   { pattern: "/notifications", title: "Notifications", section: "inbox", render: () => <NotificationsPage /> },
-  { pattern: "/subscriptions", title: "Subscriptions", section: "more", back: "/more", render: () => <SubscriptionsPage /> },
-  { pattern: "/approval-requests", title: "Approval requests", section: "more", back: "/more", render: () => <ApprovalRequestsPage /> },
+  { pattern: "/subscriptions", title: "Subscriptions", section: "inbox", render: () => <SubscriptionsPage /> },
+  { pattern: "/approval-requests", title: "Approval requests", section: "inbox", render: () => <ApprovalRequestsPage /> },
 ];
 
 /** The route for `path` with its parameters, or `undefined` for a path the UI does not know. `/` shows the chosen start page. */

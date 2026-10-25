@@ -411,7 +411,7 @@ The platform merges nothing; `develop-issue` ends with the pull request, and you
 
 - `action` is a name of your choice that policies decide on; `question`, `links` and the answer labels may be expressions.
 - An answer with `outcome: continue` goes on with the next task; `stop` ends the workflow there, and the run completes.
-- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI on the run itself (Runs, where runs waiting for you come first under "Needs you"; on a phone the question sits at the bottom of the screen), or under More → Approval requests. The `approval.requested` notification tells you a request waits.
+- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI on the run itself (Runs, where runs waiting for you come first under "Needs you"; on a phone the question sits at the bottom of the screen), and see the decided ones under Inbox → Approval requests. The `approval.requested` notification tells you a request waits.
 
 A **policy** decides per action and workflow whether the step asks (`ask`) or proceeds at once without a request (`allow`):
 

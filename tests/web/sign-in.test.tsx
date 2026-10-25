@@ -156,7 +156,7 @@ describe("the app shell", () => {
 
     await user.click(await screen.findByRole("link", { name: "Inbox" }));
 
-    expect(screen.getByRole("heading", { name: "Notifications" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
     expect(window.location.pathname).toBe("/ui/notifications");
     expect(screen.getByRole("link", { name: "Inbox" }).getAttribute("aria-current")).toBe("page");
     expect(document.title).toBe("Notifications · Tendworks");
@@ -167,7 +167,7 @@ describe("the app shell", () => {
     await signIn(user, API_TOKEN);
     await screen.findByText("Full access");
 
-    for (const [entry, heading] of [["Runs", "Runs"], ["Inbox", "Notifications"], ["Chats", "Chats"], ["Overview", "Status"]] as const) {
+    for (const [entry, heading] of [["Runs", "Runs"], ["Inbox", "Inbox"], ["Chats", "Chats"], ["Overview", "Status"]] as const) {
       await user.click(screen.getByRole("link", { name: entry }));
       expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
     }
