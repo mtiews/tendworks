@@ -292,6 +292,10 @@ Implemented (spec #71, tickets #73–#81); acceptance on the operator's host (#8
 
 The end-to-end suite covers a git workspace on a local bare repository, a directory workspace, a schedule tick through `fake-develop-issue` to an artifact and its notifications, a schedule binding over two workspaces, the human step across a restart and a read-only workspace chat that cannot push. Manual, on the operator's host: a real repository through the `github-issues` trigger, the Pushover message, a scheduled run of `check-workspace` and a read-only workspace assistant (operator guide, First test workloads 3–6).
 
+## Notifications as subscriptions (milestone 4)
+
+Implemented (spec #87, tickets #89–#94); acceptance on the operator's host (#95) is pending, then `v0.4.0` is tagged with `docs/releases/v0.4.0.md`. Subscription matching and the notifier live in `packages/human-interaction/src/notifier.ts`, the periodic health check (debounced, publishing `platform.health-changed`) in `packages/control-plane/src/platform-monitor.ts`, the heartbeat in `packages/control-plane/src/heartbeat.ts`; clients: `tend subscription list`, `GET /subscriptions`, the web UI's Subscriptions page. Operator docs: operator guide, Notifications and Heartbeat. `v0.4.0` needs a fresh installation (`human_interaction.notifications.run_id` became nullable in place).
+
 ## Quality gates
 
 | Gate | Where | Enforced by |
@@ -319,3 +323,5 @@ The end-to-end suite covers a git workspace on a local bare repository, a direct
 - [x] Milestone 2 accepted on the operator's Ubuntu host (#66), tagged `v0.2.0`
 - [x] Milestone 3 implemented (spec #71, tickets #73–#81)
 - [ ] Milestone 3 accepted on the operator's host (#82), then tag `v0.3.0`
+- [x] Milestone 4 implemented (spec #87, tickets #89–#94)
+- [ ] Milestone 4 accepted on the operator's host (#95), then tag `v0.4.0`

@@ -852,3 +852,12 @@ Milestone 3 is accepted on the operator's Ubuntu host by following only this gui
 | 6 | A workspace assistant with `write: false` | [First test workloads](#first-test-workloads), 6, on your workspace | it answers about the repository from its files; the push fails; no branch appears on GitHub |
 | 7 | Nothing left behind | after all runs and chats ended: `docker ps -a --filter label=dev.tendworks.sandbox`, `docker volume ls --filter label=dev.tendworks.volume`; `scripts/check-github-agent-access.sh --repo OWNER/NAME --audit 30` | no sandbox or session volume without a live task or open chat; `sandbox-cleanup` healthy; no direct pushes to `main` |
 | 8 | Release | tag `v0.3.0` on the accepted commit | the tag's [release notes](releases/v0.3.0.md) match what was accepted |
+
+Milestone 4 (issue #87, `v0.4.0`) is accepted on the same host with these checks, recorded in its acceptance ticket (#95):
+
+| # | Check | How | Passes when |
+| --- | --- | --- | --- |
+| M4-1 | Start and completion pushes | subscribe a workspace ([Notifications](#notifications): run started silent, completed normal) and start a run there ([Pushover on your phone](#pushover-on-your-phone)) | the phone shows a start message that opens the trigger's issue and a completion message that opens the pull request; `tend notification list` shows `phone delivered` for both |
+| M4-2 | Degraded, then recovered | subscribe the platform (`subscription-platform.yaml.example`), `docker compose -f deploy/compose.yaml stop worker`, wait about three minutes, start it again | a `platform.degraded` message naming the worker, then `platform.recovered` |
+| M4-3 | Heartbeat | set `TEND_HEARTBEAT_URL` ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)), then `stop server` | the monitor shows the pings and alarms after its grace time |
+| M4-4 | Release | tag `v0.4.0` on the accepted commit | the tag's [release notes](releases/v0.4.0.md) match what was accepted |
