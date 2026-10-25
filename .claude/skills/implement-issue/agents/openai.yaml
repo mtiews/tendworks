@@ -1,0 +1,5 @@
+interface:
+  display_name: "Implement Issue"
+  short_description: "Work one ticket of a spec unattended, then hand over the next."
+policy:
+  allow_implicit_invocation: false

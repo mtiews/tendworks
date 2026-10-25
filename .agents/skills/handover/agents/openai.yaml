@@ -1,0 +1,5 @@
+interface:
+  display_name: "Handover"
+  short_description: "Hand a finished spec to the agent, starting with its first ticket."
+policy:
+  allow_implicit_invocation: false

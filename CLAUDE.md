@@ -96,7 +96,11 @@ Issues live in GitHub Issues on `mtiews/tendworks` (via `gh` CLI). See `docs/age
 
 ### Triage labels
 
-Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+`needs-triage`, `needs-info`, `specified` (the skills' `ready-for-agent` role), `ready-for-human`, `wontfix`. The literal `ready-for-agent` label is the agent trigger; only the handover rule sets it. See `docs/agents/triage-labels.md`.
+
+### Agent workflow
+
+Specs are worked by Tendworks itself: `/handover <spec>` queues the first ticket, the trigger runs `/implement-issue <ticket>` in a sandbox, and each run hands over the next ticket on the spec's branch and pull request. See `docs/agents/agent-workflow.md`.
 
 ### Domain docs
 
