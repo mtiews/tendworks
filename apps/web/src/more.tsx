@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useApi } from "./api.js";
 import { usePlatformStatus } from "./platform-status.js";
+import { Link } from "./router.js";
 import { Pending } from "./pending.js";
 import { Time } from "./time.js";
 import { chooseStartPage, startPage, type StartPage } from "./start-page.js";
@@ -30,6 +31,14 @@ export function MorePage({ signOut, showSignOut }: { signOut: () => void; showSi
         </label>
         <p className="muted">Where the UI opens in this browser.</p>
       </fieldset>
+      <nav aria-label="Configuration" className="section">
+        <ul className="more-links">
+          <li><Link to="/triggers">Triggers</Link></li>
+          <li><Link to="/agents">Agents</Link></li>
+          <li><Link to="/workspaces">Workspaces</Link></li>
+          <li><Link to="/subscriptions">Subscriptions</Link></li>
+        </ul>
+      </nav>
       <section className="section" aria-labelledby="more-health">
         <h2 id="more-health">Platform health</h2>
         {status.data === undefined ? (

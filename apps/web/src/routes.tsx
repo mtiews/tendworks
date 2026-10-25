@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { AgentsPage } from "./agents.js";
 import { ApprovalRequestsPage } from "./approvals.js";
 import { ChatWorkbench } from "./chats.js";
 import { NotificationsPage } from "./notifications.js";
@@ -8,6 +9,8 @@ import { RunWorkbench } from "./runs.js";
 import { startPage } from "./start-page.js";
 import { OverviewPage } from "./overview.js";
 import { SubscriptionsPage } from "./subscriptions.js";
+import { TriggersPage } from "./triggers.js";
+import { WorkspacesPage } from "./workspaces.js";
 
 /*
  * The views of the UI and their paths below /ui (ADR 0027). `section` is the navigation
@@ -15,7 +18,7 @@ import { SubscriptionsPage } from "./subscriptions.js";
  * "/" is not a view: it shows the start page (see `resolve`).
  */
 
-export type Section = "overview" | "runs" | "chats" | "inbox" | "more";
+export type Section = "overview" | "runs" | "chats" | "inbox" | "triggers" | "agents" | "workspaces" | "more";
 
 /** What the shell lends to the views that need it. */
 export interface ShellActions {
@@ -45,6 +48,9 @@ export const routes: readonly Route[] = [
   { pattern: "/chats/:chatId", title: "Chat", section: "chats", back: "/chats", wide: true, render: ({ chatId = "" }, { phone }) => <ChatWorkbench chatId={chatId} phone={phone} /> },
   { pattern: "/notifications", title: "Notifications", section: "inbox", render: () => <NotificationsPage /> },
   { pattern: "/subscriptions", title: "Subscriptions", section: "inbox", render: () => <SubscriptionsPage /> },
+  { pattern: "/triggers", title: "Triggers", section: "triggers", back: "/more", render: (_, { phone }) => <TriggersPage phone={phone} /> },
+  { pattern: "/agents", title: "Agents", section: "agents", back: "/more", render: () => <AgentsPage /> },
+  { pattern: "/workspaces", title: "Workspaces", section: "workspaces", back: "/more", render: () => <WorkspacesPage /> },
   { pattern: "/approval-requests", title: "Approval requests", section: "inbox", render: () => <ApprovalRequestsPage /> },
 ];
 

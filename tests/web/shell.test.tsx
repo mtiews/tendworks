@@ -32,13 +32,13 @@ afterEach(() => {
 });
 
 describe("desktop shell", () => {
-  it("has one main navigation with the brand mark, the five sections and sign-out, marking the current section", async () => {
+  it("has one main navigation with the brand mark, the sections and sign-out, marking the current section", async () => {
     signedIn();
     renderApp({ path: "/ui/runs" });
 
     const navigation = await screen.findByRole("navigation", { name: "Main" });
     expect(screen.getByRole("link", { name: "Tendworks" })).toBeTruthy();
-    for (const name of ["Overview", "Runs", "Chats", "Inbox", "More"]) expect(screen.getByRole("link", { name })).toBeTruthy();
+    for (const name of ["Overview", "Runs", "Chats", "Inbox", "Triggers", "Agents", "Workspaces", "More"]) expect(screen.getByRole("link", { name })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Runs", current: "page" })).toBeTruthy();
     expect(navigation.querySelectorAll("[aria-current]")).toHaveLength(1);

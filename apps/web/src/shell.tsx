@@ -13,14 +13,19 @@ interface Entry {
   to: string;
   label: string;
   icon: IconName;
+  /** Not a tab of the phone: its pages are reached through More. */
+  desktopOnly?: true;
 }
 
-/* The same five places on the desktop rail and the phone's bottom tabs; "More" holds the rest. */
+/* The same five places on the desktop rail and the phone's bottom tabs; "More" holds the rest, which the rail also lists. */
 const ENTRIES: readonly Entry[] = [
   { section: "overview", to: "/overview", label: "Overview", icon: "overview" },
   { section: "runs", to: "/runs", label: "Runs", icon: "runs" },
   { section: "chats", to: "/chats", label: "Chats", icon: "chats" },
   { section: "inbox", to: "/notifications", label: "Inbox", icon: "inbox" },
+  { section: "triggers", to: "/triggers", label: "Triggers", icon: "triggers", desktopOnly: true },
+  { section: "agents", to: "/agents", label: "Agents", icon: "agents", desktopOnly: true },
+  { section: "workspaces", to: "/workspaces", label: "Workspaces", icon: "workspaces", desktopOnly: true },
   { section: "more", to: "/more", label: "More", icon: "more" },
 ];
 
@@ -88,11 +93,11 @@ function Navigation({ phone, section, badges, signOut }: { phone: boolean; secti
           <BrandMark size={34} />
         </Link>
       )}
-      {ENTRIES.map((entry) => {
+      {ENTRIES.filter((entry) => !phone || !entry.desktopOnly).map((entry) => {
         const badge = badgeOf(entry);
         const describedBy = badge ? `badge-${entry.section}` : undefined;
         return (
-          <Link key={entry.section} to={entry.to} current={section === entry.section} label={entry.label} describedBy={describedBy} className="nav-entry">
+          <Link key={entry.section} to={entry.to} current={section === entry.section || (phone && entry.section === "more" && (section === "triggers" || section === "agents" || section === "workspaces"))} label={entry.label} describedBy={describedBy} className="nav-entry">
             <Icon name={entry.icon} />
             {phone && <span className="nav-label" aria-hidden="true">{entry.label}</span>}
             {badge && (

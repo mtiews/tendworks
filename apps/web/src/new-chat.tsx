@@ -43,7 +43,11 @@ export function NewChat() {
       return [...profiles, ...assistants];
     }, [client]),
   );
-  const [picked, setPicked] = useState("");
+  // A workspace suggested by the link that opened the form (the workspaces page).
+  const [picked, setPicked] = useState(() => {
+    const workspace = new URLSearchParams(window.location.search).get("workspace");
+    return workspace === null ? "" : `workspace:${workspace}`;
+  });
   // A first message suggested by the link that opened the form, e.g. "Ask the platform assistant" on a failed run.
   const [text, setText] = useState(() => new URLSearchParams(window.location.search).get("text") ?? "");
   const [starting, setStarting] = useState(false);
