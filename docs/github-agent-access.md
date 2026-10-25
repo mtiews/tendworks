@@ -17,11 +17,11 @@ A setup needs exactly two kinds of token, both fine-grained personal access toke
 | Token | Used by | Where it lives | Can |
 | --- | --- | --- | --- |
 | **Issues token** `TENDWORKS_PLATFORM_GITHUB_TOKEN`, one per setup | the `github-issues` trigger (`token` of the binding) | server only, never a sandbox | read issues |
-| **Agent token**, one per workspace, e.g. `TENDWORKS_AGENT_GITHUB_TOKEN` | the workspace (`spec.credentials` of its `Workspace`) | worker and the sandboxes of that workspace's tasks, never the server | push branches, open pull requests |
+| **Agent token**, one per workspace, e.g. `TENDWORKS_AGENT_PLAYGROUND_TOKEN` | the workspace (`spec.credentials` of its `Workspace`) | worker and the sandboxes of that workspace's tasks, never the server | push branches, open pull requests |
 
 The trigger never uses an agent token, and agents never see the issues token.
 
-### 1. Agent token per workspace (`TENDWORKS_AGENT_GITHUB_TOKEN`)
+### 1. Agent token per workspace (`TENDWORKS_AGENT_PLAYGROUND_TOKEN`)
 
 GitHub → Settings → Developer settings → Fine-grained tokens → Generate new token:
 
@@ -85,7 +85,7 @@ Closing the gap fully needs a second identity (a machine user with a classic tok
 
 ## Verify
 
-`scripts/check-github-agent-access.sh` checks an agent token. Run it against a test repository first. It reads `TENDWORKS_AGENT_GITHUB_TOKEN` from `--env-file` or from the environment and never prints it; for a workspace with another agent token, pass that one in the environment: `TENDWORKS_AGENT_GITHUB_TOKEN="$(grep '^TENDWORKS_AGENT_MYAPP_TOKEN=' deploy/.env | cut -d= -f2-)" scripts/check-github-agent-access.sh --repo OWNER/NAME`. The issues token needs no check: it can only read issues.
+`scripts/check-github-agent-access.sh` checks an agent token. Run it against a test repository first. It reads the variable named by `--token-var` (default `TENDWORKS_AGENT_PLAYGROUND_TOKEN`, the playground workspace's agent token; only `TENDWORKS_AGENT_*` names) from `--env-file` or from the environment and never prints it. For another workspace, name its agent token: `--token-var TENDWORKS_AGENT_MYAPP_TOKEN`. The issues token needs no check: it can only read issues.
 
 ```bash
 scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env                # read-only checks

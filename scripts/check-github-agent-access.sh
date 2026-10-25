@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2015 # pass, fail and echo always return 0, so `A && B || C` is safe
-# Checks what the agent token (TENDWORKS_AGENT_GITHUB_TOKEN) can do on a GitHub repository.
+# Checks what a workspace's agent token can do on a GitHub repository.
 # Setup and expected results: docs/github-agent-access.md.
 #
-# Usage: scripts/check-github-agent-access.sh --repo OWNER/NAME [--env-file PATH]
-#          [--write-tests [--test-main]] [--audit N]
+# Usage: scripts/check-github-agent-access.sh --repo OWNER/NAME [--token-var NAME]
+#          [--env-file PATH] [--write-tests [--test-main]] [--audit N]
 #
-#   --env-file     read TENDWORKS_AGENT_GITHUB_TOKEN from this file (e.g. deploy/.env);
+#   --token-var    the variable holding the agent token, a TENDWORKS_AGENT_* name
+#                  (default TENDWORKS_AGENT_PLAYGROUND_TOKEN, the playground workspace's)
+#   --env-file     read that variable from this file (e.g. deploy/.env);
 #                  otherwise from the environment. Nothing else in the file is read.
 #   --write-tests  push test branches and open a draft pull request, then clean up
 #   --test-main    with --write-tests: try to push to main (only for repositories with a
@@ -17,25 +19,27 @@
 # environment variables only; it is never printed. Exit code 1 if any check fails.
 set -euo pipefail
 
-REPO="" ENV_FILE="" WRITE=0 TEST_MAIN=0 AUDIT=0
+REPO="" TOKEN_VAR=TENDWORKS_AGENT_PLAYGROUND_TOKEN ENV_FILE="" WRITE=0 TEST_MAIN=0 AUDIT=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) REPO=${2:?--repo needs OWNER/NAME}; shift 2 ;;
+    --token-var) TOKEN_VAR=${2:?--token-var needs a variable name}; shift 2 ;;
     --env-file) ENV_FILE=${2:?--env-file needs a path}; shift 2 ;;
     --write-tests) WRITE=1; shift ;;
     --test-main) TEST_MAIN=1; shift ;;
     --audit) AUDIT=${2:?--audit needs a number}; shift 2 ;;
-    -h | --help) sed -n '3,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '3,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "unknown argument: $1 (see --help)" >&2; exit 2 ;;
   esac
 done
 [ -n "$REPO" ] || { echo "--repo OWNER/NAME is required" >&2; exit 2; }
+[[ "$TOKEN_VAR" =~ ^TENDWORKS_AGENT_[A-Z0-9_]+$ ]] || { echo "--token-var must be a TENDWORKS_AGENT_* name, got: $TOKEN_VAR" >&2; exit 2; }
 
-TOKEN="${TENDWORKS_AGENT_GITHUB_TOKEN:-}"
+TOKEN="${!TOKEN_VAR:-}"
 if [ -n "$ENV_FILE" ]; then
-  TOKEN=$(sed -n 's/^TENDWORKS_AGENT_GITHUB_TOKEN=//p' "$ENV_FILE" | tail -1 | tr -d '\r"'"'")
+  TOKEN=$(sed -n "s/^$TOKEN_VAR=//p" "$ENV_FILE" | tail -1 | tr -d '\r"'"'")
 fi
-[ -n "$TOKEN" ] || { echo "no TENDWORKS_AGENT_GITHUB_TOKEN found" >&2; exit 2; }
+[ -n "$TOKEN" ] || { echo "no $TOKEN_VAR found" >&2; exit 2; }
 export GH_TOKEN="$TOKEN" AGENT_GIT_TOKEN="$TOKEN"
 
 FAILS=0

@@ -203,7 +203,7 @@ describe("loadConfiguration", () => {
     const dir = folder({
       "workflows/build.sw.yaml": workflow("build"),
       "agents/developer.md": agent("developer", "harness: fake\n  env: { GH_TOKEN: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
-      "triggers/github.yaml": github("TENDWORKS_AGENT_GITHUB_TOKEN"),
+      "triggers/github.yaml": github("TENDWORKS_AGENT_PLAYGROUND_TOKEN"),
     });
 
     expect(issuesOf(dir)).toEqual([
@@ -468,7 +468,7 @@ do:
     ]);
     expect(starter.notificationChannels).toEqual([]);
     expect(starter.policies).toEqual([]);
-    expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_GITHUB_TOKEN"]]);
+    expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_PLAYGROUND_TOKEN"]]);
   });
 
   it("ships a Pushover channel template that loads once renamed, with both credentials as platform secrets", () => {
