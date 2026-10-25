@@ -38,7 +38,7 @@ export function Age({ value, now }: { value: string; now: number }) {
 export function ApprovalRequestsPage() {
   const { client } = useApi();
   const requests = usePolling(
-    useCallback(async () => (await answer(client.GET("/approval-requests", { params: { query: { status: "decided" } } }))).items.filter((request) => request.status === "decided"), [client]),
+    useCallback(async () => (await answer(client.GET("/approval-requests", { params: { query: { status: "decided" } } }))).items, [client]),
   );
 
   return (
