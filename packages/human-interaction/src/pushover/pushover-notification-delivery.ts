@@ -17,20 +17,19 @@ export interface PushoverCredentials {
 export interface PushoverNotificationDeliveryOptions {
   /** Resolved at each delivery; throws when a secret is missing, which fails that delivery. */
   credentials: () => PushoverCredentials;
-  /** Message priority, -2 to 1; Pushover's default (0) when absent. */
-  priority?: number;
   fetch?: typeof fetch;
 }
 
 /**
- * Delivers notifications as Pushover messages (ADR 0025): the title as title, the detail
+ * Delivers notifications as Pushover messages (ADR 0025): with the priority the notifier
+ * resolved (Pushover's default, 0, without), the title as title, the detail
  * and the artifacts as message, the first artifact as the message's link, the time the
  * notification was recorded as the message's time. A message Pushover refuses (4xx)
  * rejects with its errors; Pushover asks not to repeat such a request unchanged.
  */
-export function createPushoverNotificationDelivery({ credentials, priority, fetch = globalThis.fetch }: PushoverNotificationDeliveryOptions): NotificationDelivery {
+export function createPushoverNotificationDelivery({ credentials, fetch = globalThis.fetch }: PushoverNotificationDeliveryOptions): NotificationDelivery {
   return {
-    async deliver(notification) {
+    async deliver(notification, { priority } = {}) {
       const { token, user } = credentials();
       const response = await fetch(MESSAGES_URL, {
         method: "POST",

@@ -1,0 +1,17 @@
+# Template of a project's subscription (ADR 0026): the playground workspace's events go to
+# the phone channel (phone.yaml.example). A project's subscriptions apply to everyone working
+# on it. Rename to subscription-playground.yaml to use it; the loader refuses an unknown
+# workspace or channel, an event the workspace does not have, and empty lists.
+#
+# Events of a workspace: run.started, run.completed, run.failed, approval.requested. Every
+# event is listed by `tend notification list`; only subscribed ones are delivered. Where
+# several subscriptions match, a channel gets one message with the highest priority.
+apiVersion: tendworks.dev/v1
+kind: Subscription
+metadata:
+  name: playground
+spec:
+  scope: { workspace: playground }
+  events: [run.completed, run.failed, approval.requested]
+  channels: [phone]
+  priority: 0   # -2 (no alert) to 1 (high); without it the channel's default applies

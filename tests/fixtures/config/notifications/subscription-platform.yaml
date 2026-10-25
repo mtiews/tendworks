@@ -1,0 +1,10 @@
+apiVersion: tendworks.dev/v1
+kind: Subscription
+metadata:
+  name: platform-log
+spec:
+  # Runs without a workspace (started with `POST /runs`, as the end-to-end tests do) belong to the platform scope.
+  scope: { platform: {} }
+  events: [run.started, run.completed, run.failed, approval.requested, platform.degraded, platform.recovered]
+  channels: [fake-log]
+  priority: 1

@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -100,7 +100,7 @@ describe("loadConfiguration", () => {
     const issues = issuesOf(dir);
 
     expect(issues[0]).toBe("agents/plain.md: missing YAML frontmatter");
-    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, NotificationChannel, Policy, SandboxTemplate, TriggerBinding, Workspace)");
+    expect(issues[1]).toBe("triggers/x.yaml: unknown kind 'Gizmo' (known: AgentProfile, NotificationChannel, Policy, SandboxTemplate, Subscription, TriggerBinding, Workspace)");
     expect(issues[2]).toMatch(/^workflows\/broken\.sw\.yaml: invalid YAML: /);
   });
 
@@ -234,54 +234,51 @@ describe("loadConfiguration", () => {
     ]);
   });
 
-  it("loads notification channels with the events they select, ordered by name", () => {
+  it("loads notification channels, which hold only how someone is reached, ordered by name", () => {
     const dir = folder({
       "notifications/phone.yaml": `apiVersion: tendworks.dev/v1
 kind: NotificationChannel
 metadata: { name: phone }
 spec:
   integration: pushover
-  events: [run.failed, approval.requested]
+  priority: 1
   pushover:
     token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
     user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
-    priority: 1
 `,
-      "notifications/log.yaml": "apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: log }\nspec: { integration: fake, events: [run.completed] }\n",
+      "notifications/log.yaml": "apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: log }\nspec: { integration: fake }\n",
     });
 
     expect(loadConfiguration(dir).notificationChannels.map(({ metadata, spec }) => [metadata.name, spec])).toEqual([
-      ["log", { integration: "fake", events: ["run.completed"] }],
+      ["log", { integration: "fake" }],
       [
         "phone",
         {
           integration: "pushover",
-          events: ["run.failed", "approval.requested"],
+          priority: 1,
           pushover: {
             token: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_TOKEN" } },
             user: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_USER" } },
-            priority: 1,
           },
         },
       ],
     ]);
   });
 
-  it("rejects a notification channel without its settings, with plain or agent secrets, unknown events and duplicates", () => {
+  it("rejects a notification channel without its settings, with plain or agent secrets, events of its own, a priority out of range and duplicates", () => {
     const channel = (name: string, spec: string) => `apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: ${name} }\nspec: ${spec}\n`;
     const dir = folder({
-      "notifications/a.yaml": channel("log", "{ integration: fake, events: [run.completed] }"),
-      "notifications/b.yaml": channel("log", "{ integration: fake, events: [run.failed] }"),
-      "notifications/c.yaml": channel("bare", "{ integration: pushover, events: [run.failed] }"),
+      "notifications/a.yaml": channel("log", "{ integration: fake }"),
+      "notifications/b.yaml": channel("log", "{ integration: fake }"),
+      "notifications/c.yaml": channel("bare", "{ integration: pushover }"),
       "notifications/d.yaml": channel(
         "leaky",
-        "{ integration: pushover, events: [run.failed], pushover: { token: plaintext, user: { secretRef: { name: TENDWORKS_AGENT_PUSHOVER_USER } } } }",
+        "{ integration: pushover, pushover: { token: plaintext, user: { secretRef: { name: TENDWORKS_AGENT_PUSHOVER_USER } } } }",
       ),
-      "notifications/e.yaml": channel("noisy", "{ integration: fake, events: [step.started] }"),
-      "notifications/f.yaml": channel("silent", "{ integration: fake, events: [] }"),
-      "notifications/g.yaml": channel(
+      "notifications/e.yaml": channel("selective", "{ integration: fake, events: [run.completed] }"),
+      "notifications/f.yaml": channel(
         "emergency",
-        "{ integration: pushover, events: [run.failed], pushover: { token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }, user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }, priority: 2 } }",
+        "{ integration: pushover, priority: 2, pushover: { token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }, user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } } } }",
       ),
     });
 
@@ -290,10 +287,60 @@ spec:
       "notifications/c.yaml: /spec: must have required property 'pushover'",
       "notifications/d.yaml: /spec/pushover/token: must be object",
       `notifications/d.yaml: /spec/pushover/user/secretRef/name: must match pattern "^TENDWORKS_PLATFORM_[A-Z0-9_]+$"`,
-      "notifications/e.yaml: /spec/events/0: must be equal to one of the allowed values (approval.requested, run.failed, run.completed)",
-      "notifications/f.yaml: /spec/events: must NOT have fewer than 1 items",
-      "notifications/g.yaml: /spec/pushover/priority: must be <= 1",
+      "notifications/e.yaml: /spec: unsupported property 'events'",
+      "notifications/f.yaml: /spec/priority: must be <= 1",
     ]);
+  });
+
+  describe("subscriptions", () => {
+    const subscription = (name: string, spec: string) => `apiVersion: tendworks.dev/v1\nkind: Subscription\nmetadata: { name: ${name} }\nspec: ${spec}\n`;
+    const workspace = (name: string) => `apiVersion: tendworks.dev/v1\nkind: Workspace\nmetadata: { name: ${name} }\nspec: { git: { url: "https://git.example/acme/${name}.git", defaultBranch: main } }\n`;
+    const channel = (name: string) => `apiVersion: tendworks.dev/v1\nkind: NotificationChannel\nmetadata: { name: ${name} }\nspec: { integration: fake }\n`;
+    const base = { "workspaces/app.yaml": workspace("app"), "notifications/phone.yaml": channel("phone"), "notifications/log.yaml": channel("log") };
+
+    it("loads subscriptions of a workspace and of the platform, ordered by name", () => {
+      const dir = folder({
+        ...base,
+        "projects/app/subscriptions.yaml": subscription("app-failures", "{ scope: { workspace: app }, events: [run.failed, approval.requested], channels: [phone, log], priority: 1 }"),
+        "platform/subscriptions/health.yaml": subscription("a-platform", "{ scope: { platform: {} }, events: [platform.degraded, platform.recovered, run.completed], channels: [phone] }"),
+      });
+
+      expect(loadConfiguration(dir).subscriptions.map(({ metadata, spec }) => [metadata.name, spec])).toEqual([
+        ["a-platform", { scope: { platform: {} }, events: ["platform.degraded", "platform.recovered", "run.completed"], channels: ["phone"] }],
+        ["app-failures", { scope: { workspace: "app" }, events: ["run.failed", "approval.requested"], channels: ["phone", "log"], priority: 1 }],
+      ]);
+    });
+
+    it("refuses an unknown workspace or channel, an event outside the scope, empty lists, both or no scope, a priority out of range and duplicates", () => {
+      const dir = folder({
+        ...base,
+        "s/a.yaml": subscription("dup", "{ scope: { workspace: app }, events: [run.failed], channels: [phone] }"),
+        "s/b.yaml": subscription("dup", "{ scope: { workspace: app }, events: [run.failed], channels: [phone] }"),
+        "s/c.yaml": subscription("lost", "{ scope: { workspace: nowhere }, events: [run.failed], channels: [phone] }"),
+        "s/d.yaml": subscription("mute", "{ scope: { workspace: app }, events: [run.failed], channels: [pager] }"),
+        "s/e.yaml": subscription("health-in-project", "{ scope: { workspace: app }, events: [platform.degraded], channels: [phone] }"),
+        "s/f.yaml": subscription("no-events", "{ scope: { workspace: app }, events: [], channels: [phone] }"),
+        "s/g.yaml": subscription("no-channels", "{ scope: { workspace: app }, events: [run.failed], channels: [] }"),
+        "s/h.yaml": subscription("both", "{ scope: { workspace: app, platform: {} }, events: [run.failed], channels: [phone] }"),
+        "s/i.yaml": subscription("neither", "{ scope: {}, events: [run.failed], channels: [phone] }"),
+        "s/j.yaml": subscription("unknown-event", "{ scope: { platform: {} }, events: [step.started], channels: [phone] }"),
+        "s/k.yaml": subscription("emergency", "{ scope: { platform: {} }, events: [platform.degraded], channels: [phone], priority: 2 }"),
+      });
+
+      const issues = issuesOf(dir);
+      expect(issues).toContain("s/b.yaml: subscription 'dup' is already defined in s/a.yaml");
+      expect(issues).toContain("s/c.yaml: subscription 'lost' is for workspace 'nowhere', but no workspace 'nowhere' is configured");
+      expect(issues).toContain("s/d.yaml: subscription 'mute' sends to channel 'pager', but no notification channel 'pager' is configured");
+      expect(issues).toContain(
+        "s/e.yaml: subscription 'health-in-project' selects event 'platform.degraded', which the workspace scope does not have (it has: run.started, run.completed, run.failed, approval.requested)",
+      );
+      expect(issues).toContain("s/f.yaml: /spec/events: must NOT have fewer than 1 items");
+      expect(issues).toContain("s/g.yaml: /spec/channels: must NOT have fewer than 1 items");
+      expect(issues.filter((issue) => issue.startsWith("s/h.yaml"))).not.toEqual([]);
+      expect(issues.filter((issue) => issue.startsWith("s/i.yaml"))).not.toEqual([]);
+      expect(issues.some((issue) => issue.startsWith("s/j.yaml: /spec/events/0: must be equal to one of the allowed values"))).toBe(true);
+      expect(issues).toContain("s/k.yaml: /spec/priority: must be <= 1");
+    });
   });
 
   it("rejects a policy for a workflow that is not configured, so a typo cannot loosen a human step", () => {
@@ -467,6 +514,7 @@ do:
       ["playground-ready-for-agent", ["github-issues"], ["playground"]],
     ]);
     expect(starter.notificationChannels).toEqual([]);
+    expect(starter.subscriptions).toEqual([]);
     expect(starter.policies).toEqual([]);
     expect(starter.workspaces.map((workspace) => [workspace.metadata.name, workspace.spec.credentials?.secretRef.name])).toEqual([["playground", "TENDWORKS_AGENT_PLAYGROUND_TOKEN"]]);
   });
@@ -479,13 +527,28 @@ do:
 
     const channels = loadConfiguration(dir).notificationChannels;
 
-    expect(channels.map((channel) => [channel.metadata.name, channel.spec.integration, channel.spec.events])).toEqual([
-      ["phone", "pushover", ["approval.requested", "run.failed", "run.completed"]],
-    ]);
+    expect(channels.map((channel) => [channel.metadata.name, channel.spec.integration])).toEqual([["phone", "pushover"]]);
     expect(channels[0]?.spec.pushover).toEqual({
       token: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_TOKEN" } },
       user: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_USER" } },
     });
+  });
+
+  it("ships subscription templates that load once renamed, for the playground and the platform, next to the channel", () => {
+    const examples = fileURLToPath(new URL("../../../examples/config", import.meta.url));
+    const dir = mkdtempSync(join(tmpdir(), "tend-config-"));
+    cpSync(examples, dir, { recursive: true });
+    for (const template of readdirSync(join(dir, "notifications")).filter((file) => file.endsWith(".example"))) {
+      copyFileSync(join(dir, "notifications", template), join(dir, "notifications", template.replace(/\.example$/, "")));
+    }
+
+    const subscriptions = loadConfiguration(dir).subscriptions;
+
+    expect(subscriptions.map(({ metadata, spec }) => [metadata.name, spec.scope, spec.channels])).toEqual([
+      ["platform-health", { platform: {} }, ["phone"]],
+      ["playground", { workspace: "playground" }, ["phone"]],
+    ]);
+    expect(loadConfiguration(examples).subscriptions).toEqual([]);
   });
 
   it("ships a read-only workspace assistant: a chat profile without the platform MCP server, enabled on the playground without writing", () => {

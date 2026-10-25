@@ -4,7 +4,7 @@ Tendworks (short: Tend) is a self-hosted, use-case-neutral agent platform. Agent
 
 ## Current state
 
-The walking skeleton is done up to milestone 1c, milestone 2 is released as `v0.2.0`, and milestone 3 is implemented (acceptance on Ubuntu pending, then `v0.3.0`):
+The walking skeleton is done up to milestone 1c, milestone 2 is released as `v0.2.0`, and milestone 3 is implemented (acceptance on Ubuntu pending, then `v0.3.0`), and milestone 4 is implemented (acceptance pending, then `v0.4.0`):
 
 | Milestone | What works |
 | --- | --- |
@@ -13,6 +13,7 @@ The walking skeleton is done up to milestone 1c, milestone 2 is released as `v0.
 | 1c: web UI | single-page app under `/ui/`: status, runs with live transcripts, approvals, notifications, chats; localhost only, signed in with an API token |
 | 2: single-host deployment on Linux | install from a release tag on Ubuntu 24.04 with Docker Engine: no default tokens, restart after reboot, schema migrations, backup and restore scripts, sandboxes per installation with orphan clean-up, the platform MCP server through an MCP-only gateway, access from your devices through a TLS layer such as Tailscale ([release notes](docs/releases/v0.2.0.md)) |
 | 3: generic platform | workspaces declared once by name (a git repository on any host with its own agent token, or a host directory under an allowed root); trigger bindings that start a workflow per workspace on a schedule or for labelled GitHub issues; agents open pull requests and report them as artifacts, the platform merges nothing; a human step with custom answers and policies; notifications to your phone through Pushover with a tap to the pull request; the platform assistant and read-only workspace assistants (`tend chat --workspace <name>`) ([release notes](docs/releases/v0.3.0.md)) |
+| 4: notifications as subscriptions | notification channels only say how you are reached; subscriptions send a project's or the platform's events (run started, completed, failed, approval requested, platform degraded, recovered) to them with a priority; a heartbeat URL lets an external monitor alarm when the platform is down ([release notes](docs/releases/v0.4.0.md)) |
 
 There is no identity (OIDC), no TLS inside the platform, no egress control and no Action Gateway yet. The stack is meant for one operator on one host.
 

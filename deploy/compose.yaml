@@ -133,6 +133,9 @@ services:
       TEND_API_READ_TOKEN: ${TEND_API_READ_TOKEN:-}
       # Directory workspaces must lie under this root (ADR 0022); the server refuses others at startup.
       TEND_WORKSPACE_ROOTS: ${TEND_WORKSPACE_ROOTS:-}
+      # Heartbeat (ADR 0026): while the platform is healthy, the server calls this URL about
+      # every five minutes. Unset: no heartbeat.
+      TEND_HEARTBEAT_URL: ${TEND_HEARTBEAT_URL:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
       - *workspace-root

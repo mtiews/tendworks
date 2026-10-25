@@ -21,6 +21,7 @@ describe("signing in", () => {
       ["Runs", "/ui/runs"],
       ["Approval requests", "/ui/approval-requests"],
       ["Notifications", "/ui/notifications"],
+      ["Subscriptions", "/ui/subscriptions"],
       ["Chats", "/ui/chats"],
     ]);
   });

@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { createAgentRuntime, createInMemoryTaskStore } from "@tendworks/agent-runtime";
-import { loadConfiguration } from "@tendworks/control-plane";
+import { createPlatformMonitor, loadConfiguration, type PlatformHealthChangedEvent } from "@tendworks/control-plane";
 import { createApprovals, createInMemoryApprovalStore } from "@tendworks/human-interaction";
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor } from "@tendworks/orchestration";
 import { createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway } from "@tendworks/trigger-gateway";
@@ -139,6 +139,31 @@ describe("events the domains emit", () => {
   });
 });
 
+describe("events the control plane emits", () => {
+  it("platform.health-changed for a degraded and a recovered platform, without a run", async () => {
+    const published: PlatformHealthChangedEvent[] = [];
+    let status: "healthy" | "unhealthy" = "unhealthy";
+    const monitor = createPlatformMonitor({
+      check: async () => ({
+        status,
+        components: [status === "healthy" ? { name: "worker", status } : { name: "worker", status, message: "connection refused" }],
+        checkedAt: new Date().toISOString(),
+      }),
+      publisher: { publish: async (event) => void published.push(event) },
+    });
+
+    await monitor.tick();
+    await monitor.tick();
+    status = "healthy";
+    await monitor.tick();
+    await monitor.tick();
+
+    expect(published.map((event) => event.data.status)).toEqual(["unhealthy", "healthy"]);
+    expect(published.every((event) => !("runid" in event) && event.subject === "platform/health")).toBe(true);
+    expectValid(published);
+  });
+});
+
 describe("the event envelope", () => {
   const envelope = contractSchema("events/cloudevent.schema.yaml");
   const base = {
@@ -157,5 +182,8 @@ describe("the event envelope", () => {
     expect(envelope({ ...base, type: "dev.tendworks.chat.started", subject: "chats/c-1" })).toBe(true);
     expect(envelope({ ...base, type: "dev.tendworks.chat.started" })).toBe(false);
     expect(envelope({ ...base, type: "dev.tendworks.chat.started", subject: "chats/c-1", runid: "r-1" })).toBe(false);
+    expect(envelope({ ...base, type: "dev.tendworks.platform.health-changed", subject: "platform/health" })).toBe(true);
+    expect(envelope({ ...base, type: "dev.tendworks.platform.health-changed" })).toBe(false);
+    expect(envelope({ ...base, type: "dev.tendworks.platform.health-changed", subject: "platform/health", runid: "r-1" })).toBe(false);
   });
 });

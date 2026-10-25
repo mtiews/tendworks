@@ -17,31 +17,30 @@ const channel = (name: string, spec: NotificationChannel.NotificationChannelSpec
 
 const phone = channel("phone", {
   integration: "pushover",
-  events: ["run.failed"],
+  priority: 1,
   pushover: {
     token: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_TOKEN" } },
     user: { secretRef: { name: "TENDWORKS_PLATFORM_PUSHOVER_USER" } },
-    priority: 1,
   },
 });
 
 describe("notification channels from configuration", () => {
-  it("names each channel with the kinds it selects", () => {
-    const channels = notifierChannelsFor([channel("log", { integration: "fake", events: ["run.completed", "approval.requested"] }), phone], {
+  it("names each channel with its default priority, if it has one", () => {
+    const channels = notifierChannelsFor([channel("log", { integration: "fake" }), phone], {
       secrets: createSecretResolver("platform", {}),
       log: () => {},
     });
 
-    expect(channels.map(({ name, events }) => [name, events])).toEqual([
-      ["log", ["run.completed", "approval.requested"]],
-      ["phone", ["run.failed"]],
+    expect(channels.map(({ name, priority }) => [name, priority])).toEqual([
+      ["log", undefined],
+      ["phone", 1],
     ]);
   });
 
   it("delivers through the fake channel to the log, or refuses when told to", async () => {
     const lines: string[] = [];
     const [log, refusing] = notifierChannelsFor(
-      [channel("log", { integration: "fake", events: ["run.completed"] }), channel("refusing", { integration: "fake", events: ["run.completed"], fake: { refuse: true } })],
+      [channel("log", { integration: "fake" }), channel("refusing", { integration: "fake", fake: { refuse: true } })],
       { secrets: createSecretResolver("platform", {}), log: (line) => lines.push(line) },
     );
 
@@ -51,14 +50,14 @@ describe("notification channels from configuration", () => {
     await expect(refusing!.delivery.deliver(SUITE_NOTIFICATION)).rejects.toThrow(/refuses/);
   });
 
-  it("sends Pushover messages with the platform secrets and priority the channel names", async () => {
+  it("sends Pushover messages with the platform secrets and the priority it is given", async () => {
     const api = stubPushoverApi({ token: TOKEN, user: USER });
     const [pushover] = notifierChannelsFor([phone], {
       secrets: createSecretResolver("platform", { TENDWORKS_PLATFORM_PUSHOVER_TOKEN: TOKEN, TENDWORKS_PLATFORM_PUSHOVER_USER: USER }),
       fetch: api,
     });
 
-    await pushover!.delivery.deliver(SUITE_NOTIFICATION);
+    await pushover!.delivery.deliver(SUITE_NOTIFICATION, { priority: 1 });
 
     expect(api.messages).toEqual([expect.objectContaining({ token: TOKEN, user: USER, priority: 1, url: "https://git.example/acme/app/pull/7" })]);
   });

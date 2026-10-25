@@ -5,7 +5,10 @@ import {
   apiTokenProblems,
   ConfigurationError,
   createAgentRuntimeClient,
+  checkPlatform,
   createControlPlaneApi,
+  createHeartbeat,
+  createPlatformMonitor,
   createOrchestrationClient,
   createStoppedControlPlaneApi,
   createStoreProbe,
@@ -106,19 +109,35 @@ await migrateOrStop(
   },
 );
 
-// Human interaction: run outcomes and approval requests from the event bus become
-// notifications, recorded before each configured notification channel that selects them
-// delivers them (ADR 0025). Channels resolve their platform secrets at each delivery.
 const notifications = createPostgresNotificationStore(pool);
-const notifier = createNotifier({ store: notifications, channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }) });
-console.log(
-  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration}: ${spec.events.join(", ")})`).join("; ") || "none"}`,
-);
 const bus = createPostgresEventBus({ pool });
-bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
 
 const workerUrl = env("TEND_WORKER_URL");
 const orchestration = createOrchestrationClient({ baseUrl: workerUrl });
+
+// Human interaction: run outcomes and approval requests from the event bus become
+// notifications, recorded before the subscriptions of their scope (the run's workspace, else the
+// platform) deliver them to channels (ADR 0025, 0026). Channels resolve their platform secrets at
+// each delivery. The workspace of a run is orchestration's record of it, a trigger's workspace
+// or else the first workspace a step handed to its agent.
+const notifier = createNotifier({
+  store: notifications,
+  channels: notifierChannelsFor(configuration.notificationChannels, { secrets: platformSecrets }),
+  subscriptions: configuration.subscriptions.map(({ spec }) => spec),
+  runOf: async (runId) => {
+    const run = await orchestration.get(runId);
+    const origin = run?.startedBy;
+    return { workspace: (origin?.kind === "trigger" ? origin.workspace : undefined) ?? run?.steps.find((step) => step.workspace)?.workspace?.name, origin };
+  },
+});
+console.log(
+  `configuration: notification channels ${configuration.notificationChannels.map(({ metadata, spec }) => `${metadata.name} (${spec.integration})`).join("; ") || "none"}`,
+);
+console.log(
+  `configuration: subscriptions ${configuration.subscriptions.map(({ metadata, spec }) => `${metadata.name} (${"workspace" in spec.scope ? `workspace ${spec.scope.workspace}` : "platform"}: ${spec.events.join(", ")} to ${spec.channels.join(", ")})`).join("; ") || "none"}`,
+);
+bus.subscribe("human-interaction.notifications", notifier.handle.bind(notifier), { types: notifier.types });
+
 // The agent runtime runs in the worker too; transcripts are read through its internal API.
 const agentRuntime = createAgentRuntimeClient({ baseUrl: workerUrl });
 
@@ -157,9 +176,11 @@ try {
 const triggerGatewayApi = createTriggerGatewayApi(triggerGateway);
 // The web UI's static build (ADR 0018): `pnpm build` puts it next to this bundle, in the image too.
 const webUiRoot = process.env.TEND_WEB_UI_DIR || fileURLToPath(new URL("../../web/dist/", import.meta.url));
+const probes = [createStoreProbe(databaseUrl)];
+const bundles = [{ name: "worker", baseUrl: workerUrl }];
 const api = createControlPlaneApi({
-  probes: [createStoreProbe(databaseUrl)],
-  bundles: [{ name: "worker", baseUrl: workerUrl }],
+  probes,
+  bundles,
   configuration,
   runs: orchestration,
   agentRuntime,
@@ -181,7 +202,30 @@ const port = Number(env("PORT", "8080"));
 const server = serve({ fetch: (request) => (new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : api.fetch(request)), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
+// The control plane checks the components behind GET /status about every minute and publishes
+// platform.health-changed after two equal results in a row (ADR 0026); human interaction
+// turns it into platform.degraded or platform.recovered.
+// The one check behind GET /status that monitor and heartbeat share.
+const checkStatus = () => checkPlatform(probes, bundles, undefined);
+const platformMonitor = createPlatformMonitor({
+  check: checkStatus,
+  publisher: { publish: (event) => bus.publish(pool, event) },
+  onError: (error) => console.error("platform health check failed:", error),
+});
+platformMonitor.start();
+
+// While GET /status is healthy, the server calls TEND_HEARTBEAT_URL about every five minutes,
+// so an external monitor alarms when it stops (ADR 0026). Unset: no heartbeat.
+const heartbeat = createHeartbeat({
+  url: process.env.TEND_HEARTBEAT_URL,
+  check: checkStatus,
+  onError: (error) => console.error("heartbeat failed:", error),
+});
+heartbeat.start();
+
 async function shutdown() {
+  platformMonitor.stop();
+  heartbeat.stop();
   await triggerGateway.stop();
   const closed = new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   // Followed transcripts keep connections open; their clients reconnect with Last-Event-ID.

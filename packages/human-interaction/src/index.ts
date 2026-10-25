@@ -23,7 +23,7 @@ export {
   type NotificationDelivery,
 } from "./notification-delivery.js";
 export { createInMemoryNotificationStore, type Delivery, type NotificationStore } from "./notification-store.js";
-export { createNotifier, type NotificationKind, type NotifierChannel, type NotifierOptions } from "./notifier.js";
+export { createNotifier, type NotificationKind, type NotifierChannel, type NotifierOptions, type NotifierSubscription } from "./notifier.js";
 export {
   createPushoverNotificationDelivery,
   type PushoverCredentials,

@@ -1,10 +1,10 @@
-import type { RunEvents } from "@tendworks/shared";
+import type { PlatformEvents, RunEvents } from "@tendworks/shared";
 import { describe, expect, it } from "vitest";
 import { approvalRequested } from "./approvals/approval-events.js";
 import type { ApprovalRequest } from "./approvals/approval-store.js";
 import { createFakeNotificationDelivery, type Notification, type NotificationDelivery } from "./notification-delivery.js";
 import { createInMemoryNotificationStore } from "./notification-store.js";
-import { createNotifier, type NotifierChannel } from "./notifier.js";
+import { createNotifier, type NotifierChannel, type NotifierRun, type NotifierSubscription } from "./notifier.js";
 
 const envelope = {
   specversion: "1.0" as const,
@@ -59,25 +59,169 @@ const request: ApprovalRequest = {
   createdAt: "2026-10-18T10:00:02.000Z",
 };
 
-const EVERYTHING = ["approval.requested", "run.failed", "run.completed"] as const;
+const EVERYTHING: NotifierSubscription["events"] = ["approval.requested", "run.failed", "run.completed"];
 const quiet = (options: { refuse?: boolean } = {}) => createFakeNotificationDelivery({ ...options, log: () => {} });
 
-function setup(channels: NotifierChannel[] = [{ name: "log", events: EVERYTHING, delivery: quiet() }]) {
+/** A subscription of the platform scope (runs without a workspace) to the given channels. */
+const platform = (channels: NotifierSubscription["channels"], events: NotifierSubscription["events"] = EVERYTHING, priority?: number): NotifierSubscription => ({
+  scope: { platform: {} },
+  events,
+  channels,
+  ...(priority === undefined ? {} : { priority }),
+});
+const project = (workspace: string, channels: NotifierSubscription["channels"], events: NotifierSubscription["events"] = EVERYTHING, priority?: number): NotifierSubscription => ({
+  scope: { workspace },
+  events,
+  channels,
+  ...(priority === undefined ? {} : { priority }),
+});
+
+function setup(
+  channels: NotifierChannel[] = [{ name: "log", delivery: quiet() }],
+  subscriptions: NotifierSubscription[] = channels.map(({ name }) => platform([name])),
+  runOf?: (runId: string) => Promise<NotifierRun>,
+) {
   const store = createInMemoryNotificationStore();
-  const notifier = createNotifier({ store, channels, now: () => new Date("2026-10-18T10:00:03.000Z") });
+  const notifier = createNotifier({ store, channels, subscriptions, ...(runOf ? { runOf } : {}), now: () => new Date("2026-10-18T10:00:03.000Z") });
   return { store, notifier };
 }
 
 const delivered = (channel: string) => ({ channel, status: "delivered", attemptedAt: "2026-10-18T10:00:03.000Z" });
 
 describe("notifier", () => {
-  it("subscribes to run.completed, run.failed and approval.requested", () => {
-    expect(setup().notifier.types).toEqual(["dev.tendworks.run.completed", "dev.tendworks.run.failed", "dev.tendworks.approval.requested"]);
+  it("subscribes to run.started, run.completed, run.failed, approval.requested and platform.health-changed", () => {
+    expect(setup().notifier.types).toEqual([
+      "dev.tendworks.run.started",
+      "dev.tendworks.run.completed",
+      "dev.tendworks.run.failed",
+      "dev.tendworks.approval.requested",
+      "dev.tendworks.platform.health-changed",
+    ]);
+  });
+
+  describe("platform.health-changed", () => {
+    const healthEvent = (id: string, data: PlatformEvents.PlatformHealthChangedEvent["data"]): PlatformEvents.PlatformHealthChangedEvent => ({
+      specversion: "1.0",
+      id,
+      source: "/tendworks/control-plane",
+      subject: "platform/health",
+      time: "2026-10-18T10:00:02.000Z",
+      datacontenttype: "application/json",
+      traceparent: envelope.traceparent,
+      type: "dev.tendworks.platform.health-changed",
+      data,
+    });
+    const degraded = healthEvent("health-changed:1", {
+      status: "unhealthy",
+      components: [
+        { name: "worker", status: "unhealthy", message: "connection refused" },
+        { name: "store", status: "unhealthy", message: "timeout" },
+      ],
+    });
+    const recovered = healthEvent("health-changed:2", { status: "healthy", components: [{ name: "worker", status: "healthy" }] });
+
+    it("turns an unhealthy platform into platform.degraded naming the components and their messages, and delivers it to the platform's subscribers", async () => {
+      const delivery = quiet();
+      const runOf = async () => {
+        throw new Error("a platform event belongs to no run");
+      };
+      const { store, notifier } = setup([{ name: "log", delivery }], [platform(["log"], ["platform.degraded", "platform.recovered"], 1)], runOf);
+
+      await notifier.handle(degraded);
+
+      const [notification] = await store.list();
+      expect(notification).toMatchObject({
+        kind: "platform.degraded",
+        title: "Platform degraded: worker, store",
+        detail: "worker: connection refused; store: timeout",
+        deliveries: [delivered("log")],
+      });
+      expect(notification).not.toHaveProperty("runId");
+      expect(delivery.delivered).toHaveLength(1);
+    });
+
+    it("turns a healthy platform into platform.recovered naming the components that recovered", async () => {
+      const { store, notifier } = setup([{ name: "log", delivery: quiet() }], [platform(["log"], ["platform.recovered"])]);
+
+      await notifier.handle(recovered);
+
+      expect((await store.list())[0]).toMatchObject({ kind: "platform.recovered", title: "Platform recovered: worker", deliveries: [delivered("log")] });
+    });
+
+    it("only lists the change when no platform subscription selects it, and never delivers it to a workspace's subscribers", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.failed"]), platform(["log"], ["platform.recovered"])]);
+
+      await notifier.handle(degraded);
+
+      expect((await store.list())[0]).toMatchObject({ kind: "platform.degraded", deliveries: [] });
+      expect(delivery.delivered).toEqual([]);
+    });
+
+    it("records a redelivered event once", async () => {
+      const { store, notifier } = setup([{ name: "log", delivery: quiet() }], [platform(["log"], ["platform.degraded"])]);
+
+      await notifier.handle(degraded);
+      await notifier.handle(degraded);
+
+      expect(await store.list()).toHaveLength(1);
+    });
+  });
+
+  describe("run.started", () => {
+    const started: RunEvents.RunStartedEvent = { ...envelope, id: "run-1:run.started", type: "dev.tendworks.run.started", data: { workflow: "develop-issue" } };
+    const issue = { kind: "trigger" as const, binding: "ready-issues", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://git.example/acme/app/issues/7" } };
+
+    it("names the workflow, the workspace and the origin's title, and links the origin", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.started"])], async () => ({ workspace: "app", origin: issue }));
+
+      await notifier.handle(started);
+
+      const [notification] = await store.list();
+      expect(notification).toMatchObject({
+        kind: "run.started",
+        runId: "run-1",
+        title: "Run run-1 of develop-issue started",
+        detail: "Workspace: app. Started by: Fix the login (acme/app#7)",
+        artifacts: [{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
+        deliveries: [delivered("log")],
+      });
+      expect(delivery.delivered).toHaveLength(1);
+    });
+
+    it("says that a manual run was started manually, and links nothing", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { kind: "manual" } }));
+
+      await notifier.handle(started);
+
+      const [notification] = await store.list();
+      expect(notification?.detail).toBe("Started by: manual");
+      expect(notification).not.toHaveProperty("artifacts");
+    });
+
+    it("links nothing when the origin has no link", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { ...issue, item: { key: issue.item.key, title: issue.item.title } } }));
+
+      await notifier.handle(started);
+
+      expect((await store.list())[0]).not.toHaveProperty("artifacts");
+    });
+
+    it("only lists a start nobody subscribed to", async () => {
+      const delivery = quiet();
+      const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.completed"])], async () => ({ workspace: "app", origin: issue }));
+
+      await notifier.handle(started);
+
+      expect(await store.list()).toEqual([expect.objectContaining({ kind: "run.started", deliveries: [] })]);
+      expect(delivery.delivered).toEqual([]);
+    });
   });
 
   it("records a completed run's notification with the artifacts its steps reported, and delivers it", async () => {
     const delivery = quiet();
-    const { store, notifier } = setup([{ name: "log", events: ["run.completed"], delivery }]);
+    const { store, notifier } = setup([{ name: "log", delivery }], [platform(["log"], ["run.completed"])]);
 
     await notifier.handle(completed);
 
@@ -141,15 +285,18 @@ describe("notifier", () => {
     ]);
   });
 
-  it("delivers to every channel that selects the notification's kind, and only to those", async () => {
+  it("delivers to every channel a matching subscription names, and only to those", async () => {
     const phone = quiet();
     const pager = quiet();
     const log = quiet();
-    const { store, notifier } = setup([
-      { name: "phone", events: ["run.failed", "approval.requested"], delivery: phone },
-      { name: "pager", events: ["run.failed"], delivery: pager },
-      { name: "log", events: ["run.completed"], delivery: log },
-    ]);
+    const { store, notifier } = setup(
+      [
+        { name: "phone", delivery: phone },
+        { name: "pager", delivery: pager },
+        { name: "log", delivery: log },
+      ],
+      [platform(["phone"], ["run.failed", "approval.requested"]), platform(["pager"], ["run.failed"]), platform(["log"], ["run.completed"])],
+    );
 
     await notifier.handle(failed);
     await notifier.handle(approvalRequested(request, request.createdAt));
@@ -160,12 +307,111 @@ describe("notifier", () => {
     expect([phone.delivered.length, pager.delivered.length, log.delivered.length]).toEqual([2, 1, 0]);
   });
 
-  it("records a notification no channel selects, with no deliveries", async () => {
-    const { store, notifier } = setup([{ name: "log", events: ["run.failed"], delivery: quiet() }]);
+  it("delivers a workspace's events through that workspace's subscriptions only", async () => {
+    const mine = quiet();
+    const theirs = quiet();
+    const health = quiet();
+    const { store, notifier } = setup(
+      [
+        { name: "mine", delivery: mine },
+        { name: "theirs", delivery: theirs },
+        { name: "health", delivery: health },
+      ],
+      [project("app", ["mine"]), project("other", ["theirs"]), platform(["health"])],
+      async () => ({ workspace: "app" }),
+    );
+
+    await notifier.handle(completed);
+
+    expect((await store.list())[0]?.deliveries).toEqual([delivered("mine")]);
+    expect([mine.delivered.length, theirs.delivered.length, health.delivered.length]).toEqual([1, 0, 0]);
+  });
+
+  it("puts the events of a run without a workspace in the platform scope", async () => {
+    const mine = quiet();
+    const health = quiet();
+    const { store, notifier } = setup(
+      [
+        { name: "mine", delivery: mine },
+        { name: "health", delivery: health },
+      ],
+      [project("app", ["mine"]), platform(["health"])],
+      async () => ({}),
+    );
+
+    await notifier.handle(completed);
+
+    expect((await store.list())[0]?.deliveries).toEqual([delivered("health")]);
+    expect([mine.delivered.length, health.delivered.length]).toEqual([0, 1]);
+  });
+
+  it("asks for the run the event is about", async () => {
+    const asked: string[] = [];
+    const { notifier } = setup(undefined, undefined, async (runId) => (asked.push(runId), {}));
+
+    await notifier.handle(completed);
+
+    expect(asked).toEqual(["run-1"]);
+  });
+
+  it("delivers once per channel when several subscriptions match, with the highest priority", async () => {
+    const phone = quiet();
+    const calls: (number | undefined)[] = [];
+    const delivery: NotificationDelivery = { deliver: async (notification, options) => (calls.push(options?.priority), phone.deliver(notification)) };
+    const { store, notifier } = setup(
+      [{ name: "phone", delivery }],
+      [project("app", ["phone"], ["run.completed"], -1), project("app", ["phone"], ["run.completed", "run.failed"], 1), project("app", ["phone"], ["run.completed"])],
+      async () => ({ workspace: "app" }),
+    );
+
+    await notifier.handle(completed);
+
+    expect(phone.delivered).toHaveLength(1);
+    expect(calls).toEqual([1]);
+    expect((await store.list())[0]?.deliveries).toEqual([delivered("phone")]);
+  });
+
+  it("falls back to the channel's default priority, and to none", async () => {
+    const calls: Record<string, number | undefined> = {};
+    const spy = (name: string): NotificationDelivery => ({ deliver: async (_, options) => void (calls[name] = options?.priority) });
+    const { notifier } = setup(
+      [
+        { name: "quiet", priority: -1, delivery: spy("quiet") },
+        { name: "plain", delivery: spy("plain") },
+        { name: "urgent", priority: -1, delivery: spy("urgent") },
+      ],
+      [platform(["quiet", "plain"]), platform(["urgent"], EVERYTHING, 1)],
+    );
+
+    await notifier.handle(completed);
+
+    expect(calls).toEqual({ quiet: -1, plain: undefined, urgent: 1 });
+  });
+
+  it("records a notification no subscription selects, with no deliveries", async () => {
+    const delivery = quiet();
+    const { store, notifier } = setup([{ name: "log", delivery }], [platform(["log"], ["run.failed"])]);
 
     await notifier.handle(completed);
 
     expect(await store.list()).toEqual([expect.objectContaining({ kind: "run.completed", deliveries: [] })]);
+    expect(delivery.delivered).toEqual([]);
+  });
+
+  it("lists every notifiable event without any subscription, and delivers none", async () => {
+    const delivery = quiet();
+    const { store, notifier } = setup([{ name: "log", delivery }], []);
+
+    await notifier.handle(completed);
+    await notifier.handle(failed);
+    await notifier.handle(approvalRequested(request, request.createdAt));
+
+    expect((await store.list()).map(({ kind, deliveries }) => [kind, deliveries])).toEqual([
+      ["approval.requested", []],
+      ["run.failed", []],
+      ["run.completed", []],
+    ]);
+    expect(delivery.delivered).toEqual([]);
   });
 
   it("records the notification before it attempts delivery", async () => {
@@ -173,7 +419,7 @@ describe("notifier", () => {
     let storedAtDelivery: Notification[] = [];
     const delivery: NotificationDelivery = { deliver: async () => void (storedAtDelivery = await store.list()) };
 
-    await createNotifier({ store, channels: [{ name: "log", events: EVERYTHING, delivery }] }).handle(completed);
+    await createNotifier({ store, channels: [{ name: "log", delivery }], subscriptions: [platform(["log"])] }).handle(completed);
 
     expect(storedAtDelivery).toEqual([expect.objectContaining({ runId: "run-1", deliveries: [{ channel: "log", status: "pending" }] })]);
   });
@@ -181,8 +427,8 @@ describe("notifier", () => {
   it("records a failed delivery on its channel, and still delivers to the others", async () => {
     const working = quiet();
     const { store, notifier } = setup([
-      { name: "broken", events: EVERYTHING, delivery: quiet({ refuse: true }) },
-      { name: "working", events: EVERYTHING, delivery: working },
+      { name: "broken", delivery: quiet({ refuse: true }) },
+      { name: "working", delivery: working },
     ]);
 
     await notifier.handle(completed);
@@ -196,7 +442,7 @@ describe("notifier", () => {
 
   it("records and delivers a notification once when the event arrives again", async () => {
     const delivery = quiet();
-    const { store, notifier } = setup([{ name: "log", events: EVERYTHING, delivery }]);
+    const { store, notifier } = setup([{ name: "log", delivery }]);
 
     await notifier.handle(completed);
     await notifier.handle(completed);
@@ -208,16 +454,17 @@ describe("notifier", () => {
   it("delivers on a redelivered event to the channels still pending, e.g. after a crash mid-delivery", async () => {
     const store = createInMemoryNotificationStore();
     const channels = (a: NotificationDelivery, b: NotificationDelivery): NotifierChannel[] => [
-      { name: "a", events: EVERYTHING, delivery: a },
-      { name: "b", events: EVERYTHING, delivery: b },
+      { name: "a", delivery: a },
+      { name: "b", delivery: b },
     ];
-    await createNotifier({ store, channels: channels(quiet(), quiet()) }).handle(completed);
+    const subscriptions = [platform(["a", "b"])];
+    await createNotifier({ store, channels: channels(quiet(), quiet()), subscriptions }).handle(completed);
     // As if the process had died after delivering to a, before b's outcome was stored.
     await store.updateDelivery((await store.list())[0]!.id, { channel: "b", status: "pending" });
 
     const a = quiet();
     const b = quiet();
-    await createNotifier({ store, channels: channels(a, b) }).handle(completed);
+    await createNotifier({ store, channels: channels(a, b), subscriptions }).handle(completed);
 
     expect([a.delivered.length, b.delivered.length]).toEqual([0, 1]);
     expect((await store.list())[0]?.deliveries.map(({ status }) => status)).toEqual(["delivered", "delivered"]);

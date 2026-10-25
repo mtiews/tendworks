@@ -21,6 +21,7 @@ type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
 type WorkspaceList = ControlPlane.components["schemas"]["WorkspaceList"];
+type SubscriptionList = ControlPlane.components["schemas"]["SubscriptionList"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
 type ApprovalRequestList = ControlPlane.components["schemas"]["ApprovalRequestList"];
 type ApprovalRequest = ControlPlane.components["schemas"]["approvalRequest"];
@@ -207,6 +208,21 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       });
       if (!data) throw new AnswerError(response, error);
       io.stdout(render(data, options.output, formatWorkspaceList));
+    });
+
+  program
+    .command("subscription")
+    .description("inspect subscriptions")
+    .command("list")
+    .description("list the configured subscriptions: which events of a workspace or the platform go to which notification channels")
+    .addOption(outputOption())
+    .action(async (options: { output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.GET("/subscriptions").catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, formatSubscriptionList));
     });
 
   const notification = program.command("notification").description("inspect notifications");
@@ -434,6 +450,14 @@ function formatChatList(list: ChatList): string {
 function formatWorkspaceList(list: WorkspaceList): string {
   const assistantOf = ({ assistant }: WorkspaceList["items"][number]) => (assistant ? `${assistant.profile} (${assistant.write ? "may write" : "read-only"})` : "-");
   return table([["NAME", "KIND", "ASSISTANT"], ...list.items.map((workspace) => [workspace.name, workspace.kind, assistantOf(workspace)])]);
+}
+
+function formatSubscriptionList(list: SubscriptionList): string {
+  const scopeOf = ({ scope }: SubscriptionList["items"][number]) => ("workspace" in scope ? `workspace ${scope.workspace}` : "platform");
+  return table([
+    ["NAME", "SCOPE", "EVENTS", "CHANNELS", "PRIORITY"],
+    ...list.items.map((subscription) => [subscription.name, scopeOf(subscription), subscription.events.join(","), subscription.channels.join(","), subscription.priority === undefined ? "-" : String(subscription.priority)]),
+  ]);
 }
 
 /** ` on workspace <name> (read-only)` for a chat with a workspace's assistant; empty otherwise. */
@@ -1036,7 +1060,7 @@ function formatNotificationList(list: NotificationList): string {
     ...list.items.map((n) => [
       n.createdAt,
       n.kind,
-      n.runId,
+      n.runId ?? "-",
       n.artifacts?.[0]?.url ?? "-",
       n.deliveries.map(({ channel, status }) => `${channel} ${status}`).join(", ") || "no channel",
       n.title,

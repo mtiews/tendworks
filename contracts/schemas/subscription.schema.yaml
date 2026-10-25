@@ -1,0 +1,86 @@
+$id: https://tendworks.dev/schemas/v1/schemas/subscription.schema.yaml
+$schema: https://json-schema.org/draft/2020-12/schema
+title: Subscription
+description: >-
+  Sends events of one scope to notification channels (ADR 0026). The scope is a workspace
+  (a project: its subscriptions apply to everyone working in it) or the platform (opt-in).
+  Every notifiable event is listed whether or not a subscription matches; only matching
+  subscriptions deliver, once per channel, with the highest priority of those matching.
+type: object
+required: [apiVersion, kind, metadata, spec]
+additionalProperties: false
+properties:
+  apiVersion:
+    const: tendworks.dev/v1
+  kind:
+    const: Subscription
+  metadata:
+    type: object
+    title: SubscriptionMetadata
+    required: [name]
+    additionalProperties: false
+    properties:
+      name:
+        type: string
+        pattern: ^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$
+        description: Name of the subscription, unique among subscriptions.
+  spec:
+    title: SubscriptionSpec
+    type: object
+    required: [scope, events, channels]
+    additionalProperties: false
+    properties:
+      scope:
+        $ref: '#/$defs/scope'
+      events:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          $ref: '#/$defs/subscribableEvent'
+        description: >-
+          The events to deliver, from the catalog of the scope: a workspace has `run.started`,
+          `run.completed`, `run.failed` and `approval.requested`; the platform has
+          `platform.degraded` and `platform.recovered`, and the run events of runs without
+          a workspace. Checked when the configuration loads.
+      channels:
+        type: array
+        minItems: 1
+        uniqueItems: true
+        items:
+          type: string
+        description: Names of the notification channels the events are delivered to.
+      priority:
+        type: integer
+        minimum: -2
+        maximum: 1
+        description: >-
+          Message priority from -2 (no alert) to 1 (high) for these events. Where several
+          subscriptions match, the highest wins; without any, the channel's default applies.
+$defs:
+  scope:
+    title: SubscriptionScope
+    description: Exactly one of `workspace` and `platform`.
+    oneOf:
+      - title: WorkspaceScope
+        type: object
+        required: [workspace]
+        additionalProperties: false
+        properties:
+          workspace:
+            type: string
+            description: Name of the workspace (the project) whose events are subscribed.
+      - title: PlatformScope
+        type: object
+        required: [platform]
+        additionalProperties: false
+        properties:
+          platform:
+            type: object
+            additionalProperties: false
+            description: >-
+              The platform itself, written `platform: {}`.
+  subscribableEvent:
+    title: SubscribableEvent
+    type: string
+    enum: [run.started, run.completed, run.failed, approval.requested, platform.degraded, platform.recovered]

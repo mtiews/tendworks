@@ -770,6 +770,39 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /subscriptions:
+    get:
+      operationId: listSubscriptions
+      summary: List the configured subscriptions, ordered by name
+      description: >-
+        The subscriptions of the configuration (ADR 0026): which events of which scope (a
+        workspace or the platform) are delivered to which notification channels, with
+        which priority. Read-only; subscriptions are configured in the configuration
+        repository.
+      responses:
+        "200":
+          description: Subscriptions.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubscriptionList"
+        "401":
+          description: The request carries neither the API token nor the read-only token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The platform stopped, e.g. after a failed schema migration.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /triggers:
     get:
       operationId: listTriggers
@@ -1253,6 +1286,40 @@ components:
             write:
               type: boolean
               description: Whether it may change the workspace.
+    SubscriptionList:
+      type: object
+      required: [items]
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/SubscriptionSummary"
+    SubscriptionSummary:
+      type: object
+      description: A subscription of the configuration (ADR 0026).
+      required: [name, scope, events, channels]
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Name of the subscription (`metadata.name`).
+        scope:
+          $ref: "../schemas/subscription.schema.yaml#/$defs/scope"
+        events:
+          type: array
+          items:
+            $ref: "../schemas/subscription.schema.yaml#/$defs/subscribableEvent"
+        channels:
+          type: array
+          items:
+            type: string
+          description: Names of the notification channels the events are delivered to.
+        priority:
+          type: integer
+          minimum: -2
+          maximum: 1
+          description: The subscription's message priority; absent when the channel's default applies.
     StartRunRequest:
       type: object
       required: [workflow]

@@ -2,9 +2,9 @@ $id: https://tendworks.dev/schemas/v1/schemas/notification-channel.schema.yaml
 $schema: https://json-schema.org/draft/2020-12/schema
 title: NotificationChannel
 description: >-
-  A way notifications reach the operator (ADR 0025). Human interaction records every
-  notification first, then delivers it to each channel that selects its event and records
-  the delivery status per channel. The integration selects the adapter that delivers.
+  A way someone is reached (ADR 0025, 0026): an adapter with its credentials and a default
+  priority. A channel selects no events; subscriptions (subscription.schema.yaml) send
+  events to channels. The integration selects the adapter that delivers.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -26,7 +26,7 @@ properties:
   spec:
     title: NotificationChannelSpec
     type: object
-    required: [integration, events]
+    required: [integration]
     additionalProperties: false
     properties:
       integration:
@@ -36,16 +36,14 @@ properties:
           Which adapter delivers. `fake` writes the notification to the platform's log, or
           refuses it with `fake.refuse`, for tests and demos; `pushover` sends it as a
           Pushover message with the settings under `pushover`.
-      events:
-        type: array
-        minItems: 1
-        uniqueItems: true
-        items:
-          type: string
-          enum: [approval.requested, run.failed, run.completed]
+      priority:
+        type: integer
+        minimum: -2
+        maximum: 1
         description: >-
-          The notifications this channel receives, by kind (the notification schema's
-          `NotificationKind`), e.g. `[run.failed, approval.requested]`.
+          Default message priority from -2 (no alert) to 1 (high, bypasses quiet hours) for
+          notifications whose matching subscriptions name none. Defaults to 0. Emergency
+          priority (2) needs acknowledgement and is not supported.
       fake:
         $ref: '#/$defs/fakeNotificationChannel'
       pushover:
@@ -80,7 +78,6 @@ $defs:
     examples:
       - token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
         user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
-        priority: 1
     properties:
       token:
         $ref: '#/$defs/secretRef'
@@ -88,13 +85,6 @@ $defs:
       user:
         $ref: '#/$defs/secretRef'
         description: The user or group key the messages go to.
-      priority:
-        type: integer
-        minimum: -2
-        maximum: 1
-        description: >-
-          Message priority from -2 (no alert) to 1 (high, bypasses quiet hours). Defaults to
-          0. Emergency priority (2) needs acknowledgement and is not supported.
   secretRef:
     title: NotificationSecretRef
     description: >-

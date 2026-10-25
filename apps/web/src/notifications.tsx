@@ -40,7 +40,7 @@ export function NotificationsPage() {
                 </td>
                 <td>{notification.kind}</td>
                 <td>
-                  <Link to={`/runs/${encodeURIComponent(notification.runId)}`}>{notification.runId}</Link>
+                  {notification.runId ? <Link to={`/runs/${encodeURIComponent(notification.runId)}`}>{notification.runId}</Link> : <span className="muted">platform</span>}
                 </td>
                 <td>
                   {notification.deliveries.length === 0 ? (

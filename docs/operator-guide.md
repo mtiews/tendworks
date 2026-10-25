@@ -131,7 +131,7 @@ All commands run from the repository root. Compose uses `deploy/` as its project
    | --- | --- |
    | `curl -s http://localhost:8080/status` | HTTP 200 and `"status":"healthy"`; 503 names the failing component. The only endpoint without a token |
    | `tend status` | `PLATFORM healthy`, `ACCESS full`, the components `store`, `execution-engine`, `sandbox-backend`, `sandbox-cleanup` |
-   | `tend agent list`, `tend trigger list`, `tend workspace list` | the profiles, trigger bindings and workspaces of your configuration |
+   | `tend agent list`, `tend trigger list`, `tend workspace list`, `tend subscription list` | the profiles, trigger bindings, workspaces and subscriptions of your configuration |
    | `http://localhost:8080/` in a browser on the host, or [from your devices](#access-from-your-devices) | redirects to `/ui/` and asks for a token; the API token signs in with full access |
 
    The starter configuration starts no run by itself: both its trigger bindings are suspended.
@@ -162,6 +162,7 @@ Running runs resume after either, and the worker takes up open chats again.
 | `TEND_PLATFORM_MCP_URL` | `http://mcp-gateway:8080/mcp` | where sandboxes of profiles with `mcp: [tendworks]` reach the platform MCP server: the MCP-only gateway, on Linux and Docker Desktop alike. Leave it unset |
 | `ANTHROPIC_BASE_URL` | empty | optional alternative model endpoint for Claude Code |
 | `TEND_WORKSPACE_ROOTS` | empty (no directory workspaces) | absolute host directory that directory workspaces must lie under ([Directory workspaces](#directory-workspaces)) |
+| `TEND_HEARTBEAT_URL` | empty (no heartbeat) | URL the server calls about every five minutes while the platform is healthy ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)) |
 
 `TEND_SANDBOX_IMAGES` and `TEND_INSTALLATION` are set by compose itself; don't set them.
 
@@ -199,7 +200,8 @@ Rules the loader enforces:
 | `Workspace` | `workspaces/*.yaml` | a repository (`spec.git`) or host directory (`spec.directory`) agents work in, its credential and its assistant: [Workspaces](#workspaces) | server and worker |
 | `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.suspend`, `spec.trigger` (`schedule` or `github-issues`): [Trigger bindings](#trigger-bindings) | server |
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | the prompt text; new workflows calling `agent://<profile>` in a workspace; a [human step](#waiting-for-a-human-the-human-step-and-policies) `call: approval` where a workflow waits for you | server |
-| `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.events`, `spec.pushover.priority`: [Notifications](#notifications) | server |
+| `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.priority` (the default), `spec.pushover`: [Notifications](#notifications) | server |
+| `Subscription` | any `*.yaml`, e.g. `notifications/` | `spec.scope` (`workspace: <name>` or `platform: {}`), `spec.events`, `spec.channels`, `spec.priority`: [Notifications](#notifications) | server |
 | `Policy` | `policies/*.yaml` | `spec.actions.<action>: allow \| ask` for the human steps of `spec.workflows`: [Waiting for a human](#waiting-for-a-human-the-human-step-and-policies) | server |
 | `AgentProfile` (Markdown with frontmatter; the body is the role description) | `agents/*.md` | `spec.chat.idleMinutes` (1–1440, default 5): how long an idle chat keeps its sandbox; `spec.env` secret references; `spec.skills`; `spec.mcp: [tendworks]`; `spec.attribution: false`. No repository credential: the workspace brings it | server and worker |
 | `SandboxTemplate` | `sandboxes/*.yaml` | `spec.image` (the deployment's own images by repository alone, e.g. `tendworks/sandbox-claude-code`: the worker fills in the pin from `deploy/compose.yaml`; other images with an exact tag or digest), `spec.isolationClass: container \| gvisor`, `spec.resources.cpus`, `memoryMb`. Images with your own tooling: [sandbox images](sandbox-images.md) | worker (server validates) |
@@ -334,28 +336,30 @@ spec:
 
 ### Notifications
 
-Human interaction records a notification for every approval request (`approval.requested`) and every completed or failed run (`run.completed`, `run.failed`), then delivers it to each notification channel that selects its event (ADR 0025). Without a channel, notifications are only recorded.
+Human interaction records a notification for every started, completed or failed run (`run.started`, `run.completed`, `run.failed`) and every approval request (`approval.requested`), whether or not anyone subscribed. A **notification channel** only says how you are reached (Pushover with its credentials, a default priority). A **subscription** sends events of one scope to channels (ADR 0025, 0026). Without a matching subscription, a notification is only recorded and listed.
+
+- **Scope:** `workspace: <name>` is a project; its subscriptions apply to everyone working in it. `platform: {}` holds the events of runs without a workspace (e.g. started with `tend run start`) and, opt-in, the platform's own events. A run's workspace is the one its trigger binding started it in, else the first one a step handed to its agent.
+- **Events:** a workspace has `run.started`, `run.completed`, `run.failed`, `approval.requested`; the platform has the same for runs without a workspace, plus `platform.degraded` and `platform.recovered`. The server checks the platform's components (the worker's included) about every minute; a change counts after two equal results in a row, so a single failed check notifies nobody. The notification names the affected components and their messages. The check state is kept in memory: after a server restart a platform that was degraded is reported healthy again until a check fails twice. The server refuses, when it loads the configuration, a subscription with an unknown workspace or channel, an event outside its scope, or an empty `events` or `channels`.
+- **Matching:** a notification is delivered once per channel that any matching subscription names, with the highest `priority` of those subscriptions, else the channel's `priority`, else 0. `priority` goes from -2 (no alert) to 1 (high).
 
 - **Artifacts:** notifications of finished runs carry what the run's steps reported, e.g. `develop-issue`'s pull request; the first artifact is the message's link.
 - **Approval requests** list their answers and the `tend approval answer` command, and their links: a tap opens the first, e.g. the pull request to merge.
 - **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Notifications page of the web UI. A failed delivery is not retried.
-- **Several channels**, e.g. a second one for failures only with an alert that bypasses quiet hours:
+- **A subscription**, e.g. failures and approvals of the `playground` workspace high, completions normal:
 
   ```yaml
   apiVersion: tendworks.dev/v1
-  kind: NotificationChannel
+  kind: Subscription
   metadata:
-    name: phone-failures
+    name: playground-attention
   spec:
-    integration: pushover
-    events: [run.failed]
-    pushover:
-      token: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_TOKEN } }
-      user: { secretRef: { name: TENDWORKS_PLATFORM_PUSHOVER_USER } }
-      priority: 1
+    scope: { workspace: playground }
+    events: [run.failed, approval.requested]
+    channels: [phone]
+    priority: 1
   ```
 
-  `priority` goes from -2 (no alert) to 1 (high); 0 is the default. A notification with two channels selecting it is delivered twice.
+  Templates for a project and the platform are next to `phone.yaml.example`.
 - `integration: fake` writes every notification to the server log instead (`docker compose -f deploy/compose.yaml logs server`), to try channels out without an account.
 
 #### Pushover on your phone
@@ -371,10 +375,21 @@ Human interaction records a notification for every approval request (`approval.r
    ```
 
    They are platform secrets: only the server holds them, never a sandbox.
-5. In your configuration, rename `notifications/phone.yaml.example` to `notifications/phone.yaml` (choose `events` and `priority` there).
-6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names it: `configuration: notification channels phone (pushover: approval.requested, run.failed, run.completed)`.
+5. In your configuration, rename `notifications/phone.yaml.example` to `notifications/phone.yaml` and `subscription-playground.yaml.example` to `notifications/subscription-playground.yaml` (choose `events` and `priority` there; a channel selects no events itself).
+6. `docker compose -f deploy/compose.yaml up -d --wait` (the server gets the secrets), then `docker compose -f deploy/compose.yaml restart server` (it reads the channel). The server log names the channel and the subscription: `configuration: notification channels phone (pushover)`.
 7. Check the delivery: start `hello-developer` ([Everyday commands](#everyday-commands)). When it completes, the phone shows `Run <id> of hello-developer completed`, and `tend notification list` shows `phone delivered`. A failure shows there as `phone failed for <id>: …`: `secret TENDWORKS_PLATFORM_PUSHOVER_TOKEN is not set` (the secret did not reach the server: `up -d --wait`, not `restart`) or `Pushover refused the message (HTTP 400): …` with Pushover's reason (e.g. a wrong token or user key).
 8. Check the link, by hand: let `develop-issue` work an issue ([First test workloads](#first-test-workloads), 3). When the run completes, tap its message on the phone: it opens the pull request that `tend run get <id>` lists as `pullRequest` and under ARTIFACT.
+
+#### Heartbeat: when the platform itself is down
+
+A stopped server cannot notify anyone, so let an external monitor notice the silence. While `GET /status` is healthy, the server calls `TEND_HEARTBEAT_URL` with a plain `GET` about every five minutes; while the platform is degraded, or without the variable, it calls nothing. The call carries no secrets and no state. A failed ping is logged (`heartbeat failed: ...`) and tried again at the next interval.
+
+Point it at a **push monitor**, which alarms when the pings stop:
+
+1. [healthchecks.io](https://healthchecks.io): create a check with period 5 minutes and grace time 5 to 10 minutes, add the Pushover integration and copy the check's ping URL.
+2. Or Uptime Kuma: add a monitor of type *Push* with heartbeat interval 300 seconds plus a retry or two, attach a Pushover notification, and copy the push URL.
+3. Put the URL into `deploy/.env`: `TEND_HEARTBEAT_URL=https://hc-ping.com/<uuid>`, then `docker compose -f deploy/compose.yaml up -d --wait`.
+4. Check it: the monitor shows the first ping within seconds. `docker compose -f deploy/compose.yaml stop server` makes it alarm after the grace time.
 
 ### Waiting for a human: the human step and policies
 
@@ -803,7 +818,7 @@ docker network rm tendworks-sandboxes
 | issue labelled but no new run | | each issue fires once per binding and workspace, also after a failed run (ADR 0006); start it by hand ([Everyday commands](#everyday-commands), "Retry an issue") |
 | `tend notification list` shows `<channel> failed for <id>: secret TENDWORKS_PLATFORM_PUSHOVER_... is not set` | notifications | the Pushover secrets did not reach the server; set them in `deploy/.env`, `up -d --wait` |
 | `<channel> failed for <id>: Pushover refused the message (HTTP 4xx): ...` | notifications | Pushover's reason, e.g. an invalid application token or user key; fix it in `deploy/.env`, `up -d --wait` |
-| no notification on the phone, `no channel` in `tend notification list` | notifications | no channel selects that event; check `spec.events` and that the file ends in `.yaml` (`phone.yaml.example` is not read); the server log lists the channels at start |
+| no notification on the phone, `no channel` in `tend notification list` | notifications | no subscription matches that event; check its `spec.scope` (a run without a workspace is in `platform: {}`), `spec.events`, `spec.channels` and that the files end in `.yaml` (`*.yaml.example` is not read); the server log lists channels and subscriptions at start |
 | chat refused: `Unknown workspace` or `Chat not allowed` | `tend chat --workspace`, UI | no workspace of that name, or its assistant is not enabled (`spec.assistant.enabled: true`); `tend workspace list` |
 | chat answers `the workspace is busy: ...` | chat | a run works in the same directory workspace; send the message again once it ended |
 | run or chat fails: `directory ... is in use by another agent session (task ...)` | `tend run get`, chat | only one session at a time per directory workspace; wait for the other one, or use a git workspace for parallel work |
@@ -837,3 +852,12 @@ Milestone 3 is accepted on the operator's Ubuntu host by following only this gui
 | 6 | A workspace assistant with `write: false` | [First test workloads](#first-test-workloads), 6, on your workspace | it answers about the repository from its files; the push fails; no branch appears on GitHub |
 | 7 | Nothing left behind | after all runs and chats ended: `docker ps -a --filter label=dev.tendworks.sandbox`, `docker volume ls --filter label=dev.tendworks.volume`; `scripts/check-github-agent-access.sh --repo OWNER/NAME --audit 30` | no sandbox or session volume without a live task or open chat; `sandbox-cleanup` healthy; no direct pushes to `main` |
 | 8 | Release | tag `v0.3.0` on the accepted commit | the tag's [release notes](releases/v0.3.0.md) match what was accepted |
+
+Milestone 4 (issue #87, `v0.4.0`) is accepted on the same host with these checks, recorded in its acceptance ticket (#95):
+
+| # | Check | How | Passes when |
+| --- | --- | --- | --- |
+| M4-1 | Start and completion pushes | subscribe a workspace ([Notifications](#notifications): run started silent, completed normal) and start a run there ([Pushover on your phone](#pushover-on-your-phone)) | the phone shows a start message that opens the trigger's issue and a completion message that opens the pull request; `tend notification list` shows `phone delivered` for both |
+| M4-2 | Degraded, then recovered | subscribe the platform (`subscription-platform.yaml.example`), `docker compose -f deploy/compose.yaml stop worker`, wait about three minutes, start it again | a `platform.degraded` message naming the worker, then `platform.recovered` |
+| M4-3 | Heartbeat | set `TEND_HEARTBEAT_URL` ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)), then `stop server` | the monitor shows the pings and alarms after its grace time |
+| M4-4 | Release | tag `v0.4.0` on the accepted commit | the tag's [release notes](releases/v0.4.0.md) match what was accepted |
