@@ -105,7 +105,8 @@ of this repo, Node 24, pnpm and betterleaks, but **no Docker**.
 3. **Builds** the ticket test-first with `/tdd`, runs the sandbox gate (`pnpm install`,
    `pnpm check`), reviews the ticket's diff with `/code-review` and fixes the findings.
 4. **Commits and pushes** to `spec/<S>`. The first ticket opens a **draft pull request**
-   `spec/<S>` → `main` that closes the spec and all its tickets.
+   `spec/<S>` → `main` that closes the spec's **agent tickets** (`Closes #<n>`); it names the
+   spec (`Part of #<S>`) and the human tickets without a closing keyword.
 5. **Waits for CI** on the pull request. Integration tests, coverage and e2e need Docker,
    so they run only there. A red CI is fixed in the same run, within a few attempts.
 6. **Closes** #N with its acceptance criteria ticked, and reports the pull request as the
@@ -127,8 +128,8 @@ Each run ends with markers on their own lines:
 
 ### 5. Merge (human)
 
-Finish the human tickets, review the pull request, and merge it. Merging closes the spec
-and its tickets.
+Review the pull request and merge it; merging closes the agent tickets. Then finish the
+human tickets (e.g. the acceptance), close them, and close the spec last.
 
 ## When something gets stuck
 

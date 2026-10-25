@@ -69,7 +69,10 @@ already on `spec/<S>`: treat them as done and build on that code.
 
 If the spec has no open pull request yet, open a draft one. Write the body with the
 `pr` skill's template (Summary / Evidence / Merge Danger) for what the spec delivers,
-followed by one `Closes #<n>` line for the spec and for each of its tickets:
+followed by one `Closes #<n>` line for each **agent ticket** of the spec (its tickets without
+`ready-for-human`), a `Part of #<S>` line for the spec, and one line naming the human
+tickets **without** a closing keyword (e.g. `Acceptance: #<n> (human)`). The spec and its
+human tickets stay open until the human finishes them; a merge must never close them:
 
     gh pr create --draft --base main --head spec/<S> --title "<spec title>" --body-file <file>
 
@@ -101,8 +104,8 @@ still red: [blocked](#if-you-cannot-finish).
    took on your own (e.g. the seams you chose):
    `gh issue close <N> --comment "Done by the agent on spec/<S> (<short-shas>), ships with #<pr>. Decisions: ..."`
 
-Closing does not wait for the merge: the pull request closes the spec and its tickets
-when it is merged, and the handover rule needs #N closed.
+Closing does not wait for the merge: the handover rule needs #N closed. The pull request
+closes only the agent tickets when it is merged; the spec and its human tickets stay open.
 
 ## 7. Hand over
 
