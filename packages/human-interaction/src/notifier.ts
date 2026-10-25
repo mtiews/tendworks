@@ -116,7 +116,7 @@ function toNotification(event: NotifiedEvent, createdAt: string, run: NotifierRu
   if (event.type === "dev.tendworks.run.started") {
     const { workspace, origin } = run;
     const item = origin?.kind === "trigger" ? origin.item : undefined;
-    const startedBy = item ? `${item.title} (${item.key})` : "manual";
+    const startedBy = origin?.kind === "trigger" ? `${origin.item.title} (${origin.item.key})` : "manual";
     return {
       ...base,
       kind: "run.started",

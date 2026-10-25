@@ -54,7 +54,7 @@ _Avoid_: security level, sandbox type, runtime
 ### Human interaction
 
 **Notification**:
-A message to the human that needs no decision, e.g. that a run finished. It is recorded before it is delivered, so it is never lost when delivery fails. A finished run's notification carries the run's artifacts.
+A message to the human that needs no decision, e.g. that a run started or finished. It is recorded before it is delivered, so it is never lost when delivery fails. A finished run's notification carries the run's artifacts; a started run's carries the link of what started it (e.g. the issue), so a channel's tap opens it.
 _Avoid_: alert, task, message (that is an agent's output)
 
 **Notification channel**:
