@@ -1,6 +1,7 @@
 import { useCallback, useId, useState, type FormEvent } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
+import { useEnterToSend } from "./enter-to-send.js";
 import { Pending } from "./pending.js";
 import { useLocation } from "./router.js";
 import { usePolling } from "./use-polling.js";
@@ -48,6 +49,25 @@ export function NewChat() {
   const [refusal, setRefusal] = useState<string>();
   const ids = { chatWith: useId(), text: useId() };
 
+  const chosen =
+    choices?.find((choice) => choice.value === picked) ?? choices?.find((choice) => choice.value === `agent:${PLATFORM_ASSISTANT}`) ?? choices?.[0];
+
+  const start = async (event: FormEvent) => {
+    event.preventDefault();
+    // The same rules as the button, which Enter shares.
+    if (!chosen || starting || text.trim() === "") return;
+    setStarting(true);
+    setRefusal(undefined);
+    try {
+      const chat = await answer(client.POST("/chats", { body: { ...chosen.chatWith, text } }));
+      navigate(`/chats/${encodeURIComponent(chat.id)}`);
+    } catch (failure: unknown) {
+      setRefusal(failure instanceof AnswerError ? failure.reason : failure instanceof Error ? failure.message : String(failure));
+      setStarting(false);
+    }
+  };
+  const enterToSend = useEnterToSend((event) => void start(event), true);
+
   if (!canChange) {
     return (
       <>
@@ -64,23 +84,6 @@ export function NewChat() {
       </>
     );
   }
-
-  const chosen =
-    choices.find((choice) => choice.value === picked) ?? choices.find((choice) => choice.value === `agent:${PLATFORM_ASSISTANT}`) ?? choices[0];
-
-  const start = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!chosen) return;
-    setStarting(true);
-    setRefusal(undefined);
-    try {
-      const chat = await answer(client.POST("/chats", { body: { ...chosen.chatWith, text } }));
-      navigate(`/chats/${encodeURIComponent(chat.id)}`);
-    } catch (failure: unknown) {
-      setRefusal(failure instanceof AnswerError ? failure.reason : failure instanceof Error ? failure.message : String(failure));
-      setStarting(false);
-    }
-  };
 
   return (
     <>
@@ -102,17 +105,18 @@ export function NewChat() {
           </div>
           <div className="field">
             <label htmlFor={ids.text}>Message</label>
-            <textarea id={ids.text} rows={4} required value={text} onChange={(event) => setText(event.target.value)} />
+            <textarea id={ids.text} rows={4} required value={text} {...enterToSend.inputProps} onChange={(event) => setText(event.target.value)} />
           </div>
           {refusal !== undefined && (
             <p className="message message-error" role="alert">
               {refusal}
             </p>
           )}
-          <div>
+          <div className="chat-buttons">
             <button type="submit" className="primary" disabled={starting || text.trim() === ""}>
               Start chat
             </button>
+            {enterToSend.hint}
           </div>
         </form>
       )}
