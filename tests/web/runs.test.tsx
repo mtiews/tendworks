@@ -348,6 +348,70 @@ describe("run detail", () => {
     expect(screen.queryByRole("link", { name: "Ask the platform assistant" })).toBeNull();
   });
 
+  describe("retry", () => {
+    const configured = emptyConfiguration({
+      workflowNames: ["develop-issue"],
+      workflow: (name) => (name === "develop-issue" ? ({ document: { name } } as never) : undefined),
+    });
+
+    it("retries a failed run after a confirmation, opens the new run and links it to the failed one", async () => {
+      signedIn();
+      const runs = runsOf(failedRun);
+      const { user } = renderApp({ path: "/ui/runs/run-3", runs, configuration: configured, agentRuntime: createInMemoryAgentRuntime() });
+
+      await user.click(await screen.findByRole("button", { name: "Retry" }));
+      const confirmation = screen.getByRole("alertdialog", { name: "Retry run run-3?" });
+      expect(confirmation.textContent).toContain("starts a new run of develop-issue with the same input");
+      expect(runs.started).toEqual([]);
+      await user.click(within(confirmation).getByRole("button", { name: "Retry run" }));
+
+      const [retry] = [...runs.runs.values()].filter((run) => run.startedBy?.retryOf === "run-3");
+      expect(retry).toBeDefined();
+      await screen.findByText(retry!.id);
+      expect(window.location.pathname).toBe(`/ui/runs/${retry!.id}`);
+      expect(field("Started by")).toBe("manual");
+      expect(field("Retry of")).toBe("run-3");
+      await user.click(screen.getByRole("link", { name: "run-3" }));
+      expect(window.location.pathname).toBe("/ui/runs/run-3");
+    });
+
+    it("starts nothing when the operator cancels", async () => {
+      signedIn();
+      const runs = runsOf(failedRun);
+      const { user } = renderApp({ path: "/ui/runs/run-3", runs, configuration: configured, agentRuntime: createInMemoryAgentRuntime() });
+
+      await user.click(await screen.findByRole("button", { name: "Retry" }));
+      await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(runs.started).toEqual([]);
+    });
+
+    it("says why the platform refused the retry", async () => {
+      signedIn();
+      const { user } = renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime: createInMemoryAgentRuntime() });
+
+      await user.click(await screen.findByRole("button", { name: "Retry" }));
+      await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Retry run" }));
+
+      expect(await screen.findByText("Run not retryable: its workflow 'develop-issue' is no longer configured (configured: none)")).toBeTruthy();
+      expect(window.location.pathname).toBe("/ui/runs/run-3");
+    });
+
+    it("offers no retry with read-only access, nor for a run that did not fail", async () => {
+      signedIn(READ_TOKEN);
+      renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun, completedRun), configuration: configured, agentRuntime: createInMemoryAgentRuntime() });
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+
+      cleanup();
+      signedIn();
+      renderApp({ path: "/ui/runs/run-4", runs: runsOf(failedRun, completedRun), configuration: configured });
+      expect(await screen.findByRole("heading", { level: 1, name: /hello-agent/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    });
+  });
+
   it("opens from the run list and works as a deep link after a reload", async () => {
     signedIn();
     const runs = runsOf(manualRun, failedRun);

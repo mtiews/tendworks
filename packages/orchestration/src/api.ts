@@ -34,7 +34,7 @@ export function createOrchestrationApi({
     if (!isObject(body?.workflow)) return problem(400, "Invalid request", "`workflow` must be a workflow definition object");
     if (body.input !== undefined && !isObject(body.input)) return problem(400, "Invalid request", "`input` must be an object");
     if (body.startedBy !== undefined && !isRunOrigin(body.startedBy)) {
-      return problem(400, "Invalid request", "`startedBy` must be { kind: manual } or { kind: trigger, binding, workspace?, item: { key, title, url? } }");
+      return problem(400, "Invalid request", "`startedBy` must be { kind: manual, retryOf? } or { kind: trigger, binding, workspace?, item: { key, title, url? }, retryOf? }");
     }
     // The caller's trace, e.g. the trigger that fired; without one the run starts its own.
     const traceparent = c.req.header("traceparent");
@@ -85,7 +85,8 @@ export function createOrchestrationApi({
 
 function isRunOrigin(value: unknown): value is NonNullable<Run["startedBy"]> {
   if (!isObject(value)) return false;
-  if (value.kind === "manual") return Object.keys(value).length === 1;
+  if (value.retryOf !== undefined && typeof value.retryOf !== "string") return false;
+  if (value.kind === "manual") return Object.keys(value).every((key) => key === "kind" || key === "retryOf");
   const item = value.item;
   return (
     value.kind === "trigger" &&

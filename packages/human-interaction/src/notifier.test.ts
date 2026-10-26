@@ -200,6 +200,16 @@ describe("notifier", () => {
       expect(notification).not.toHaveProperty("artifacts");
     });
 
+    it("names the run a retry retries", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "app", origin: { ...issue, retryOf: "run-0" } }));
+
+      await notifier.handle(started);
+
+      const [notification] = await store.list();
+      expect(notification?.detail).toBe("Workspace: app. Started by: Fix the login (acme/app#7), retry of run-0");
+      expect(notification?.artifacts).toEqual([{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }]);
+    });
+
     it("links nothing when the origin has no link", async () => {
       const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { ...issue, item: { key: issue.item.key, title: issue.item.title } } }));
 
