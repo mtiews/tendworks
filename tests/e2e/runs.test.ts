@@ -37,6 +37,30 @@ describe("runs on the compose stack", () => {
     expect(list?.items.map((item) => item.id)).toContain(run.id);
   });
 
+  it("fails a run whose workflow raises an error because the agent reported no pull request", { timeout: 60_000 }, async () => {
+    const { data: started } = await client.POST("/runs", {
+      body: { workflow: "requires-pull-request", input: { item: { key: "raise", title: "Report nothing", number: 12 } } },
+    });
+    expect(started).toBeDefined();
+
+    const run = await waitForEnd(started!.id);
+
+    const error = {
+      type: "https://serverlessworkflow.io/spec/1.0.0/errors/runtime",
+      status: 500,
+      instance: "/do/2/fail",
+      title: "The agent ended without reporting its result",
+      detail: "no pull request; last answer: Pretended to implement the issue.",
+    };
+    expect(run).toMatchObject({ status: "failed", error });
+    expect(run.steps.map((step) => [step.name, step.status])).toEqual([
+      ["implement", "completed"],
+      ["check", "completed"],
+      ["fail", "failed"],
+    ]);
+    expect(run.steps[2]?.error).toEqual(error);
+  });
+
   it("neither starts nor lists runs without a token, and lets the read-only token only read", async () => {
     const { response } = await anonymous.POST("/runs", { body: { workflow: "hello-agent" } });
 

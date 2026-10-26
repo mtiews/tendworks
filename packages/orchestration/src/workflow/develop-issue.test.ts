@@ -77,7 +77,7 @@ describe("example workflow develop-issue", () => {
     });
   });
 
-  it("ends after the agent step, with the reported pull request in its output and no call to the platform", async () => {
+  it("ends after checking the agent step, with the reported pull request in its output and no call to the platform", async () => {
     const http = new InMemoryHttpExecutor();
 
     const run = await runWorkflow(definition, { runId, input: { workspace: "playground", item: issue }, http, executor: developer(PR), events: new EventQueue() });
@@ -87,6 +87,25 @@ describe("example workflow develop-issue", () => {
       status: "completed",
       output: { issue: 12, branch: "tendworks/issue-12-0b6c4c1e", taskId: "task-1", pullRequest: PR },
     });
-    expect(run.steps.map((step) => step.name)).toEqual(["implement"]);
+    expect(run.steps.map((step) => step.name)).toEqual(["implement", "check"]);
+  });
+
+  it("fails the run, naming the agent's last answer, when the agent reports no pull request", async () => {
+    const run = await runWorkflow(definition, { runId, input: { workspace: "playground", item: issue }, executor: developer(), events: new EventQueue() });
+
+    expect(run).toMatchObject({
+      status: "failed",
+      error: {
+        status: 500,
+        instance: "/do/2/fail",
+        title: "The agent ended without reporting a pull request",
+        detail: "no pull request artifact; last answer of the agent: Opened the pull request.",
+      },
+    });
+    expect(run.steps.map((step) => [step.name, step.status])).toEqual([
+      ["implement", "completed"],
+      ["check", "completed"],
+      ["fail", "failed"],
+    ]);
   });
 });

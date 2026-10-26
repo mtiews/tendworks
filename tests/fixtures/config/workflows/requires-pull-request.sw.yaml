@@ -1,0 +1,37 @@
+# The check of an agent step's result: the fake developer reports no pull request, so the
+# workflow raises an error and the run fails with it.
+# Start it with: POST /runs {"workflow": "requires-pull-request", "input": {"item": {"key": "hello", "title": "Say hello", "number": 1}}}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: requires-pull-request
+  version: '0.1.0'
+  summary: Fails the run because the agent reports no pull request.
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://fake-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: '${ "Implement issue #\(.item.number // 0): \(.item.title // "untitled")" }'
+      output:
+        as: '${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]), lastAnswer: .status.message.parts[0].text } }'
+  - check:
+      switch:
+        - reported:
+            when: '${ .pullRequest != null }'
+            then: end
+        - missing:
+            then: fail
+  - fail:
+      raise:
+        error:
+          type: https://serverlessworkflow.io/spec/1.0.0/errors/runtime
+          status: 500
+          title: The agent ended without reporting its result
+          detail: '${ "no pull request; last answer: \(.lastAnswer)" }'

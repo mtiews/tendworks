@@ -44,7 +44,7 @@ Architecture decisions go to `docs/adr/` as Markdown ADRs. When a decision chang
 
 - TypeScript throughout, Node.js LTS
 - pnpm workspaces monorepo; one package per domain, cross-imports blocked by lint rule (e.g. dependency-cruiser)
-- Temporal (dev mode locally) + own Serverless Workflow 1.0 interpreter (subset: do, call, listen, switch, for, try, wait)
+- Temporal (dev mode locally) + own Serverless Workflow 1.0 interpreter (subset: do, call, listen, switch, raise, for, try, wait)
 - Postgres for state, Temporal and event bus (outbox + LISTEN/NOTIFY); NATS optional later
 - Sandbox: own small sandbox API modeled on OpenSandbox; first backend Docker with isolation class `container` by default, `gvisor` as operator opt-in (ADR 0001)
 - `tend` CLI on a client generated from the OpenAPI contract (commander)

@@ -34,7 +34,7 @@ do:${implement}
             wait: { minutes: 5 }
 `);
 
-    expect(issues).toEqual(["/do/1/review/do/0/pause: unsupported task type 'wait' (supported: call, do, switch, listen)"]);
+    expect(issues).toEqual(["/do/1/review/do/0/pause: unsupported task type 'wait' (supported: call, do, switch, listen, raise)"]);
   });
 
   it("rejects a call type other than a2a, approval and http", () => {
@@ -62,6 +62,21 @@ do:
 
     expect(validateWorkflow(parse(step("continue")))).toMatchObject({ do: [{ confirm: { call: "approval" } }] });
     expect(issuesOf(step("retry"))).toEqual([expect.stringMatching(/^\/do\/0\/confirm\/with\/answers\/0\/outcome: /)]);
+  });
+
+  it("accepts a raise task with an inline error and rejects one without status or with an error reference", () => {
+    const raise = (error: string) => `${header}
+do:
+  - fail:
+      raise:
+        error: ${error}
+`;
+
+    expect(validateWorkflow(parse(raise("{ type: 'https://serverlessworkflow.io/spec/1.0.0/errors/runtime', status: 500, title: Nope, detail: '${ .x }' }")))).toMatchObject({
+      do: [{ fail: { raise: { error: { status: 500 } } } }],
+    });
+    expect(issuesOf(raise("{ type: 'https://example.com/e', title: Nope }"))).toEqual([expect.stringMatching(/^\/do\/0\/fail\/raise\/error: /)]);
+    expect(issuesOf(raise("my-error"))).toEqual([expect.stringMatching(/^\/do\/0\/fail\/raise\/error: /)]);
   });
 
   it("accepts an http call with a literal or computed endpoint and a body", () => {

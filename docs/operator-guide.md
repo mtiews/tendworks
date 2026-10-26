@@ -391,6 +391,29 @@ Point it at a **push monitor**, which alarms when the pings stop:
 3. Put the URL into `deploy/.env`: `TEND_HEARTBEAT_URL=https://hc-ping.com/<uuid>`, then `docker compose -f deploy/compose.yaml up -d --wait`.
 4. Check it: the monitor shows the first ping within seconds. `docker compose -f deploy/compose.yaml stop server` makes it alarm after the grace time.
 
+### Checking an agent's result: the raise task
+
+An agent step completes when the agent's turn ends, whatever it delivered. Only the workflow knows what the step should deliver, so it checks the result and fails the run with the `raise` task. `output.as` of an agent step (`call: a2a`) sees the agent's A2A task: `.id`, `.status.state`, `.status.message.parts[].text` (the agent's last answer), and `.artifacts[]` with `name`, `description` and `parts[]` (links are `parts[].url`). A `switch` decides, `raise` fails the run (`develop-issue` does exactly this when the agent reports no `pull-request` artifact):
+
+```yaml
+  - check:
+      switch:
+        - reported:
+            when: '${ .pullRequest != null }'
+            then: end
+        - missing:
+            then: fail
+  - fail:
+      raise:
+        error:
+          type: https://serverlessworkflow.io/spec/1.0.0/errors/runtime
+          status: 500
+          title: The agent ended without reporting a pull request
+          detail: '${ "last answer of the agent: \(.lastAnswer)" }'
+```
+
+The run ends `failed` with this error on the run and on the step (`tend run get`, the web UI), and `run.failed` goes to the subscriptions. `detail` may be a runtime expression; only an inline `error` is supported (no `try`/`catch`, no error references). Retrying the run raises again if the agent again delivers nothing.
+
 ### Waiting for a human: the human step and policies
 
 The platform merges nothing; `develop-issue` ends with the pull request, and you merge it in GitHub. A workflow that should continue after something you do outside the platform waits with the human step `call: approval`: it asks a question with answers of your choice and waits for yours, also across restarts.

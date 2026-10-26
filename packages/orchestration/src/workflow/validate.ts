@@ -8,7 +8,7 @@ import { parse } from "yaml";
 
 const SCHEMA = new URL("../../../../contracts/schemas/serverless-workflow.schema.yaml", import.meta.url);
 
-const SUPPORTED_TASKS = ["call", "do", "switch", "listen"];
+const SUPPORTED_TASKS = ["call", "do", "switch", "listen", "raise"];
 const SUPPORTED_CALLS = ["a2a", "approval", "http"];
 // Every task type of DSL 1.0.3. `for` also has a `do` list, so it is checked first.
 const DSL_TASKS = ["call", "fork", "emit", "for", "listen", "raise", "run", "set", "switch", "try", "wait", "do"];
