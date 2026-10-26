@@ -21,6 +21,7 @@ import {
   type TranscriptStore,
   UnknownWorkspaceError,
 } from "./index.js";
+import { toChat, type ChatFacts } from "./chats.js";
 import { createGitWorkspace, type Workspace } from "./workspace.js";
 
 const assistant: AgentProfile.AgentProfile = {
@@ -132,6 +133,17 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(chat.title).toBe(first);
     expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
     expect((await runtime.listChats()).find(({ id }) => id === started.id)?.title).toBe(first);
+  });
+
+  it("names a chat started before chats kept their name by its first message, else by its agent", () => {
+    const task = (history: A2A.Message[]): A2A.Task => ({ id: "chat-1", contextId: "chat-1", status: { state: "TASK_STATE_INPUT_REQUIRED" }, history });
+    const earlier = { agent: "assistant", startedAt: "2026-10-20T10:00:00.000Z", traceparent: "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01" } as ChatFacts;
+
+    const named = toChat(task([say("What failed last night?"), { messageId: "m-2", role: "ROLE_AGENT", parts: [{ text: "Nothing." }] }, say("Sure?")]), earlier);
+    expect(named.title).toBe("What failed last night?");
+    expect(isChat(named), JSON.stringify(isChat.errors)).toBe(true);
+
+    expect(toChat(task([]), earlier).title).toBe("assistant");
   });
 
   it("holds several turns in one agent session in which the agent remembers earlier turns", async () => {
