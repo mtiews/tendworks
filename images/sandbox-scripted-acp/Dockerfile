@@ -10,7 +10,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git \
  && rm -rf /var/lib/apt/lists/* \
  && git config --system user.name "Tendworks agent" \
- && git config --system user.email "agent@tendworks.invalid" \
+ && git config --system user.email "agent@tendworks.dev" \
  && git config --system init.defaultBranch main \
  && git init --quiet /tmp/seed \
  && printf 'scripted playground\n' > /tmp/seed/README.md \

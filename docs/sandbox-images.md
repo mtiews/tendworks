@@ -148,6 +148,7 @@ metadata:
 spec:
   harness: claude-code
   sandbox: flutter
+  model: claude-opus-5-5
   skills: [tdd]
   attribution: false
   chat: {}

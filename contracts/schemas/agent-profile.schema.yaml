@@ -61,6 +61,13 @@ properties:
           Skills (Agent Skills format) the agent can use, by directory name under
           `skills/` of the configuration folder (`skills/<name>/SKILL.md` plus any files
           next to it). They are copied into the agent's sandbox before the session starts.
+      model:
+        type: string
+        minLength: 1
+        description: >-
+          Model the harness uses for the agent's sessions, by the harness's own model id
+          (e.g. `claude-opus-5-5` for `claude-code`). Written to the session's harness
+          settings before it starts. Absent keeps the harness default. Ignored by `fake`.
       attribution:
         type: boolean
         default: true

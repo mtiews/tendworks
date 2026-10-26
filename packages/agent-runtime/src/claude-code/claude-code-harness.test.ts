@@ -539,6 +539,24 @@ describe("Claude Code harness: the agent's role, skills, secrets and workspace",
     });
   });
 
+  it("sets the model the profile names in the harness's settings, over what the configuration already holds", async () => {
+    const sandboxes = scriptedSandboxes();
+    const original = sandboxes.api.create;
+    sandboxes.api.create = async (t) => {
+      const created = await original(t);
+      await sandboxes.api.writeFile(created.id, "/session/claude/settings.json", encode(JSON.stringify({ model: "sonnet" })));
+      return created;
+    };
+
+    await harness(sandboxes.api).run({ ...task(), profile: developer({ model: "claude-opus-5-5" }) }, observe().observer);
+
+    const { files, request } = sandboxes.attached[0]!;
+    expect(JSON.parse(files.get(`${request.env?.CLAUDE_CONFIG_DIR}/settings.json`)!)).toEqual({
+      model: "claude-opus-5-5",
+      permissions: { defaultMode: "bypassPermissions" },
+    });
+  });
+
   it("copies the profile's skills into the harness's config directory before the harness starts", async () => {
     const sandboxes = scriptedSandboxes();
     const skills = new Map([["tdd", [{ path: "SKILL.md", content: encode("Red, green.") }, { path: "refs/mocking.md", content: encode("Mock less.") }]]]);

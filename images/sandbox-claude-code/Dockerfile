@@ -30,7 +30,7 @@ RUN apt-get update \
 # workspace exposes (e.g. GH_TOKEN). Commits carry a fixed agent identity.
 COPY --chmod=0755 git-credential-tendworks /usr/local/bin/git-credential-tendworks
 RUN git config --system user.name "Tendworks agent" \
- && git config --system user.email "agent@tendworks.invalid" \
+ && git config --system user.email "agent@tendworks.dev" \
  && git config --system init.defaultBranch main \
  && gh --version
 
