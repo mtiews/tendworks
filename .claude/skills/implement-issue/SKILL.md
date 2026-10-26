@@ -1,13 +1,16 @@
 ---
 name: implement-issue
-description: "Autonomously work ONE ticket of a spec labeled ready-for-agent on the spec's branch, wait for CI on the spec's pull request, then hand over the next ticket. Trigger/manual invocation only: /implement-issue <number>."
+description: "Autonomously work ONE issue labeled ready-for-agent: a ticket of a spec on the spec's branch (then hand over the next ticket), or a standalone issue on its own branch and pull request (fast path). Trigger/manual invocation only: /implement-issue <number>."
 argument-hint: "<issue-number>"
 disable-model-invocation: true
 ---
 
 Work exactly one ticket: **#$ARGUMENTS** (#N below). The trigger started this run because
 #N carries `ready-for-agent`. Read `docs/agents/agent-workflow.md` first: it holds the
-flow and the **handover rule** this skill applies. One run, one ticket, then stop.
+flow and the **handover rule** this skill applies. One run, one issue, then stop.
+
+Two shapes, told apart in section 1: a **ticket** of a spec (sections 2 to 7) and a
+**standalone issue** without a parent (the [fast path](#fast-path-standalone-issue)).
 
 `git` and `gh` are authenticated; you may edit files, run tools, commit, push, open and
 edit pull requests, and manage issues. The sandbox has Node 24, pnpm and betterleaks, but
@@ -26,12 +29,15 @@ the closing comment.
 State the ticket's number and title. If it carries `ready-for-agent`, claim it:
 `gh issue edit <N> --remove-label ready-for-agent`.
 
-**Stop** if #N is closed, did not carry `ready-for-agent`, has sub-issues (a spec), has no
-`parent` (no ticket of a spec), or carries `ready-for-human` (a human ticket). Comment
-the reason on #N (not for a closed issue), output `NOTHING_TO_DO #<N>` on its own line,
-and stop.
+**Stop** if #N is closed, did not carry `ready-for-agent`, has sub-issues (a spec), or
+carries `ready-for-human` (a human ticket). Comment the reason on #N (not for a closed
+issue), output `NOTHING_TO_DO #<N>` on its own line, and stop.
 
-Otherwise the spec **#S** is the parent: `gh api "<parent_issue_url>" --jq .number`.
+Then branch on the parent:
+
+- #N has no `parent`: a standalone issue. Follow the [fast path](#fast-path-standalone-issue)
+  instead of sections 2 to 7.
+- Otherwise the spec **#S** is the parent: `gh api "<parent_issue_url>" --jq .number`.
 
 ## 2. Get on the spec branch
 
@@ -117,6 +123,33 @@ Apply the handover rule from `docs/agents/agent-workflow.md` to spec #S.
 | done | `gh pr ready <pr>`; comment on #S that the pull request is ready, naming any open human tickets. Update the pull request body's Summary and Evidence to the whole spec. Output `PR_OPENED #<pr>` and `RESOLVED #<N>`, each on its own line, and stop |
 | stuck | comment on #S which agent tickets are held and by which open blockers. Output `RESOLVED #<N>` and stop |
 
+## Fast path (standalone issue)
+
+A human labeled an issue without a parent `ready-for-agent`. No spec, no handover: one
+issue, one branch, one pull request. Section 1 (claim) and 3 (build) apply as written;
+read #N in full instead of a spec, and take its acceptance criteria as the testing
+decisions.
+
+1. **Size check.** If #N has no acceptance criteria, or is too big for one fresh context
+   window, do not start: [blocked](#if-you-cannot-finish) and recommend the spec route
+   (`/to-spec`, `/to-tickets`) in the comment.
+2. **Branch** `agent/<N>`: `git fetch origin`, then `git checkout -B agent/<N> origin/agent/<N>`
+   if it exists (a retry), otherwise `git checkout -B agent/<N> origin/main`. Remember
+   `BASE=$(git rev-parse HEAD)`, run `pnpm install`.
+3. **Build** as in section 3 (steps 1 to 4), pushing `agent/<N>`.
+4. **Pull request.** If `gh pr list --head agent/<N> --state open` finds none, open a
+   draft one with the `pr` skill's template, titled like #N, ending with `Closes #<N>`
+   (and no `Part of`): `gh pr create --draft --base main --head agent/<N> ...`.
+5. **Wait for CI** as in section 5, with `agent/<N>` for `spec/<S>`.
+6. **Finish.** Tick the met acceptance criteria in #N's body and comment on #N with the
+   commits, the pull request and the decisions you took on your own. **Do not close
+   #N**: merging the pull request closes it. Write the `pull-request` artifact as in
+   section 4, then `gh pr ready <pr>`. Output `PR_OPENED #<pr>` and `RESOLVED #<N>`, each
+   on its own line, and stop. Hand over nothing.
+
+Failure works as [below](#if-you-cannot-finish), minus the spec: no comment on a spec, and
+the branch is `agent/<N>`.
+
 ## If you cannot finish
 
 Do not close #N and do not hand over another ticket: the spec waits for a human.
@@ -138,7 +171,7 @@ Do not close #N and do not hand over another ticket: the spec waits for a human.
 
 ## Rules
 
-- Exactly one ticket per run, then stop. Never ask; decide, or go [blocked](#if-you-cannot-finish).
+- Exactly one issue per run, then stop. Never ask; decide, or go [blocked](#if-you-cannot-finish).
 - Set `ready-for-agent` only through the handover rule in section 7.
-- Never push to `main`; tickets reach `main` only through the spec's pull request.
+- Never push to `main`; work reaches `main` only through a pull request (the spec's, or the standalone issue's own).
 - Never close #N before its work is pushed and CI is green.

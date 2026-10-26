@@ -20,7 +20,8 @@ last agent ticket marks the spec's pull request ready for review.
 
 The core rule: **`ready-for-agent` only ever sits on a ticket that can start now, and on
 at most one ticket of a spec.** The trigger is a plain label filter; the skills keep the
-label honest.
+label honest. Standalone issues are the exception: a human sets the label on them (see
+[Fast path](#fast-path-small-changes)).
 
 ## Labels
 
@@ -38,7 +39,9 @@ label honest.
 - **Human ticket**: a ticket labeled `ready-for-human`, e.g. a milestone acceptance on a
   real host. The agent skips it, and it does not keep the pull request from becoming ready.
 
-An issue that is not a sub-issue of a spec is not worked by the agent.
+- **Standalone issue**: an issue without a parent and without sub-issues, written by a
+  human with a goal and acceptance criteria. The human labels it `ready-for-agent`
+  themselves; it takes the [fast path](#fast-path-small-changes).
 
 ## Handover rule
 
@@ -131,6 +134,23 @@ Each run ends with markers on their own lines:
 Review the pull request and merge it; merging closes the agent tickets. Then finish the
 human tickets (e.g. the acceptance), close them, and close the spec last.
 
+## Fast path: small changes
+
+For a change that fits one fresh context window, a spec with tickets is overhead. Write an
+issue with a goal and acceptance criteria (`- [ ]`), no parent, and label it
+`ready-for-agent` yourself. The same trigger starts `/implement-issue <N>`, which then:
+
+1. stops with `BLOCKED #N` if the criteria are missing or the issue is too big (it
+   recommends `/to-spec`),
+2. works on branch `agent/<N>` from `origin/main`, test-first, with `pnpm check` and
+   `/code-review`,
+3. opens a draft pull request that closes #N, waits for CI and marks it ready,
+4. leaves #N open (the merge closes it) and hands over nothing.
+
+Markers are the same as above. Several standalone issues can run at once: each has its own
+branch. You review and merge the pull request. A change that needs several steps, blocks
+on others or has a human acceptance belongs in a spec.
+
 ## When something gets stuck
 
 | Situation | What you see | What to do |
@@ -145,4 +165,5 @@ human tickets (e.g. the acceptance), close them, and close the spec last.
 - Blocking counts only as **native dependencies**; "Blocked by" text in a body is ignored
   by the rule. `/handover` offers to convert it.
 - Keep a ticket small enough for one fresh context window.
-- Never add `ready-for-agent` by hand; run `/handover`, which checks first.
+- Never add `ready-for-agent` by hand to a ticket of a spec; run `/handover`, which checks
+  first. Only a standalone issue gets the label by hand.
