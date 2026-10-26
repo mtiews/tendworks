@@ -22,8 +22,21 @@ jobs:
         run: pnpm check
       - name: Unit and adapter integration tests with coverage thresholds
         run: pnpm coverage
+      # Only the browser: the runner already has Chromium's system libraries, and installing
+      # Playwright's system packages (fonts) with --with-deps took up to 14 minutes on a slow mirror.
+      - name: Playwright version from the lockfile
+        id: playwright
+        run: |
+          version=$(grep -m1 -oP '^  playwright@\K[0-9.]+(?=:)' pnpm-lock.yaml)
+          test -n "$version" || { echo "no playwright version in pnpm-lock.yaml"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Cached Playwright browser
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
       - name: Browser for the web UI's end-to-end flows
-        run: pnpm --filter @tendworks/browser-tests exec playwright install --with-deps chromium
+        run: pnpm --filter @tendworks/browser-tests exec playwright install chromium
       - name: Create deploy/.env with random tokens, as an operator does
         run: scripts/setup-env.sh
       - name: End-to-end tests on the compose stack, API and browser
