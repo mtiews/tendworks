@@ -6,6 +6,7 @@ metadata:
 spec:
   harness: claude-code
   sandbox: claude-code
+  model: claude-opus-5-5
   # The platform assistant: `tend chat` without arguments (ADR 0015). Its workspace starts
   # empty and it holds no repository credential, so it cannot push, open pull requests or
   # merge. Chats about a workspace's contents go to that workspace's assistant instead.

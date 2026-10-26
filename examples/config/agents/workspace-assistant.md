@@ -6,6 +6,7 @@ metadata:
 spec:
   harness: claude-code
   sandbox: claude-code
+  model: claude-opus-5-5
   # The assistant of every workspace that enables one without naming another profile
   # (`assistant: { enabled: true }`, ADR 0022). A human leads it in a chat started by the
   # workspace's name: `tend chat --workspace <name>`.

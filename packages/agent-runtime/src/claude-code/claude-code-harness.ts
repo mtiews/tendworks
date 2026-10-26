@@ -541,7 +541,8 @@ async function reportedArtifacts(
  * complete (anthropics/claude-code#73403). Marks it in both places the global config may
  * live and lets the session use tools without asking; the sandbox is the boundary. A
  * profile with `attribution: false` turns Claude Code's AI attribution in commits and pull
- * requests off. Existing content is kept, except where the profile decides.
+ * requests off. A profile with `model` sets the session's model. Existing content is kept,
+ * except where the profile decides.
  */
 async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string, profile: LoadedAgentProfile): Promise<void> {
   const merge = async (path: string, change: (current: Record<string, unknown>) => Record<string, unknown>) => {
@@ -559,6 +560,7 @@ async function completeOnboarding(sandboxes: Sandboxes, sandboxId: string, profi
   await merge(`${CONFIG_DIR}/settings.json`, (settings) => ({
     ...settings,
     permissions: { defaultMode: "bypassPermissions", ...(settings.permissions as Record<string, unknown> | undefined) },
+    ...(profile.spec.model === undefined ? {} : { model: profile.spec.model }),
     ...(profile.spec.attribution === false ? { attribution: { commit: "", pr: "", sessionUrl: false } } : {}),
   }));
 }

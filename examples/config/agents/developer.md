@@ -6,6 +6,7 @@ metadata:
 spec:
   harness: claude-code
   sandbox: claude-code
+  model: claude-opus-5-5
   skills: [tdd]
   # No AI attribution (co-author trailers, generated-with lines) in commits and pull requests.
   attribution: false
