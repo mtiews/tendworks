@@ -366,7 +366,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .argument("<id>", "chat id")
     .option("-v, --verbose", VERBOSE_HELP)
     .action(async (chatId: string, _options: unknown, command: Command) => {
-      // The parent `chat` takes --verbose too, wherever it stands.
+      // The parent `chat` parses --verbose wherever it stands, so read it with the globals.
       const verbose = command.optsWithGlobals<{ verbose?: boolean }>().verbose === true;
       const { baseUrl, client } = controlPlane(command);
       const found = await getChat(client, baseUrl, chatId);
@@ -808,7 +808,7 @@ function isConcise(entry: TranscriptEntry): boolean {
   return CONCISE_TYPES.has(entry.type);
 }
 
-const CONCISE_TYPES = new Set<string>(["message-chunk", "task-started", "message-received", "task-resumed", "task-ended", "session-resumed", "session-resume-failed", "error"]);
+const CONCISE_TYPES = new Set<TranscriptEntry["type"]>(["message-chunk", "task-started", "message-received", "task-resumed", "task-ended", "session-resumed", "session-resume-failed", "error"]);
 
 /** `12s` or `2m05s`, for the time between two timestamps. */
 function formatDuration(from: string, to: string): string {
