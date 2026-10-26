@@ -50,4 +50,11 @@ describe("starting the server", () => {
     expect(code).not.toBe(0);
     expect(output).toContain("TEND_POSTGRES_PASSWORD is not set");
   });
+
+  it("is refused with an invalid platform check interval; the log names its variable", { timeout: 60_000 }, async () => {
+    const { code, output } = await startServer(strong, other, "TEND_PLATFORM_CHECK_SECONDS=5s");
+
+    expect(code).not.toBe(0);
+    expect(output).toContain('TEND_PLATFORM_CHECK_SECONDS: "5s" is not a whole number of seconds');
+  });
 });

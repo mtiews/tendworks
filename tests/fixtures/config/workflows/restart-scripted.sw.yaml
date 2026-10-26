@@ -1,6 +1,7 @@
 # End-to-end restart test through the Claude Code harness with a scripted ACP agent: the
-# agent's first turn writes before.txt and works for 90 s, so the platform can be
-# restarted mid-turn; the resumed session writes after.txt and says it was resumed.
+# agent's first turn writes before.txt and works for 90 s (its default: the prompt names no
+# duration), so the platform can be restarted mid-turn; the resumed session writes
+# after.txt and says it was resumed.
 # Start it with: POST /runs {"workflow": "restart-scripted"}
 document:
   dsl: '1.0.3'

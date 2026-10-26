@@ -1,0 +1,24 @@
+# The scripted ACP agent's turn of restart-scripted, but short: the agent writes before.txt,
+# works for 15 s (the prompt says how long), then writes after.txt. For end-to-end tests that
+# watch a running step without restarting the platform (tests/e2e/transcripts.test.ts).
+# Start it with: POST /runs {"workflow": "short-scripted"}
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: short-scripted
+  version: '0.1.0'
+  summary: Hands a short task to the scripted ACP agent in a sandbox.
+do:
+  - write-files:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://scripted-developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: Write before.txt, work for 15 seconds, then write after.txt and list the .txt files.
+      output:
+        as: '${ { taskId: .id, state: .status.state, reply: .status.message.parts[0].text } }'

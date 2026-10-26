@@ -73,7 +73,7 @@ describe("transcripts of running steps on the compose stack", () => {
     "serves what the scripted ACP agent did in its sandbox while it still works",
     { timeout: 300_000 },
     async () => {
-      const { runId, taskId } = await runningStep("restart-scripted");
+      const { runId, taskId } = await runningStep("short-scripted");
 
       const entries = await until("the agent's first tool call", 120_000, async () => {
         const read = await transcript(runId, taskId);
@@ -149,7 +149,7 @@ describe("following running steps live on the compose stack", () => {
     "tend run logs --follow shows what the scripted ACP agent does before its step finishes, and stops when the run ends",
     { timeout: 300_000 },
     async () => {
-      const { runId } = await runningStep("restart-scripted");
+      const { runId } = await runningStep("short-scripted");
       // The tend CLI as the server image ships it, against the stack's own API.
       const tend = spawn("docker", ["compose", "-f", composeFile, "exec", "-T", "server", "node", "apps/cli/dist/main.js", "--url", "http://localhost:8080", "--token", READ_TOKEN, "run", "logs", runId, "--follow"]);
       let stdout = "";

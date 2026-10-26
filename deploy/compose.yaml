@@ -136,6 +136,9 @@ services:
       # Heartbeat (ADR 0026): while the platform is healthy, the server calls this URL about
       # every five minutes. Unset: no heartbeat.
       TEND_HEARTBEAT_URL: ${TEND_HEARTBEAT_URL:-}
+      # How often the server checks the platform's components, in seconds (ADR 0026).
+      # Unset: every 60 seconds. The end-to-end tests shorten it.
+      TEND_PLATFORM_CHECK_SECONDS: ${TEND_PLATFORM_CHECK_SECONDS:-}
     volumes:
       - ${TEND_CONFIG_PATH:-../examples/config}:/config:ro
       - *workspace-root

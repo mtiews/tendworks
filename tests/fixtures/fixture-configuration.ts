@@ -11,7 +11,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 //
 // As a script it assembles the fixture configuration for the compose stack and runs a
 // command with TEND_CONFIG_PATH pointing at it (`pnpm e2e`); without a command it only
-// assembles and prints the path:
+// assembles and prints the path. The command also gets the stack's test settings
+// (TEST_SETTINGS), e.g. a short platform check interval so the health test need not wait
+// minutes:
 //   node tests/fixtures/fixture-configuration.ts [command...]
 
 export const STARTER_CONFIGURATION = fileURLToPath(new URL("../../examples/config", import.meta.url));
@@ -47,6 +49,12 @@ function files(dir: string): string[] {
 export const WORKSPACE_ROOT = fileURLToPath(new URL("workspace-root", import.meta.url));
 export const DIRECTORY_WORKSPACE = join(WORKSPACE_ROOT, "scripted-directory");
 
+/** Settings of the compose stack under test, in the command's environment unless set there to something else than empty. */
+export const TEST_SETTINGS = {
+  // The platform monitor checks every 5 s instead of every minute (tests/e2e/platform-health.test.ts).
+  TEND_PLATFORM_CHECK_SECONDS: "5",
+};
+
 /** A host path as the Docker engine knows it: Docker Desktop on Windows sees the drives under /run/desktop/mnt/host. */
 function onDockerHost(path: string): string {
   return process.platform === "win32" ? `/run/desktop/mnt/host/${path[0]!.toLowerCase()}${path.slice(2).replaceAll("\\", "/")}` : path;
@@ -75,8 +83,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const configPath = relative(fileURLToPath(new URL("../../deploy", import.meta.url)), ASSEMBLED_CONFIGURATION).split("\\").join("/");
   console.info(`TEND_CONFIG_PATH=${configPath}`);
   console.info(`TEND_WORKSPACE_ROOTS=${workspaceRoot}`);
+  const settings = Object.fromEntries(Object.entries(TEST_SETTINGS).map(([name, value]) => [name, process.env[name] || value]));
+  for (const [name, value] of Object.entries(settings)) console.info(`${name}=${value}`);
   const command = process.argv.slice(2).join(" ");
   if (command === "") process.exit(0);
-  const { status } = spawnSync(command, { stdio: "inherit", shell: true, env: { ...process.env, TEND_CONFIG_PATH: configPath, TEND_WORKSPACE_ROOTS: workspaceRoot } });
+  const { status } = spawnSync(command, { stdio: "inherit", shell: true, env: { ...process.env, ...settings, TEND_CONFIG_PATH: configPath, TEND_WORKSPACE_ROOTS: workspaceRoot } });
   process.exit(status ?? 1);
 }
