@@ -17,6 +17,7 @@
   display: grid;
   gap: var(--space-4);
   max-width: 48rem;
+  padding: var(--space-4);
 }
 
 .field label {
