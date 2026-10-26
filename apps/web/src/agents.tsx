@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { answer } from "./answers.js";
 import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
+import { Chip, Pill } from "./pill.js";
 import { Link } from "./router.js";
 import { Time } from "./time.js";
 import { usePolling } from "./use-polling.js";
@@ -35,7 +36,7 @@ export function AgentsPage() {
               <li key={agent.name} className="card">
                 <div className="card-head">
                   <span className="card-kind">{agent.name}</span>
-                  <span>{agent.sessions === undefined ? "sessions unknown" : agent.sessions.length === 0 ? "idle" : `${agent.sessions.length} active`}</span>
+                  {agent.sessions === undefined ? <Pill tone="warn">sessions unknown</Pill> : agent.sessions.length === 0 ? <Pill tone="neutral">idle</Pill> : <Pill tone="running">{`${agent.sessions.length} active`}</Pill>}
                 </div>
                 <dl className="facts">
                   <dt>Harness</dt>
@@ -43,7 +44,7 @@ export function AgentsPage() {
                   <dt>Sandbox</dt>
                   <dd>{agent.sandbox ?? <span className="muted">default</span>}</dd>
                   <dt>Skills</dt>
-                  <dd>{agent.skills?.length ? agent.skills.join(", ") : <span className="muted">none</span>}</dd>
+                  <dd className="chips">{agent.skills?.length ? agent.skills.map((skill) => <Chip key={skill}>{skill}</Chip>) : <span className="muted">none</span>}</dd>
                 </dl>
                 {agent.sessions !== undefined && agent.sessions.length > 0 && (
                   <ul className="sessions" aria-label={`Sessions of ${agent.name}`}>

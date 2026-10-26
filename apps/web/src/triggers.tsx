@@ -4,7 +4,9 @@ import { useCallback } from "react";
 import { answer } from "./answers.js";
 import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
-import { Time } from "./time.js";
+import { Panel } from "./panel.js";
+import { Chip, Pill } from "./pill.js";
+import { Age, In } from "./time.js";
 import { checksAround, type Checks } from "./trigger-checks.js";
 import { usePolling } from "./use-polling.js";
 
@@ -18,6 +20,10 @@ type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number
 export function TriggersPage({ phone }: { phone: boolean }) {
   const { client } = useApi();
   const triggers = usePolling(useCallback(async () => ({ items: (await answer(client.GET("/triggers"))).items, readAt: Date.now() }), [client]));
+  const items = triggers.data?.items ?? [];
+  const suspended = items.filter((trigger) => trigger.suspended).length;
+  const readAt = triggers.data?.readAt ?? 0;
+  const counts = `${items.length - suspended} active · ${suspended} suspended`;
 
   return (
     <>
@@ -27,16 +33,19 @@ export function TriggersPage({ phone }: { phone: boolean }) {
       ) : triggers.data.items.length === 0 ? (
         <p className="muted">No trigger bindings are configured.</p>
       ) : phone ? (
-        <ul className="cards" aria-label="Trigger bindings">
+        <Panel title="Bindings" aside={counts}>
+        <ul className="rows" aria-label="Trigger bindings">
           {triggers.data.items.map((trigger) => (
-            <li key={trigger.name} className="card">
+            <li key={trigger.name} className="binding">
               <div className="card-head">
                 <span className="card-kind">{trigger.name}</span>
-                <span>{trigger.suspended ? "suspended" : <>next <Time value={trigger.nextExecutionAt} /></>}</span>
+                {trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <span>next <In value={trigger.nextExecutionAt} now={readAt} /></span>}
               </div>
               <dl className="facts">
                 <dt>Source</dt>
-                <dd>{trigger.kind}</dd>
+                <dd>
+                  <Chip>{trigger.kind}</Chip>
+                </dd>
                 <dt>Workflow</dt>
                 <dd>{trigger.workflow}</dd>
                 <dt>Workspaces</dt>
@@ -45,14 +54,16 @@ export function TriggersPage({ phone }: { phone: boolean }) {
                 <dd>{formatSchedule(trigger.schedule)}</dd>
                 <dt>Last check</dt>
                 <dd>
-                  <Evaluation evaluation={trigger.lastEvaluation} />
+                  <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
                 </dd>
               </dl>
             </li>
           ))}
         </ul>
+        </Panel>
       ) : (
         <>
+          <Panel title="Bindings" aside={counts}>
           <table aria-label="Trigger bindings">
             <thead>
               <tr>
@@ -68,19 +79,22 @@ export function TriggersPage({ phone }: { phone: boolean }) {
             <tbody>
               {triggers.data.items.map((trigger) => (
                 <tr key={trigger.name}>
-                  <td>{trigger.name}</td>
-                  <td>{trigger.kind}</td>
+                  <td className="binding-name">{trigger.name}</td>
+                  <td>
+                    <Chip>{trigger.kind}</Chip>
+                  </td>
                   <td>{trigger.workflow}</td>
                   <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
                   <td>{formatSchedule(trigger.schedule)}</td>
-                  <td>{trigger.suspended ? <span className="muted">suspended</span> : <Time value={trigger.nextExecutionAt} />}</td>
+                  <td>{trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <In value={trigger.nextExecutionAt} now={readAt} />}</td>
                   <td>
-                    <Evaluation evaluation={trigger.lastEvaluation} />
+                    <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </Panel>
           <Timeline triggers={triggers.data.items} now={triggers.data.readAt} />
         </>
       )}
@@ -89,20 +103,20 @@ export function TriggersPage({ phone }: { phone: boolean }) {
 }
 
 /** `failed <at>: <why>` or `succeeded <at>, <n> runs started`, as `tend trigger list` says it. */
-function Evaluation({ evaluation }: { evaluation: Trigger["lastEvaluation"] }) {
+function Evaluation({ evaluation, now }: { evaluation: Trigger["lastEvaluation"]; now: number }) {
   if (!evaluation) return <span className="muted">not checked yet</span>;
   if (evaluation.status === "failed") {
     return (
       <span className="state-unhealthy">
-        failed <Time value={evaluation.at} />
+        failed <Age value={evaluation.at} now={now} />
         {evaluation.message ? `: ${evaluation.message}` : ""}
       </span>
     );
   }
   return (
-    <>
-      succeeded <Time value={evaluation.at} />, {evaluation.startedRuns} {evaluation.startedRuns === 1 ? "run" : "runs"} started
-    </>
+    <span className="muted">
+      succeeded <Age value={evaluation.at} now={now} />, {evaluation.startedRuns} {evaluation.startedRuns === 1 ? "run" : "runs"} started
+    </span>
   );
 }
 
@@ -111,8 +125,8 @@ const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 /** The checks of the last and next 12 hours, one track per binding; the marks are decoration, the text says the numbers. */
 function Timeline({ triggers, now }: { triggers: readonly Trigger[]; now: number }) {
   return (
-    <section aria-labelledby="trigger-timeline" className="section">
-      <h2 id="trigger-timeline">Checks in the last and next 12 hours</h2>
+    <Panel title="Checks in the last and next 12 hours">
+      <div className="timeline-body">
       <ul className="timeline" aria-label="Trigger checks">
         {triggers.map((trigger) => {
           const checks = checksAround(trigger, now);
@@ -130,8 +144,9 @@ function Timeline({ triggers, now }: { triggers: readonly Trigger[]; now: number
         <span>now</span>
         <span>+12 h</span>
       </p>
-      <p className="muted">Earlier checks of a schedule by interval are projected from its next check; a cron schedule shows only its next and last check.</p>
-    </section>
+      <p className="timeline-note muted">Earlier checks of a schedule by interval are projected from its next check; a cron schedule shows only its next and last check.</p>
+      </div>
+    </Panel>
   );
 }
 

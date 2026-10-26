@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { answer } from "./answers.js";
 import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
+import { Chip } from "./pill.js";
 import { Link } from "./router.js";
 import { usePolling } from "./use-polling.js";
 
@@ -27,7 +28,7 @@ export function WorkspacesPage() {
             <li key={workspace.name} className="card">
               <div className="card-head">
                 <span className="card-kind">{workspace.name}</span>
-                <span>{workspace.kind}</span>
+                <Chip>{workspace.kind}</Chip>
               </div>
               <dl className="facts">
                 <dt>Assistant</dt>

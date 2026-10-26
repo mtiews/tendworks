@@ -1,0 +1,314 @@
+/*
+ * The pages around the workbench (spec #101): inbox tabs, cards (agents, workspaces,
+ * subscriptions, approval requests), facts, the trigger timeline, More. Tokens only.
+ */
+
+/* Inbox: tabs, and cards instead of tables so nothing scrolls sideways on a phone */
+.inbox-tabs {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.inbox-tabs a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  border-bottom: var(--border-medium) solid transparent;
+  color: var(--color-muted);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.inbox-tabs a[aria-current="page"] {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.cards {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.card > * + * {
+  margin-top: var(--space-2);
+}
+
+.card p {
+  margin-bottom: 0;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  color: var(--color-muted);
+}
+
+.card-kind {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.card-title {
+  font-size: var(--text-md);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--color-muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+/* Trigger checks timeline */
+.timeline {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: var(--timeline-name-width) 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.timeline-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.timeline-off .timeline-name {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+.timeline-track {
+  width: 100%;
+  height: calc(var(--space-4) + var(--space-1));
+  background: var(--color-surface-raised);
+  border-radius: var(--radius);
+}
+
+.timeline-mark {
+  stroke: var(--color-running);
+  stroke-width: 2;
+}
+
+.timeline-band {
+  fill: var(--color-running);
+  opacity: 0.35;
+}
+
+.timeline-now {
+  stroke: var(--color-warn);
+  stroke-width: 1;
+}
+
+.timeline-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: var(--space-1) 0 0 calc(var(--timeline-name-width) + var(--space-3));
+  font-size: var(--text-xs);
+}
+
+.sessions {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.more-links {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.more-links a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+}
+
+/* Notifications: one compact row each, the columns of a table on a desktop. */
+.notification {
+  display: grid;
+  grid-template-columns: var(--column-age) var(--column-state) minmax(0, 1fr) minmax(var(--column-delivery-min), var(--column-delivery-max));
+  align-items: baseline;
+  gap: var(--space-1) var(--space-4);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.notification:hover {
+  background: var(--color-hover);
+}
+
+.notification-age {
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.notification-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-2);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.notification-detail {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+}
+
+.notification-delivery {
+  min-width: 0;
+  color: var(--color-muted);
+}
+
+/* One line per delivery and for the detail; the full text is on hover. */
+.notification-delivery li,
+span.notification-delivery,
+.notification-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-phone .notification {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.shell-phone .notification-event {
+  order: -1;
+}
+
+.shell-phone .notification-age {
+  text-align: right;
+}
+
+.shell-phone .notification-main,
+.shell-phone .notification-delivery {
+  grid-column: 1 / -1;
+}
+
+.mono-id {
+  text-decoration: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+}
+
+a.mono-id:hover {
+  color: var(--color-link);
+}
+
+a.chip {
+  text-decoration: none;
+}
+
+a.chip:hover {
+  border-color: var(--color-link);
+}
+
+/* Triggers */
+.binding-name {
+  font-weight: 600;
+}
+
+.binding {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.binding > * + * {
+  margin-top: var(--space-2);
+}
+
+.timeline-body {
+  padding: var(--space-3) var(--space-4);
+}
+
+.timeline-note {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-xs);
+}
+
+/* Cards in a grid, as in the prototype: a name with its state, then compact facts. */
+.cards {
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min-width), 1fr));
+}
+
+.card {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-panel);
+}
+
+.card-head {
+  align-items: baseline;
+}
+
+.card-kind {
+  font-size: var(--text-md);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.answer {
+  display: inline-block;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--color-muted);
+  background: var(--color-surface-raised);
+}
+
+.answer-continue {
+  color: var(--color-ok);
+  background: var(--color-ok-bg);
+}
+
+.answer-stop {
+  color: var(--color-error);
+  background: var(--color-error-bg);
+}

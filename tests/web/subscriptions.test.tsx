@@ -1,5 +1,5 @@
 import { emptyConfiguration } from "@tendworks/control-plane";
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { API_TOKEN, renderApp, signedIn } from "./support/platform.js";
 
@@ -23,10 +23,13 @@ describe("subscriptions in the inbox", () => {
     openSubscriptions();
 
     const list = await screen.findByRole("list", { name: "Subscriptions" });
-    const cards = [...list.querySelectorAll(":scope > li")].map((card) => [card.querySelector(".card-kind")?.textContent, ...[...card.querySelectorAll("dd")].map((value) => value.textContent), card.querySelector(".card-head span:last-child")?.textContent]);
+    const cards = [...list.querySelectorAll(":scope > li")].map((card) => [
+      within(card as HTMLElement).getAllByRole("term").map((term) => `${term.textContent}: ${[...(term.nextElementSibling?.childNodes ?? [])].map((node) => node.textContent).join(", ")}`),
+      card.textContent,
+    ]);
     expect(cards).toEqual([
-      ["app-pushes", "run.started, run.failed", "phone, log", "1", "workspace app"],
-      ["platform-state", "platform.degraded, platform.recovered", "phone", "channel default", "platform"],
+      [["Events: run.started, run.failed", "Channels: phone, log", "Priority: 1"], expect.stringMatching(/^app-pushesworkspace app/)],
+      [["Events: platform.degraded, platform.recovered", "Channels: phone", "Priority: channel default"], expect.stringMatching(/^platform-stateplatform/)],
     ]);
   });
 

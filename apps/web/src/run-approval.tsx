@@ -1,7 +1,8 @@
 import { useCallback, useId } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
-import { Age, DecisionActions, DecisionFailure, outcomeOf, Question, THEN, useDecision } from "./approvals.js";
+import { Age } from "./time.js";
+import { DecisionActions, DecisionFailure, outcomeOf, Question, THEN, useDecision } from "./approvals.js";
 import { usePolling } from "./use-polling.js";
 
 /**

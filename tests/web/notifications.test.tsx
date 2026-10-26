@@ -48,13 +48,13 @@ const unselected: Notification = {
 const { runId: _runId, ...withoutRun } = unselected;
 
 describe("notifications in the inbox", () => {
-  it("lists notifications newest first as cards with type, time, title, artifacts, delivery per channel and run", async () => {
+  it("lists notifications newest first, one row each with event, time, title, artifacts, delivery per channel and run", async () => {
     openNotifications({ notifications: { list: async () => [failed, delivered, unselected] } });
 
     const list = await screen.findByRole("list", { name: "Notifications" });
-    const cards = list.querySelectorAll(":scope > li");
-    expect([...cards].map((card) => card.querySelector(".card-kind")?.textContent)).toEqual(["run.failed", "run.completed", "approval.requested"]);
-    const [first, second, third] = [...cards] as HTMLElement[];
+    const rows = list.querySelectorAll(":scope > li");
+    expect([...rows].map((row) => within(row as HTMLElement).getByText(/^(run|approval)./).textContent)).toEqual(["run.failed", "run.completed", "approval.requested"]);
+    const [first, second, third] = [...rows] as HTMLElement[];
     expect(first!.querySelector("time")?.getAttribute("datetime")).toBe(failed.createdAt);
     expect(first!.textContent).toContain("Run 7f1d2a9e-run-failed of hello-agent failed");
     expect(first!.textContent).toContain("/do/0/implement: Agent task ended in state TASK_STATE_FAILED");
@@ -62,7 +62,7 @@ describe("notifications in the inbox", () => {
       "log: delivered",
       "phone: failed: Pushover refused the message (HTTP 400): application token is invalid",
     ]);
-    expect(within(second!).getAllByRole("link").map((link) => link.textContent)).toEqual(["pull-request", "preview", "Run 0b6c4c1e-run-completed"]);
+    expect(within(second!).getAllByRole("link").map((link) => link.textContent)).toEqual(["pull-request", "preview", "Run 0b6c4c1e"]);
     expect(third!.textContent).toContain("Approval needed: Deploy?");
   });
 
@@ -82,7 +82,7 @@ describe("notifications in the inbox", () => {
     expect(within(list).getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
       ["pull-request", "https://git.example/acme/app/pull/7"],
       ["preview", "https://preview.example/app/7"],
-      ["Run 0b6c4c1e-run-completed", "/ui/runs/0b6c4c1e-run-completed"],
+      ["Run 0b6c4c1e", "/ui/runs/0b6c4c1e-run-completed"],
     ]);
   });
 
@@ -90,7 +90,7 @@ describe("notifications in the inbox", () => {
     openNotifications({ notifications: { list: async () => [failed, withoutRun] } });
 
     const list = await screen.findByRole("list", { name: "Notifications" });
-    expect(within(list).getByRole("link", { name: "Run 7f1d2a9e-run-failed" }).getAttribute("href")).toBe("/ui/runs/7f1d2a9e-run-failed");
+    expect(within(list).getByRole("link", { name: "Run 7f1d2a9e" }).getAttribute("href")).toBe("/ui/runs/7f1d2a9e-run-failed");
     expect(within(list).getByText("platform")).toBeTruthy();
   });
 

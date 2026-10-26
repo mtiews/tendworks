@@ -2,7 +2,7 @@ import { formatCost } from "@tendworks/platform";
 import { useCallback, useEffect, useId, useState } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
-import { Age } from "./approvals.js";
+import { Age } from "./time.js";
 import { ChatWindow } from "./chat-window.js";
 import { chatTitle, defaultChat, groupChats, matchesChatFilter, stateOf, type Chat } from "./chat-summary.js";
 import { NewChat } from "./new-chat.js";

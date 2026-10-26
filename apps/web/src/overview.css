@@ -1,5 +1,6 @@
 /*
- * The overview (spec #101): figures, live tiles, attention and next checks. Tokens only.
+ * The overview (spec #101), mission control: figures, the live panel with terminal tiles and
+ * approval tiles, attention and next checks as panels side by side. Tokens only.
  */
 
 .figures {
@@ -16,9 +17,9 @@
   flex-direction: column;
   gap: var(--space-1);
   min-height: var(--touch-target);
-  padding: var(--space-3);
+  padding: var(--space-3) var(--space-4);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-panel);
   background: var(--color-surface);
   color: var(--color-text);
   text-decoration: none;
@@ -36,115 +37,213 @@
 }
 
 .figure-value {
-  font-size: var(--text-lg);
-  font-weight: 600;
+  font-size: var(--text-figure);
+  font-weight: 700;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .figure-ask {
   border-color: var(--color-warn);
+  box-shadow: inset 0 0 0 1px var(--color-warn-bg);
 }
 
-.figure-bad {
-  border-color: var(--color-error);
+.figure-ask .figure-value {
+  color: var(--color-warn);
 }
 
+.figure-bad .figure-value {
+  color: var(--color-error);
+}
+
+.shell-phone .figure {
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Live: tiles edge to edge in the panel, a hairline between them. */
 .tiles {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
-  gap: var(--space-3);
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min-width), 1fr));
+  gap: 1px;
   margin: 0;
   padding: 0;
   list-style: none;
+  background: var(--color-border);
 }
 
 .shell-phone .tiles {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.tile {
+.tiles > li {
+  display: flex;
   min-width: 0;
-  padding: var(--space-3);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius);
   background: var(--color-surface);
+}
+
+.tile {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: var(--tile-min-height);
+  padding: var(--space-3) var(--space-4);
   overflow-wrap: anywhere;
 }
 
-.tile > h3 {
+.tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.tile-head h3 {
+  flex: 1;
+  min-width: 0;
   margin: 0;
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
-.tile > p {
-  margin: var(--space-1) 0 var(--space-2);
+.tile-head a {
+  color: var(--color-text);
+  text-decoration: none;
 }
 
-.tile-ask {
-  border-color: var(--color-warn);
-  background: var(--color-warn-bg);
+.tile-head a:hover {
+  text-decoration: underline;
 }
 
-.tile .transcript-options {
+.tile-foot {
+  margin: 0;
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+}
+
+/* The terminal: the step's last transcript entries, small and monospaced, ending at the bottom. */
+.terminal {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  min-height: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+}
+
+.terminal .transcript-options {
   display: none;
+}
+
+.terminal .transcript-entries {
+  gap: 0;
+}
+
+.terminal .entry pre,
+.terminal .markdown p {
+  margin: 0;
+  padding: 0;
+  background: none;
+}
+
+.terminal .entry-toggle {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+}
+
+.terminal .live {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-xs);
 }
 
 .last-call {
   margin: 0;
-  font-family: var(--font-mono);
+  color: var(--color-tool);
+}
+
+.tile-ask {
+  background: linear-gradient(180deg, var(--color-warn-bg), transparent 70%);
+}
+
+.tile-needs {
+  margin-right: var(--space-1);
+  font-weight: 700;
+  color: var(--color-warn);
+}
+
+.tile-ask .approval-question {
   font-size: var(--text-sm);
 }
 
+.tile-ask .decision {
+  margin-top: auto;
+}
+
+.shell-phone .tile-ask .decision-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--answer-min-width), 1fr));
+}
+
+.shell-phone .tile-ask .decision-actions button {
+  min-height: var(--touch-target);
+}
+
+/* Attention and next checks: two panels side by side, one under the other on a phone. */
 .overview-columns {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
+  align-items: start;
 }
 
 .shell-phone .overview-columns {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.attention {
+.overview-columns .panel {
   margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
-.attention > li {
-  border-bottom: 1px solid var(--color-border);
+.row-more {
+  color: var(--color-link);
 }
 
-.attention-item {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-2);
-  min-height: var(--touch-target);
-  padding: var(--space-2) 0;
-  color: var(--color-text);
-  text-decoration: none;
-  overflow-wrap: anywhere;
-}
-
-.attention-item .item-age {
-  margin-left: auto;
-}
-
-.attention-item .dot {
-  flex: none;
-}
-
-.check {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-1) var(--space-3);
-  padding: var(--space-2) 0;
+.dot-next {
+  background: var(--color-running);
 }
 
 .check-name {
   font-weight: 600;
 }
 
-.check-next {
-  margin-left: auto;
+/* Attention and next checks: one line per item, cut with an ellipsis; the full text stays on hover. */
+.overview-columns .row {
+  align-items: center;
+  font-size: var(--text-sm);
+}
+
+.overview-columns .row > span:not(.dot, .row-end, .check-name) {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overview-columns .check-name {
+  flex: none;
+  white-space: nowrap;
+}
+
+.shell-phone .tile {
+  min-height: 0;
 }

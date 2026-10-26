@@ -46,7 +46,7 @@
 }
 
 .entry-human {
-  border-left: 3px solid var(--color-accent);
+  border-left: var(--border-strong) solid var(--color-link);
   padding-left: var(--space-2);
 }
 
@@ -141,4 +141,11 @@
 
 .live::before {
   content: "\25CF\00A0";
+}
+
+/* Tool calls read as such, as in a terminal: their title in the tool color. */
+.tool-title {
+  color: var(--color-tool);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }

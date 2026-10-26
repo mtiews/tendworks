@@ -107,7 +107,8 @@ describe("overview: live tiles", () => {
 
     const tile = await screen.findByRole("article", { name: "Fix the login" });
     expect(within(tile).getByRole("link", { name: "Fix the login" }).getAttribute("href")).toBe("/ui/runs/r-1");
-    expect(tile.textContent).toContain("playground · #12 · implement");
+    expect(tile.textContent).toContain("playground #12 · 1 h ago");
+    expect(within(tile).getByText("implement")).toBeTruthy();
     expect(await within(tile).findByRole("button", { name: /Tool 7/ })).toBeTruthy();
     expect(within(tile).queryByRole("button", { name: /Tool 1\b/ })).toBeNull();
 
@@ -132,7 +133,7 @@ describe("overview: live tiles", () => {
     const approvals = createInMemoryApprovals([request]);
     const { user, platform } = openOverview({ approvals, runs: runsOf(run("r-wait", "running", { createdAt: ago(3), startedBy: { kind: "trigger", binding: "github-issues", workspace: "playground", item: { key: "#13", title: "Add search" } } })) });
 
-    const tile = await screen.findByRole("article", { name: /Approval request/ });
+    const tile = await screen.findByRole("article", { name: /^Needs you/ });
     expect(within(tile).getByRole("link", { name: "Add search" }).getAttribute("href")).toBe("/ui/runs/r-wait");
     expect(tile.textContent).toContain(request.question);
     await user.click(within(tile).getByRole("button", { name: "Merged – continue" }));
@@ -141,14 +142,14 @@ describe("overview: live tiles", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Answered “Merged – continue”. The run continues.");
     const decisions = platform.requests.filter((candidate) => candidate.method === "POST" && new URL(candidate.url).pathname.endsWith("/decision"));
     expect(await Promise.all(decisions.map((candidate) => candidate.json()))).toEqual([{ answer: "Merged – continue" }]);
-    await waitFor(() => expect(screen.queryByRole("article", { name: /Approval request/ })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("article", { name: /^Needs you/ })).toBeNull());
   });
 
   it("shows the request without answers to a read-only token", async () => {
     signedIn(READ_TOKEN);
     renderApp({ path: "/ui/overview", approvals: createInMemoryApprovals([request]) });
 
-    const tile = await screen.findByRole("article", { name: /Approval request/ });
+    const tile = await screen.findByRole("article", { name: /^Needs you/ });
     expect(within(tile).queryAllByRole("button")).toEqual([]);
   });
 });

@@ -119,31 +119,6 @@
   border-left-color: var(--color-accent);
 }
 
-.dot {
-  width: var(--space-2);
-  height: var(--space-2);
-  border-radius: 50%;
-  background: var(--color-muted);
-  align-self: center;
-}
-
-.dot-running,
-.dot-pending {
-  background: var(--color-focus);
-}
-
-.dot-waiting {
-  background: var(--color-warn);
-}
-
-.dot-completed {
-  background: var(--color-ok);
-}
-
-.dot-failed {
-  background: var(--color-error);
-}
-
 .item-title {
   font-weight: 600;
   overflow: hidden;
@@ -192,17 +167,22 @@
   font-weight: 400;
 }
 
+/* A status as a pill in its own color (see .pill in styles.css). */
 .status {
-  font-size: var(--text-sm);
-  font-weight: 600;
+  display: inline-block;
   padding: 0 var(--space-2);
   border-radius: var(--radius);
-  background: var(--color-surface-raised);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
   color: var(--color-muted);
+  background: var(--color-surface-raised);
 }
 
 .status-completed {
   color: var(--color-ok);
+  background: var(--color-ok-bg);
 }
 
 .status-failed {
@@ -211,9 +191,9 @@
 }
 
 .status-running,
-.status-working,
-.status-pending {
-  color: var(--color-focus);
+.status-working {
+  color: var(--color-running);
+  background: var(--color-running-bg);
 }
 
 .fields {
@@ -328,7 +308,7 @@
 }
 
 .step-running {
-  border-bottom-color: var(--color-focus);
+  border-bottom-color: var(--color-running);
 }
 
 .step-failed {

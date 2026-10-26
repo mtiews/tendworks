@@ -3,6 +3,7 @@ import { answer } from "./answers.js";
 import { useApi } from "./api.js";
 import { InboxTabs } from "./inbox-tabs.js";
 import { Pending } from "./pending.js";
+import { Chip, StatePill } from "./pill.js";
 import { usePolling } from "./use-polling.js";
 
 /** Who gets what: the configured subscriptions, read-only (ADR 0026). They change in the configuration repository. */
@@ -25,11 +26,15 @@ export function SubscriptionsPage() {
             <li key={subscription.name} className="card">
               <div className="card-head">
                 <span className="card-kind">{subscription.name}</span>
-                <span>{"workspace" in subscription.scope ? `workspace ${subscription.scope.workspace}` : "platform"}</span>
+                <Chip>{"workspace" in subscription.scope ? `workspace ${subscription.scope.workspace}` : "platform"}</Chip>
               </div>
               <dl className="facts">
                 <dt>Events</dt>
-                <dd>{subscription.events.join(", ")}</dd>
+                <dd className="chips">
+                  {subscription.events.map((event) => (
+                    <StatePill key={event} state={event} />
+                  ))}
+                </dd>
                 <dt>Channels</dt>
                 <dd>{subscription.channels.join(", ")}</dd>
                 <dt>Priority</dt>
