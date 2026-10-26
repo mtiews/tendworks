@@ -1,0 +1,432 @@
+/*
+ * The shell (ADR 0027): on a desktop an icon rail beside the page, on a phone (below 760px) a
+ * top bar, the page and bottom tabs. The layout is chosen in script (`usePhone`), so the
+ * classes below only style what is rendered. Tokens only; no inline styles.
+ */
+
+.shell {
+  display: grid;
+  min-height: 100vh;
+}
+
+.shell-desktop {
+  grid-template-columns: var(--rail-width) minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "nav top"
+    "nav main";
+}
+
+.shell-phone {
+  /* The page scrolls as a whole (chat input and transcripts follow the window); the top bar sticks, the tabs are fixed. */
+  --tabs-height: 56px;
+  --bottom-inset: calc(var(--tabs-height) + env(safe-area-inset-bottom, 0px));
+  display: block;
+}
+
+.shell > nav {
+  grid-area: nav;
+}
+
+.top-bar {
+  grid-area: top;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  min-height: var(--touch-target);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.shell-phone .top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding-top: calc(var(--space-2) + env(safe-area-inset-top, 0px));
+  padding-left: var(--space-3);
+  padding-right: var(--space-3);
+}
+
+.wordmark {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-right: auto;
+  min-height: var(--touch-target);
+  color: var(--color-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.back {
+  display: grid;
+  place-items: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  margin: 0 auto 0 calc(var(--space-2) * -1);
+  border-radius: var(--radius);
+  color: var(--color-text);
+}
+
+.scope {
+  font-size: var(--text-sm);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+
+.scope-read {
+  color: var(--color-read-only);
+  background: var(--color-read-only-bg);
+  border-color: var(--color-read-only);
+}
+
+.content {
+  grid-area: main;
+  min-width: 0;
+  max-width: var(--content-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: var(--space-6) var(--space-4);
+}
+
+.shell-phone .content {
+  max-width: none;
+  padding: var(--space-4) var(--space-3) calc(var(--bottom-inset) + var(--space-4));
+}
+
+/* Brand mark colors */
+.brand-stem {
+  fill: var(--color-brand-stem);
+}
+
+.brand-leaf {
+  fill: var(--color-brand-leaf);
+}
+
+/* Navigation: shared entries */
+.nav-entry {
+  position: relative;
+  display: grid;
+  place-items: center;
+  color: var(--color-muted);
+  text-decoration: none;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.nav-entry:hover {
+  background: var(--color-hover);
+  color: var(--color-text);
+}
+
+.nav-entry[aria-current="page"] {
+  color: var(--color-text);
+  background: var(--color-surface-raised);
+}
+
+.icon {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.badge {
+  position: absolute;
+  top: var(--space-1);
+  right: var(--space-1);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-1);
+  border-radius: 8px;
+  background: var(--color-warn);
+  color: var(--color-warn-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Desktop: icon rail */
+.rail {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-3) 0;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+}
+
+.rail .nav-entry {
+  width: var(--touch-target);
+  height: var(--touch-target);
+}
+
+.rail .nav-entry[aria-current="page"] {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.rail-mark {
+  display: grid;
+  place-items: center;
+  width: var(--touch-target);
+  height: var(--touch-target);
+  margin-bottom: var(--space-3);
+}
+
+.rail-health {
+  margin-top: auto;
+}
+
+.led {
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  background: var(--color-muted);
+}
+
+.led-healthy {
+  background: var(--color-ok);
+}
+
+.led-unhealthy {
+  background: var(--color-error);
+}
+
+/* Phone: bottom tabs */
+.tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+.tabs .nav-entry {
+  grid-auto-flow: row;
+  align-content: center;
+  justify-items: center;
+  gap: 2px;
+  min-height: var(--tabs-height);
+  border-radius: 0;
+  font-size: var(--text-xs);
+}
+
+.tabs .nav-entry[aria-current="page"] {
+  background: transparent;
+  color: var(--color-brand-leaf);
+  box-shadow: inset 0 2px 0 var(--color-accent);
+}
+
+.tabs .badge {
+  right: calc(50% - 22px);
+}
+
+/* More */
+
+.choice {
+  border: 0;
+  padding: 0;
+}
+
+.choice legend {
+  font-size: var(--text-md);
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.choice .checkbox {
+  min-height: var(--touch-target);
+}
+
+/* Views that use the whole width beside the navigation (the workbench, route flag `wide`). */
+.content-wide {
+  max-width: none;
+}
+
+/* The desktop shell then fills the window exactly, so the view's panes scroll on their own. */
+.shell-desktop:has(.content-wide) {
+  height: 100vh;
+}
+
+.shell-desktop .content-wide {
+  min-height: 0;
+  padding: 0;
+}
+
+/* Inbox: tabs, and cards instead of tables so nothing scrolls sideways on a phone */
+.inbox-tabs {
+  display: flex;
+  gap: var(--space-4);
+  margin: 0 0 var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.inbox-tabs a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+  border-bottom: var(--border-medium) solid transparent;
+  color: var(--color-muted);
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.inbox-tabs a[aria-current="page"] {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent);
+}
+
+.cards {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.card > * + * {
+  margin-top: var(--space-2);
+}
+
+.card p {
+  margin-bottom: 0;
+}
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-1) var(--space-3);
+  color: var(--color-muted);
+}
+
+.card-kind {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.card-title {
+  font-size: var(--text-md);
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0;
+}
+
+.facts dt {
+  color: var(--color-muted);
+}
+
+.facts dd {
+  margin: 0;
+}
+
+/* Trigger checks timeline */
+.timeline {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 10rem 1fr;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+}
+
+.timeline-off .timeline-name {
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+.timeline-track {
+  width: 100%;
+  height: 1.25rem;
+  background: var(--color-surface);
+  border-radius: var(--radius);
+}
+
+.timeline-mark {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+}
+
+.timeline-band {
+  fill: var(--color-accent);
+  opacity: 0.5;
+}
+
+.timeline-now {
+  stroke: var(--color-warn);
+  stroke-width: 1;
+}
+
+.timeline-axis {
+  display: flex;
+  justify-content: space-between;
+  margin: var(--space-1) 0 0 calc(10rem + var(--space-3));
+  font-size: var(--text-xs);
+}
+
+.sessions {
+  margin: 0;
+  padding-left: var(--space-4);
+}
+
+.more-links {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.more-links a {
+  display: flex;
+  align-items: center;
+  min-height: var(--touch-target);
+}

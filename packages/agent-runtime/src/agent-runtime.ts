@@ -458,7 +458,8 @@ export function createAgentRuntime({
 
       const id = crypto.randomUUID();
       const startedAt = now().toISOString();
-      const facts: ChatFacts = { agent, harness: profile.spec.harness, startedAt, traceparent: newTraceparent(), ...inWorkspace };
+      const title = message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
+      const facts: ChatFacts = { agent, title, harness: profile.spec.harness, startedAt, traceparent: newTraceparent(), ...inWorkspace };
       const claimed = await store.claim(
         {
           messageId: message.messageId,

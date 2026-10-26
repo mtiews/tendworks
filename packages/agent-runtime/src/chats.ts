@@ -5,11 +5,13 @@ import type { Cost } from "./harness.js";
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
 
-/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, harness, startedAt, traceparent, workspace?, write? }`. */
+/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, title, harness, startedAt, traceparent, workspace?, write? }`. */
 export const CHAT = "dev.tendworks/chat";
 
 export interface ChatFacts {
   agent: string;
+  /** The first message as sent: what the chat is called. */
+  title: string;
   /**
    * The harness of the agent profile the chat started with, so the chat's session can still
    * be ended once the profile is gone from the configuration. Missing in chats started
@@ -49,6 +51,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
   return {
     id: task.id,
     agent: facts.agent,
+    title: facts.title,
     status,
     startedAt: facts.startedAt,
     lastActivityAt,

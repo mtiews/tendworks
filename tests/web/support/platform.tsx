@@ -15,6 +15,16 @@ export const READ_TOKEN = "view-test-read-token"; // betterleaks:allow (dummy to
 
 export type PlatformOptions = Partial<ControlPlaneApiOptions>;
 
+/** Makes the window as wide as a phone (or not), as the browser's media query would; delete `window.matchMedia` after the test. */
+export function phoneWidth(phone: boolean): void {
+  window.matchMedia = ((query: string) => ({
+    matches: phone && query.includes("max-width: 759"),
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  })) as unknown as typeof window.matchMedia;
+}
+
 /** Starts the next `renderApp` signed in with `token`, as after a sign-in earlier in this tab. */
 export function signedIn(token: string = API_TOKEN): void {
   window.sessionStorage.setItem("tendworks.token", token);

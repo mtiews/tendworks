@@ -6,10 +6,11 @@ import { usePolling } from "./use-polling.js";
 
 /**
  * The run's pending approval request on its run detail, with its answers as on the approval
- * requests page; nothing while the run waits for none. Read-only access shows the request
+ * requests page; nothing while the run waits for none. As a `bar` (on a phone) it sits at the
+ * bottom of the screen, within reach of the thumb. Read-only access shows the request
  * without actions.
  */
-export function RunApprovalRequest({ runId }: { runId: string }) {
+export function RunApprovalRequest({ runId, bar = false }: { runId: string; bar?: boolean }) {
   const { client, canChange } = useApi();
   const polled = usePolling(
     useCallback(
@@ -34,7 +35,7 @@ export function RunApprovalRequest({ runId }: { runId: string }) {
         </p>
       )}
       {loaded?.request && (
-        <section className="approval panel" aria-labelledby={headingId}>
+        <section className={bar ? "approval approval-bar" : "approval banner banner-ask"} aria-labelledby={headingId}>
           <h2 id={headingId}>Approval request</h2>
           <div className="approval-question">
             <Question request={loaded.request} />

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { answer } from "./answers.js";
 import { useApi } from "./api.js";
+import { InboxTabs } from "./inbox-tabs.js";
 import { Pending } from "./pending.js";
 import { usePolling } from "./use-polling.js";
 
@@ -13,34 +14,30 @@ export function SubscriptionsPage() {
 
   return (
     <>
-      <h1>Subscriptions</h1>
+      <InboxTabs current="/subscriptions" />
       {subscriptions.data === undefined ? (
         <Pending error={subscriptions.error} what="subscriptions" />
       ) : subscriptions.data.length === 0 ? (
         <p className="muted">No subscriptions: notifications are listed, but delivered nowhere.</p>
       ) : (
-        <table aria-label="Subscriptions">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Scope</th>
-              <th>Events</th>
-              <th>Channels</th>
-              <th>Priority</th>
-            </tr>
-          </thead>
-          <tbody>
-            {subscriptions.data.map((subscription) => (
-              <tr key={subscription.name}>
-                <td>{subscription.name}</td>
-                <td>{"workspace" in subscription.scope ? `workspace ${subscription.scope.workspace}` : "platform"}</td>
-                <td>{subscription.events.join(", ")}</td>
-                <td>{subscription.channels.join(", ")}</td>
-                <td>{subscription.priority ?? <span className="muted">channel default</span>}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ul className="cards" aria-label="Subscriptions">
+          {subscriptions.data.map((subscription) => (
+            <li key={subscription.name} className="card">
+              <div className="card-head">
+                <span className="card-kind">{subscription.name}</span>
+                <span>{"workspace" in subscription.scope ? `workspace ${subscription.scope.workspace}` : "platform"}</span>
+              </div>
+              <dl className="facts">
+                <dt>Events</dt>
+                <dd>{subscription.events.join(", ")}</dd>
+                <dt>Channels</dt>
+                <dd>{subscription.channels.join(", ")}</dd>
+                <dt>Priority</dt>
+                <dd>{subscription.priority ?? <span className="muted">channel default</span>}</dd>
+              </dl>
+            </li>
+          ))}
+        </ul>
       )}
     </>
   );

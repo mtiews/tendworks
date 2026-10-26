@@ -2,7 +2,6 @@ import { createInMemoryApprovals, createInMemoryRuns, type ApprovalRequest } fro
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
-import { rows } from "./support/table.js";
 
 const PULL_REQUEST = "https://github.com/acme/playground/pull/13";
 
@@ -48,150 +47,65 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("approval requests page", () => {
-  it("lists pending requests first with their answers, then decided ones with the chosen answer, like `tend approval list`", async () => {
-    openApprovals([decided, pending]);
+describe("decided approval requests in the inbox", () => {
+  it("lists only decided requests, newest first, each with question, answer, decision time and a link to its run", async () => {
+    const older: ApprovalRequest = { ...decided, id: "1b1b-approval-older", runId: "8c8c-run", answer: "Cancel", decidedAt: "2026-10-19T09:02:00.000Z" };
+    openApprovals([decided, pending, older]);
 
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    expect(rows(table)).toEqual([
-      ["Status", "Question", "Run", "Requested", "Decided", "Actions"],
-      ["pending", `${pending.question}Pull requestmerge-pull-request · careful`, "0b6c4c1e-run", pending.createdAt, "", "Merged – continueCancel"],
-      ["decided", `${decided.question}merge-pull-request · careful`, "9a8b-run", decided.createdAt, `Merged – continue${decided.decidedAt}`, ""],
-    ]);
-    expect(screen.getByRole("link", { name: "0b6c4c1e-run" }).getAttribute("href")).toBe("/ui/runs/0b6c4c1e-run");
+    const list = await screen.findByRole("list", { name: "Approval requests" });
+    const cards = within(list).getAllByRole("listitem");
+    expect(cards).toHaveLength(2);
+    expect(cards[0]!.textContent).toContain(decided.question);
+    expect(cards[0]!.textContent).toContain("Merged – continue");
+    expect(cards[0]!.querySelector("time")?.getAttribute("datetime")).toBe(decided.decidedAt);
+    expect(cards[0]!.textContent).not.toContain(pending.question);
+    expect(cards[1]!.querySelector(".answer-stop")?.textContent).toBe("Cancel");
+    expect(within(cards[0]!).getByRole("link", { name: "Run 9a8b-run" }).getAttribute("href")).toBe("/ui/runs/9a8b-run");
   });
 
-  it("shows the request's links, opening them in a new tab", async () => {
-    openApprovals([pending]);
+  it("is a tab of the inbox next to notifications and subscriptions", async () => {
+    const { user } = openApprovals([decided]);
+
+    const tabs = await screen.findByRole("navigation", { name: "Inbox" });
+    expect(within(tabs).getAllByRole("link").map((link) => link.textContent)).toEqual(["Notifications", "Subscriptions", "Approval requests"]);
+    expect(within(tabs).getByRole("link", { name: "Approval requests", current: "page" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Inbox", current: "page" })).toBeTruthy();
+
+    await user.click(within(tabs).getByRole("link", { name: "Subscriptions" }));
+    expect(await screen.findByRole("link", { name: "Subscriptions", current: "page" })).toBeTruthy();
+  });
+
+  it("offers no answers: pending requests are answered in the workbench", async () => {
+    openApprovals([pending, decided]);
+
+    const list = await screen.findByRole("list", { name: "Approval requests" });
+    expect(within(list).queryAllByRole("button")).toEqual([]);
+  });
+
+  it("shows the question's links and action, opening links in a new tab", async () => {
+    openApprovals([{ ...decided, links: [{ title: "Pull request", url: PULL_REQUEST }] }]);
 
     const link = await screen.findByRole("link", { name: "Pull request" });
     expect(link.getAttribute("href")).toBe(PULL_REQUEST);
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noopener noreferrer");
+    expect(screen.getByText("merge-pull-request · careful")).toBeTruthy();
   });
 
-  it("names only the action when no policy applied", async () => {
-    const { policy: _policy, ...unpolicied } = pending;
-    openApprovals([unpolicied]);
-
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    expect(rows(table)[1]?.[1]).toBe(`${pending.question}Pull requestmerge-pull-request`);
-  });
-
-  it("shows how long ago each request was made", async () => {
-    vi.useFakeTimers({ now: new Date("2026-10-21T12:00:00.000Z"), shouldAdvanceTime: true });
-    const at = (iso: string, id: string) => ({ ...decided, id, createdAt: iso });
-    openApprovals([at("2026-10-21T11:59:30.000Z", "a"), at("2026-10-21T11:15:00.000Z", "b"), at("2026-10-21T07:00:00.000Z", "c"), at("2026-10-18T12:00:00.000Z", "d")]);
-
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    const ages = [...table.querySelectorAll("tbody tr")].map((row) => row.querySelectorAll("time")[0]?.textContent);
-    expect(ages).toEqual(["just now", "45 min ago", "5 h ago", "3 days ago"]);
-  });
-
-  it("decides a pending request with an answer only after the operator confirms what the run then does", async () => {
-    const { user, platform } = openApprovals([pending]);
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-
-    await user.click(within(table).getByRole("button", { name: "Merged – continue" }));
-    const confirmation = screen.getByRole("alertdialog", { name: "Answer “Merged – continue”?" });
-    expect(confirmation.textContent).toContain(pending.question);
-    expect(confirmation.textContent).toContain("The run continues.");
-    expect(decisions(platform.requests)).toEqual([]);
-    await user.click(within(confirmation).getByRole("button", { name: "Merged – continue" }));
-
-    expect(await screen.findByText("decided")).toBeTruthy();
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(await Promise.all(decisions(platform.requests).map((request) => request.json()))).toEqual([{ answer: "Merged – continue" }]);
-  });
-
-  it("says that an answer that stops ends the run", async () => {
-    const { user } = openApprovals([pending]);
-
-    await user.click(await screen.findByRole("button", { name: "Cancel" }));
-    const confirmation = screen.getByRole("alertdialog", { name: "Answer “Cancel”?" });
-    expect(confirmation.textContent).toContain("The run stops.");
-    await user.click(within(confirmation).getByRole("button", { name: "Cancel" }));
-
-    expect(await screen.findByText("decided")).toBeTruthy();
-    expect(within(screen.getByRole("table", { name: "Approval requests" })).getByText("Cancel")).toBeTruthy();
-  });
-
-  it("decides nothing when the operator cancels the confirmation or presses Escape", async () => {
-    const { user, platform } = openApprovals([pending]);
-
-    const proceed = await screen.findByRole("button", { name: "Merged – continue" });
-    await user.click(proceed);
-    // The safe choice is not called Cancel, since an answer may be.
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Not now" }));
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Merged – continue" }));
-
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(document.activeElement).toBe(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Not now" }));
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-
-    expect(decisions(platform.requests)).toEqual([]);
-    expect(screen.getByText("pending")).toBeTruthy();
-  });
-
-  it("shows a request decided elsewhere (`tend`, another tab) as decided without a reload", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    const { approvals } = openApprovals([pending]);
-    await screen.findByRole("button", { name: "Merged – continue" });
-
-    await approvals.decide(pending.id, "Cancel");
-    await act(() => vi.advanceTimersByTimeAsync(5_000));
-
-    expect(await screen.findByText("decided")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Merged – continue" })).toBeNull();
-  });
-
-  it("says when the request was decided with another answer meanwhile, and shows that answer", async () => {
-    const { user, approvals } = openApprovals([pending]);
-    await user.click(await screen.findByRole("button", { name: "Merged – continue" }));
-
-    await approvals.decide(pending.id, "Cancel");
-    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Merged – continue" }));
-
-    expect((await screen.findByRole("alert")).textContent).toBe("Approval request already decided (409)");
-    expect(await screen.findByText("decided")).toBeTruthy();
-  });
-
-  it("links the URLs in the question, opening them in a new tab", async () => {
-    openApprovals([pending]);
-
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    const link = within(table).getByRole("link", { name: PULL_REQUEST });
-    expect(link.getAttribute("href")).toBe(PULL_REQUEST);
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(link.getAttribute("rel")).toBe("noopener noreferrer");
-  });
-
-  it("keeps trailing punctuation out of links and leaves other URL schemes as text", async () => {
+  it("links the URLs in the question and keeps trailing punctuation and other schemes out of links", async () => {
     const question = "Merge (https://github.com/acme/playground/pull/13), see https://example.test/notes. Or javascript:alert(1)?";
-    openApprovals([{ ...pending, question, links: [] }]);
+    openApprovals([{ ...decided, question, links: [] }]);
 
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    const links = within(table)
+    const list = await screen.findByRole("list", { name: "Approval requests" });
+    const links = within(list)
       .getAllByRole("link")
       .filter((link) => link.getAttribute("target") === "_blank");
     expect(links.map((link) => link.getAttribute("href"))).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
-    expect(links.map((link) => link.textContent)).toEqual(["https://github.com/acme/playground/pull/13", "https://example.test/notes"]);
-    expect(rows(table)[1]?.[1]).toBe(`${question}merge-pull-request · careful`);
   });
 
-  it("offers no answers to choose in read-only mode", async () => {
-    openApprovals([pending, decided], READ_TOKEN);
-
-    const table = await screen.findByRole("table", { name: "Approval requests" });
-    expect(rows(table)[0]).toEqual(["Status", "Question", "Run", "Requested", "Decided"]);
-    expect(within(table).queryAllByRole("button")).toEqual([]);
-  });
-
-  it("says when there are no approval requests, and when they cannot be read", async () => {
-    openApprovals([]);
-    expect(await screen.findByText("No approval requests yet.")).toBeTruthy();
+  it("says when no request was decided yet, and when they cannot be read", async () => {
+    openApprovals([pending]);
+    expect(await screen.findByText("No decided approval requests yet.")).toBeTruthy();
 
     cleanup();
     signedIn();

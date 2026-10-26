@@ -119,6 +119,21 @@ describe("chats (scripted ACP agent behind the fake sandbox)", () => {
     expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
   });
 
+  it("names the chat by the first message as sent and keeps the name over later messages", async () => {
+    const { runtime } = setup({ reply: ["Hi", "Again"] });
+    const first = "  What failed last night?\nPlease look. ";
+
+    const started = await runtime.startChat("assistant", say(first));
+    await waiting(runtime, started.id);
+    await runtime.sendChatMessage(started.id, say("And now?"));
+    const chat = await waiting(runtime, started.id);
+
+    expect(started.title).toBe(first);
+    expect(chat.title).toBe(first);
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect((await runtime.listChats()).find(({ id }) => id === started.id)?.title).toBe(first);
+  });
+
   it("holds several turns in one agent session in which the agent remembers earlier turns", async () => {
     const { runtime, sandboxes } = setup();
     const { id } = await runtime.startChat("assistant", say("My name is Ada."));

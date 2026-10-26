@@ -9,7 +9,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 export const BASE = "/ui";
 
 interface Location {
-  /** The path below /ui, e.g. `/runs/r-1`; `/` for the status page. */
+  /** The path below /ui, e.g. `/runs/r-1`; `/` for the start page. */
   path: string;
   navigate: (to: string, options?: { replace?: boolean }) => void;
 }
@@ -64,8 +64,23 @@ export function match(pattern: string, path: string): Record<string, string> | u
   return parameters;
 }
 
-/** A link to a view: a real `<a href>` (new tab, copy link), navigating in place on a plain click. */
-export function Link({ to, children, className, current: isCurrent }: { to: string; children: ReactNode; className?: string; current?: boolean }) {
+/** A link to a view: a real `<a href>`, navigating in place on a plain click (new tab and copy link still work). */
+export function Link({
+  to,
+  children,
+  className,
+  current: isCurrent,
+  label,
+  describedBy,
+}: {
+  to: string;
+  children: ReactNode;
+  className?: string;
+  current?: boolean;
+  /** The accessible name where the content alone (icons, badges) would not give it. */
+  label?: string | undefined;
+  describedBy?: string | undefined;
+}) {
   const { navigate } = useLocation();
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
@@ -73,7 +88,7 @@ export function Link({ to, children, className, current: isCurrent }: { to: stri
     navigate(to);
   };
   return (
-    <a href={`${BASE}${to}`} onClick={onClick} className={className} aria-current={isCurrent ? "page" : undefined}>
+    <a href={`${BASE}${to}`} onClick={onClick} className={className} aria-current={isCurrent ? "page" : undefined} aria-label={label} aria-describedby={describedBy}>
       {children}
     </a>
   );

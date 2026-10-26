@@ -254,7 +254,7 @@ describe("tend chat", () => {
 });
 
 describe("tend chat list, get and end", () => {
-  it("lists chats with profile, workspace, status, start, last activity and cost", async () => {
+  it("lists chats with title, profile, workspace, status, start, last activity and cost", async () => {
     const { agentRuntime, tend } = platform();
     const id = await existingChat(agentRuntime, "Hi.");
     const inWorkspace = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
@@ -262,9 +262,24 @@ describe("tend chat list, get and end", () => {
     const { exitCode, out } = tend(["chat", "list"]);
 
     expect(await exitCode).toBe(0);
-    expect(out()).toMatch(/^ID\s+AGENT\s+WORKSPACE\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
-    expect(out()).toMatch(new RegExp(`^${id}\\s+assistant\\s+-\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
-    expect(out()).toMatch(new RegExp(`^${inWorkspace.id}\\s+workspace-assistant\\s+app\\s+working\\s`, "m"));
+    expect(out()).toMatch(/^ID\s+TITLE\s+AGENT\s+WORKSPACE\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
+    expect(out()).toMatch(new RegExp(`^${id}\\s+Hello\\s+assistant\\s+-\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
+    expect(out()).toMatch(new RegExp(`^${inWorkspace.id}\\s+Hello\\s+workspace-assistant\\s+app\\s+working\\s`, "m"));
+  });
+
+  it("shortens a long, multi-line title to one line in the list and shows it whole in get", async () => {
+    const { agentRuntime, tend } = platform();
+    const text = `Why did the nightly run fail?\nAnd what should I change in the workflow so that it does not fail again next week?`;
+    const { id } = await agentRuntime.startChat({ agent: "assistant", text });
+
+    const listed = tend(["chat", "list"]);
+    const got = tend(["chat", "get", id]);
+
+    expect(await listed.exitCode).toBe(0);
+    expect(listed.out()).toMatch(new RegExp(`^${id}\\s+Why did the nightly run fail\\? And what should I change in t…\\s+assistant\\s`, "m"));
+    expect(await got.exitCode).toBe(0);
+    expect(got.out()).toContain("Why did the nightly run fail? And what should I change in the workflow");
+    expect(got.out()).toContain("what should I change in the workflow so that it does not fail again next week?");
   });
 
   it("shows the workspace of a chat with a workspace's assistant, and whether it may write", async () => {

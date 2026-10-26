@@ -1,8 +1,7 @@
 import { emptyConfiguration } from "@tendworks/control-plane";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { API_TOKEN, renderApp } from "./support/platform.js";
-import { rows } from "./support/table.js";
+import { API_TOKEN, renderApp, signedIn } from "./support/platform.js";
 
 function openSubscriptions(subscriptions = true) {
   window.sessionStorage.setItem("tendworks.token", API_TOKEN);
@@ -19,22 +18,26 @@ function openSubscriptions(subscriptions = true) {
   return renderApp({ path: "/ui/subscriptions", configuration });
 }
 
-describe("subscriptions page", () => {
-  it("lists each subscription with its scope, events, channels and priority, as tend subscription list does", async () => {
+describe("subscriptions in the inbox", () => {
+  it("lists each subscription as a card with its scope, events, channels and priority, as tend subscription list does", async () => {
     openSubscriptions();
 
-    const table = await screen.findByRole("table", { name: "Subscriptions" });
-    expect(rows(table)).toEqual([
-      ["Name", "Scope", "Events", "Channels", "Priority"],
-      ["app-pushes", "workspace app", "run.started, run.failed", "phone, log", "1"],
-      ["platform-state", "platform", "platform.degraded, platform.recovered", "phone", "channel default"],
+    const list = await screen.findByRole("list", { name: "Subscriptions" });
+    const cards = [...list.querySelectorAll(":scope > li")].map((card) => [card.querySelector(".card-kind")?.textContent, ...[...card.querySelectorAll("dd")].map((value) => value.textContent), card.querySelector(".card-head span:last-child")?.textContent]);
+    expect(cards).toEqual([
+      ["app-pushes", "run.started, run.failed", "phone, log", "1", "workspace app"],
+      ["platform-state", "platform.degraded, platform.recovered", "phone", "channel default", "platform"],
     ]);
   });
 
-  it("is in the navigation", async () => {
-    openSubscriptions();
+  it("is a tab of the inbox", async () => {
+    signedIn();
+    const { user } = renderApp({ path: "/ui/notifications" });
 
-    expect(await screen.findByRole("link", { name: "Subscriptions" })).toBeTruthy();
+    await user.click(await screen.findByRole("link", { name: "Subscriptions" }));
+
+    expect(await screen.findByRole("link", { name: "Subscriptions", current: "page" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Inbox", current: "page" })).toBeTruthy();
   });
 
   it("says so when nothing is subscribed", async () => {

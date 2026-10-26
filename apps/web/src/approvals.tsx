@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
 import { Confirmation } from "./confirm.js";
+import { InboxTabs } from "./inbox-tabs.js";
 import { Pending } from "./pending.js";
 import { LinkedText } from "./linked-text.js";
 import { safeHref } from "./markdown.js";
@@ -21,12 +22,6 @@ export const THEN: Record<Answer["outcome"], string> = { continue: "The run cont
 /** The outcome of the answer a decided request was decided with. */
 export const outcomeOf = (request: ApprovalRequest) => request.answers.find((offered) => offered.label === request.answer)?.outcome;
 
-/** Pending requests first, each group newest first as the API lists them. */
-const pendingFirst = (requests: ApprovalRequest[]) => [
-  ...requests.filter((request) => request.status === "pending"),
-  ...requests.filter((request) => request.status !== "pending"),
-];
-
 /** How long before `now` (ms, e.g. when the list was read) `value` was, in the largest whole unit; the exact time stays on hover and in `dateTime`. */
 export function Age({ value, now }: { value: string; now: number }) {
   const minutes = Math.max(0, Math.floor((now - new Date(value).getTime()) / 60_000));
@@ -39,71 +34,37 @@ export function Age({ value, now }: { value: string; now: number }) {
   );
 }
 
-/** The approval requests (`tend approval list`): pending first, then decided ones with their answer. */
+/** The decided approval requests (pending ones are answered in the workbench and on the overview): the question, the answer and when it was decided. */
 export function ApprovalRequestsPage() {
-  const { client, canChange } = useApi();
+  const { client } = useApi();
   const requests = usePolling(
-    useCallback(async () => ({ items: pendingFirst((await answer(client.GET("/approval-requests"))).items), readAt: Date.now() }), [client]),
+    useCallback(async () => (await answer(client.GET("/approval-requests", { params: { query: { status: "decided" } } }))).items, [client]),
   );
-  const { failure, decided } = useDecision(requests.refresh);
-  const list = requests.data;
 
   return (
     <>
-      <h1>Approval requests</h1>
-      <DecisionFailure failure={failure} />
-      {list === undefined ? (
+      <InboxTabs current="/approval-requests" />
+      {requests.data === undefined ? (
         <Pending error={requests.error} what="approval requests" />
-      ) : list.items.length === 0 ? (
-        <p className="muted">No approval requests yet.</p>
+      ) : requests.data.length === 0 ? (
+        <p className="muted">No decided approval requests yet.</p>
       ) : (
-        <table aria-label="Approval requests">
-          <thead>
-            <tr>
-              <th>Status</th>
-              <th>Question</th>
-              <th>Run</th>
-              <th>Requested</th>
-              <th>Decided</th>
-              {canChange && <th>Actions</th>}
-            </tr>
-          </thead>
-          <tbody>
-            {list.items.map((request) => (
-              <tr key={request.id}>
-                <td>
-                  <span className={`status status-${request.status}`}>{request.status}</span>
-                </td>
-                <td>
-                  <Question request={request} />
-                </td>
-                <td>
-                  <Link to={`/runs/${encodeURIComponent(request.runId)}`}>{request.runId}</Link>
-                </td>
-                <td>
-                  <Age value={request.createdAt} now={list.readAt} />
-                </td>
-                <td>
-                  {request.answer !== undefined && (
-                    <>
-                      <span className={`answer answer-${outcomeOf(request) ?? "unknown"}`}>{request.answer}</span>
-                      {request.decidedAt && (
-                        <div className="muted">
-                          <Time value={request.decidedAt} />
-                        </div>
-                      )}
-                    </>
-                  )}
-                </td>
-                {canChange && (
-                  <td>
-                    {request.status === "pending" && <DecisionActions request={request} onDone={decided} />}
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <ul className="cards" aria-label="Approval requests">
+          {requests.data.map((request) => (
+            <li key={request.id} className="card">
+              <div className="card-head">
+                <span className={`answer answer-${outcomeOf(request) ?? "unknown"}`}>{request.answer}</span>
+                {request.decidedAt && <Time value={request.decidedAt} />}
+              </div>
+              <div className="card-title">
+                <Question request={request} />
+              </div>
+              <div>
+                <Link to={`/runs/${encodeURIComponent(request.runId)}`}>Run {request.runId}</Link>
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
     </>
   );

@@ -1,34 +1,41 @@
-import type { ControlPlane } from "@tendworks/shared";
-import { useCallback, type ReactNode } from "react";
+import { formatCost, formatOrigin } from "@tendworks/platform";
+import { useCallback, useId, useState, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
-import { formatCost, formatOrigin, totalCost } from "@tendworks/platform";
 import { Artifacts } from "./artifacts.js";
+import { LiveTranscript } from "./live-transcript.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
+import { Age } from "./approvals.js";
+import { defaultStep, duration, runArtifacts, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
+import { Link } from "./router.js";
 import { Time } from "./time.js";
-import { LiveTranscript } from "./live-transcript.js";
 import { usePolling } from "./use-polling.js";
 import type { OpenTranscriptStream } from "./use-transcript.js";
 
-type Run = ControlPlane.components["schemas"]["run"];
-type Step = Run["steps"][number];
 type WorkflowError = NonNullable<Run["error"]>;
+type Tab = "transcript" | "output" | "artifacts";
 
 const describeError = (error: WorkflowError) => `${error.title}${error.detail ? `: ${error.detail}` : ""}`;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
- * One run (`tend run get` and `tend run logs`): its summary, a failure prominently, its
- * steps with status and cost, its output, and the transcript of each agent step.
+ * One run in the workbench (`tend run get` and `tend run logs`): named by what started it,
+ * its facts, a failure prominently, its pending approval request (a bar at the bottom on a
+ * phone), its steps to choose from, and tabs for the chosen step's transcript, the output and
+ * the artifacts. It opens on its agent step.
  */
-export function RunDetail({ runId }: { runId: string }) {
-  const { client } = useApi();
-  const { data: run, error, refresh } = usePolling(useCallback(() => answer(client.GET("/runs/{runId}", { params: { path: { runId } } })), [client, runId]));
+export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
+  const { client, canChange } = useApi();
+  const { data: run, error, refresh } = usePolling(
+    useCallback(async () => ({ run: await answer(client.GET("/runs/{runId}", { params: { path: { runId } } })), readAt: Date.now() }), [client, runId]),
+  );
+  const [chosenStep, chooseStep] = useState<string>();
+  const [chosenTab, chooseTab] = useState<Tab>();
 
   if (!run) {
     return (
-      <>
+      <article className="run">
         <h1>Run {runId}</h1>
         {error instanceof AnswerError && error.status === 404 ? (
           <p className="muted">There is no run {runId}.</p>
@@ -39,115 +46,183 @@ export function RunDetail({ runId }: { runId: string }) {
         ) : (
           <p className="muted">Loading…</p>
         )}
-      </>
+      </article>
     );
   }
 
-  const costs = run.steps.flatMap((step) => (step.cost ? [step.cost] : []));
-  // The item a trigger started the run for, e.g. the issue, when it has a safe link.
-  const item = run.startedBy?.kind === "trigger" ? run.startedBy.item : undefined;
-  const itemHref = item?.url === undefined ? undefined : safeHref(item.url);
-  const itemLink = item && itemHref ? { href: itemHref, text: item.title || item.key } : undefined;
-  const fields: [string, ReactNode][] = [
-    ["Workflow", run.workflow],
-    ["Status", <span className={`status status-${run.status}`}>{run.status}</span>],
-    ...(run.startedBy ? [["Started by", formatOrigin(run.startedBy)] as [string, ReactNode]] : []),
-    ["Created", <Time value={run.createdAt} />],
-    ["Started", run.startedAt && <Time value={run.startedAt} />],
-    ["Finished", run.finishedAt && <Time value={run.finishedAt} />],
-    ...(costs.length > 0 ? [["Cost", totalCost(costs)] as [string, ReactNode]] : []),
-  ];
+  const { run: current, readAt } = run;
+  const { title, key } = runTitle(current);
+  const step = current.steps.find((candidate) => candidate.reference === chosenStep) ?? defaultStep(current);
+  const artifacts = runArtifacts(current);
+  const tab = chosenTab ?? (current.steps.some((candidate) => candidate.taskId !== undefined) ? "transcript" : "output");
 
   return (
-    <>
-      <h1>Run {run.id}</h1>
-      {error !== undefined && <p className="message message-error">{messageOf(error)}</p>}
-      {run.error && (
-        <p className="message message-error failure" role="alert">
-          Failed at {run.error.instance}: {describeError(run.error)}
+    <article className="run">
+      <header className="run-head">
+        <h1>
+          {title} {key && <span className="muted">{key}</span>}
+        </h1>
+        <span className={`status status-${current.status}`}>{current.status}</span>
+      </header>
+      {error !== undefined && (
+        <p className="message message-error" role="alert">
+          {messageOf(error)}
         </p>
       )}
-      <RunApprovalRequest runId={run.id} />
-      <dl className="fields">
-        {fields.map(([label, value]) => (
-          <div key={label}>
-            <dt>{label}</dt>
-            <dd>{value}</dd>
-          </div>
-        ))}
-      </dl>
-      {itemLink && (
-        <p>
-          <a href={itemLink.href} target="_blank" rel="noopener noreferrer">
-            {itemLink.text}
-          </a>
-        </p>
+      <Facts run={current} readAt={readAt} />
+      <ItemLink run={current} />
+      {current.error && (
+        <div className="banner banner-error">
+          <p className="failure" role="alert">
+            Failed at {current.error.instance}: {describeError(current.error)}
+          </p>
+          {canChange && (
+            <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
+              Ask the platform assistant
+            </Link>
+          )}
+        </div>
       )}
-      <h2>Steps</h2>
-      {run.steps.length === 0 ? (
+      <RunApprovalRequest runId={current.id} bar={phone} />
+      {current.steps.length === 0 ? (
         <p className="muted">No steps yet.</p>
       ) : (
-        <table aria-label="Steps">
-          <thead>
-            <tr>
-              <th>Step</th>
-              <th>Status</th>
-              <th>Task</th>
-              <th>Cost</th>
-              <th>Started</th>
-              <th>Finished</th>
-            </tr>
-          </thead>
-          <tbody>
-            {run.steps.map((step) => (
-              <tr key={step.reference} className={step.status === "failed" ? "row-failed" : undefined}>
-                <td>{step.taskId ? <a href={`#step-${step.taskId}`}>{step.reference}</a> : step.reference}</td>
-                <td>
-                  <span className={`status status-${step.status}`}>{step.status}</span>
-                </td>
-                <td>{step.taskId ?? ""}</td>
-                <td>{step.cost ? formatCost(step.cost) : ""}</td>
-                <td>
-                  <Time value={step.startedAt} />
-                </td>
-                <td>{step.finishedAt && <Time value={step.finishedAt} />}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <Stepper
+          steps={current.steps}
+          chosen={step}
+          choose={(reference) => {
+            chooseStep(reference);
+            chooseTab("transcript");
+          }}
+          readAt={readAt}
+        />
       )}
-      <Output output={run.output} />
-      {run.steps.map((step) => step.taskId && <AgentStep key={step.reference} runId={run.id} step={step} taskId={step.taskId} ended={refresh} />)}
+      <Tabs
+        tab={tab}
+        choose={chooseTab}
+        artifacts={artifacts.length}
+        panels={{
+          transcript: step ? <StepPanel runId={current.id} step={step} ended={refresh} /> : <p className="muted">No steps yet.</p>,
+          output: <Output output={current.output} />,
+          artifacts: artifacts.length === 0 ? <p className="muted">No artifacts.</p> : <Artifacts artifacts={artifacts} />,
+        }}
+      />
+    </article>
+  );
+}
+
+/** A fact of the run, left out while it has no value (e.g. `Finished` while it runs). */
+type Fact = [label: string, value: ReactNode];
+const fact = (label: string, value: ReactNode | undefined): Fact[] => (value === undefined || value === "" ? [] : [[label, value]]);
+
+function Facts({ run, readAt }: { run: Run; readAt: number }) {
+  const fields: Fact[] = [
+    ...fact("Run", run.id),
+    ...fact("Workflow", run.workflow),
+    ...fact("Workspace", runWorkspace(run)),
+    ...fact("Status", run.status),
+    ...fact("Started by", run.startedBy && formatOrigin(run.startedBy)),
+    ...fact("Created", <Time value={run.createdAt} />),
+    ...fact("Age", <Age value={run.createdAt} now={readAt} />),
+    ...fact("Started", run.startedAt && <Time value={run.startedAt} />),
+    ...fact("Finished", run.finishedAt && <Time value={run.finishedAt} />),
+    ...fact("Duration", duration(run.startedAt, run.finishedAt, readAt)),
+    ...fact("Cost", runCost(run)),
+  ];
+  return (
+    <dl className="fields">
+      {fields.map(([label, value]) => (
+        <div key={label}>
+          <dt>{label}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** The item a trigger started the run for, e.g. the issue, when it has a safe link. */
+function ItemLink({ run }: { run: Run }) {
+  const item = run.startedBy?.kind === "trigger" ? run.startedBy.item : undefined;
+  const href = item?.url === undefined ? undefined : safeHref(item.url);
+  if (!item || !href) return null;
+  return (
+    <p className="item-link">
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {item.title || item.key}
+      </a>
+    </p>
+  );
+}
+
+/** The steps in order; choosing one shows its transcript. */
+function Stepper({ steps, chosen, choose, readAt }: { steps: Step[]; chosen: Step | undefined; choose: (reference: string) => void; readAt: number }) {
+  return (
+    <ol className="stepper" aria-label="Steps">
+      {steps.map((step, index) => {
+        const took = duration(step.startedAt, step.finishedAt, readAt);
+        return (
+          <li key={step.reference}>
+            <button type="button" className={`step-choice step-${step.status}`} aria-pressed={step === chosen} title={step.reference} onClick={() => choose(step.reference)}>
+              <span className="step-number">Step {index + 1}</span>
+              <span className="step-name">{step.name}</span>
+              <span className="step-state">{[step.status, took].filter(Boolean).join(" · ")}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function Tabs({ tab, choose, artifacts, panels }: { tab: Tab; choose: (tab: Tab) => void; artifacts: number; panels: Record<Tab, ReactNode> }) {
+  const id = useId();
+  const labels: Record<Tab, string> = { transcript: "Transcript", output: "Output", artifacts: artifacts > 0 ? `Artifacts (${artifacts})` : "Artifacts" };
+  const order: Tab[] = ["transcript", "output", "artifacts"];
+  return (
+    <>
+      <div className="run-tabs" role="tablist" aria-label="Run">
+        {order.map((name) => (
+          <button
+            key={name}
+            type="button"
+            role="tab"
+            id={`${id}-${name}`}
+            aria-selected={tab === name}
+            aria-controls={`${id}-panel`}
+            tabIndex={tab === name ? 0 : -1}
+            onClick={() => choose(name)}
+            onKeyDown={(event) => {
+              const index = order.indexOf(name);
+              const target = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: order.length - 1 }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              const next = order[(target + order.length) % order.length]!;
+              choose(next);
+              document.getElementById(`${id}-${next}`)?.focus();
+            }}
+          >
+            {labels[name]}
+          </button>
+        ))}
+      </div>
+      <div className="run-panel" role="tabpanel" id={`${id}-panel`} aria-labelledby={`${id}-${tab}`} tabIndex={0}>
+        {panels[tab]}
+      </div>
     </>
   );
 }
 
-/** The run's output, one row per top-level field: single-line strings as they are, anything else as JSON (as `tend run get`). */
-function Output({ output }: { output: unknown }) {
-  if (output === undefined) return null;
-  const entries: [string, unknown][] = output !== null && typeof output === "object" && !Array.isArray(output) ? Object.entries(output) : [["output", output]];
-  if (entries.length === 0) return null;
-  return (
-    <>
-      <h2>Output</h2>
-      <table aria-label="Output">
-        <thead>
-          <tr>
-            <th>Field</th>
-            <th>Value</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(([key, value]) => (
-            <tr key={key}>
-              <td>{key}</td>
-              <td>{typeof value === "string" && !/[\r\n]/.test(value) ? value : <code className="value">{typeof value === "string" ? value : JSON.stringify(value)}</code>}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
+/** The chosen step: an agent step with its transcript (live while it runs), else what kind of step it is. */
+function StepPanel({ runId, step, ended }: { runId: string; step: Step; ended: () => void }) {
+  if (step.taskId === undefined) {
+    return (
+      <p className="muted">
+        {step.name} runs without an agent and has no transcript.{step.status === "running" && " It is at work, or waits for an answer."}
+      </p>
+    );
+  }
+  return <AgentStep key={step.reference} runId={runId} step={step} taskId={step.taskId} ended={ended} />;
 }
 
 /** An agent step: its status, cost, error and results, and its transcript, live while the step runs. */
@@ -159,10 +234,10 @@ function AgentStep({ runId, step, taskId, ended }: { runId: string; step: Step; 
     [client, runId, taskId],
   );
 
-  const headingId = `step-${taskId}`;
+  const headingId = useId();
   return (
-    <section className="step panel" aria-labelledby={headingId}>
-      <h2 id={headingId}>{step.reference}</h2>
+    <section className="step" aria-labelledby={headingId}>
+      <h2 id={headingId}>{step.name}</h2>
       <p className="step-meta">
         <span className={`status status-${step.status}`}>{step.status}</span>
         {step.cost && <span>{formatCost(step.cost)}</span>}
@@ -174,3 +249,29 @@ function AgentStep({ runId, step, taskId, ended }: { runId: string; step: Step; 
     </section>
   );
 }
+
+/** The run's output, one row per top-level field: single-line strings as they are, anything else as JSON (as `tend run get`). */
+function Output({ output }: { output: unknown }) {
+  const entries: [string, unknown][] =
+    output === undefined ? [] : output !== null && typeof output === "object" && !Array.isArray(output) ? Object.entries(output) : [["output", output]];
+  if (entries.length === 0) return <p className="muted">No output.</p>;
+  return (
+    <table aria-label="Output">
+      <thead>
+        <tr>
+          <th>Field</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        {entries.map(([key, value]) => (
+          <tr key={key}>
+            <td>{key}</td>
+            <td>{typeof value === "string" && !/[\r\n]/.test(value) ? value : <code className="value">{typeof value === "string" ? value : JSON.stringify(value)}</code>}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+

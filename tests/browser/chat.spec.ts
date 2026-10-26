@@ -1,9 +1,19 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { API_TOKEN, credentialSelected, expect, expectNoHorizontalScroll, signIn, test } from "./support/test.js";
 
 const conversation = (page: Page) => page.getByRole("region", { name: "Conversation" });
 const transcript = (page: Page) => conversation(page).getByRole("list", { name: "Transcript" });
 const input = (page: Page) => conversation(page).getByRole("textbox", { name: "Message" });
+
+/** The element lies within the visible part of the screen: the input is not pushed out of view by the transcript. */
+async function expectInView(page: Page, element: Locator) {
+  const box = await element.boundingBox();
+  const viewport = page.viewportSize();
+  expect(box).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+}
 
 async function send(page: Page, text: string) {
   await expect(input(page)).toBeEnabled({ timeout: 60_000 });
@@ -13,7 +23,7 @@ async function send(page: Page, text: string) {
 
 // The workspace scripted-playground's assistant, the scripted ACP agent (images/sandbox-scripted-acp), answers a prompt starting with "chat:"
 // at once with every chat prompt so far, and works on any other prompt until cancelled.
-test("a chat followed in two tabs is written from both, cancelled and ended", async ({ page, openTab }) => {
+test("a chat followed in two tabs is written from both, cancelled and ended", async ({ page, openTab }, testInfo) => {
   test.skip(!credentialSelected(), "the scripted ACP agent needs TEND_CLAUDE_CODE_CREDENTIAL");
   test.setTimeout(240_000);
 
@@ -24,6 +34,9 @@ test("a chat followed in two tabs is written from both, cancelled and ended", as
   await page.getByRole("button", { name: "Start chat" }).click();
   await expect(page).toHaveURL(/\/ui\/chats\/[^/]+$/);
   await expect(transcript(page)).toContainText("I remember: My name is Ada.", { timeout: 120_000 });
+  // The chat is named by its first message, and its input stays in view at the bottom of the screen.
+  await expect(page.getByRole("heading", { level: 1, name: "chat: My name is Ada." })).toBeVisible();
+  await expectInView(page, input(page));
 
   // The same chat in a second tab, signed in there too (the token stays in its tab).
   const other = await openTab();
@@ -53,5 +66,10 @@ test("a chat followed in two tabs is written from both, cancelled and ended", as
     await expect(conversation(tab).getByText("This chat has ended.")).toBeVisible({ timeout: 60_000 });
     await expect(input(tab)).toHaveCount(0);
   }
+  await expectNoHorizontalScroll(page);
+
+  // The ended chat sits in the list of ended chats, beside the chat on a desktop and after it on a phone.
+  if (testInfo.project.name === "phone") await page.getByRole("link", { name: "Back" }).click();
+  await expect(page.getByRole("list", { name: "Ended" }).getByRole("link", { name: /chat: My name is Ada\./ }).first()).toBeVisible();
   await expectNoHorizontalScroll(page);
 });

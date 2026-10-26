@@ -10,7 +10,7 @@ The Tendworks mark is a sprout whose stem and two leaves form a T: tend means ca
 | Leaves | `#5fb38a` | `#a8dcbf` |
 | Leaves on the green background | `#a8dcbf` | |
 
-They match the web UI's accent colors (`apps/web/src/styles.css`).
+The web UI's design tokens (`apps/web/src/styles.css`) are built on them: the dark column is the UI's default (mission control, background `#0b0f0d`), the light column applies when the system is light. The mark is an inline SVG component (`apps/web/src/brand-mark.tsx`) colored by the tokens `--color-brand-stem` and `--color-brand-leaf`.
 
 ## Files
 
@@ -33,4 +33,4 @@ The wordmark is set in [Nunito](https://fonts.google.com/specimen/Nunito) (SIL O
 
 ## Web UI
 
-`apps/web/public/` holds `favicon.svg` and PNGs rendered from these SVGs: `apple-touch-icon.png` (180 px, from `app-icon-maskable.svg`), `icon-192.png` and `icon-512.png` (from `app-icon.svg`), `icon-maskable-512.png` (from `app-icon-maskable.svg`). Render them again when the mark changes.
+`apps/web/public/` holds `favicon.svg` and PNGs rendered from these SVGs: `apple-touch-icon.png` (180 px, from `app-icon-maskable.svg`), `icon-192.png` and `icon-512.png` (from `app-icon.svg`), `icon-maskable-512.png` (from `app-icon-maskable.svg`). Render them again when the mark changes. The PWA manifest (`manifest.webmanifest`) uses the dark background `#0b0f0d` for `background_color` and `theme_color`, since a manifest cannot follow the color scheme; `index.html` sets `theme-color` per scheme.

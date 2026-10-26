@@ -344,7 +344,7 @@ Human interaction records a notification for every started, completed or failed 
 
 - **Artifacts:** notifications of finished runs carry what the run's steps reported, e.g. `develop-issue`'s pull request; the first artifact is the message's link.
 - **Approval requests** list their answers and the `tend approval answer` command, and their links: a tap opens the first, e.g. the pull request to merge.
-- **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Notifications page of the web UI. A failed delivery is not retried.
+- **Delivery status per channel:** `tend notification list` (`DELIVERY`, e.g. `phone delivered`, followed by one `phone failed for <id>: <reason>` line per failed delivery) and the Inbox of the web UI. A failed delivery is not retried.
 - **A subscription**, e.g. failures and approvals of the `playground` workspace high, completions normal:
 
   ```yaml
@@ -411,7 +411,7 @@ The platform merges nothing; `develop-issue` ends with the pull request, and you
 
 - `action` is a name of your choice that policies decide on; `question`, `links` and the answer labels may be expressions.
 - An answer with `outcome: continue` goes on with the next task; `stop` ends the workflow there, and the run completes.
-- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or on the Approvals page or the run's detail in the web UI. The `approval.requested` notification tells you a request waits.
+- Answer with `tend approval list --pending`, `tend approval get <id>` (question, links, answers) and `tend approval answer <id> "Merged – continue"`, or in the web UI on the run itself (Runs, where runs waiting for you come first under "Needs you"; on a phone the question sits at the bottom of the screen), and see the decided ones under Inbox → Approval requests. The `approval.requested` notification tells you a request waits.
 
 A **policy** decides per action and workflow whether the step asks (`ask`) or proceeds at once without a request (`allow`):
 
@@ -651,7 +651,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 
 - **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; start it again by hand ([Everyday commands](#everyday-commands), "Retry an issue").
 - Revert configuration changes after the tests, or keep them deliberately.
-- Watch a run live: `tend run logs <id> --follow`, or the run detail in the UI.
+- Watch a run live: `tend run logs <id> --follow`, or the run in the UI's Runs.
 
 ## Operations
 

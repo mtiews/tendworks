@@ -217,7 +217,7 @@ export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }:
       if (!chatAgents.includes(agent)) throw new ChatRefusedError("Chat not allowed", `agent profile ${agent} does not allow chats: its agent profile has no spec.chat`);
       const id = crypto.randomUUID();
       const startedAt = now();
-      chats.set(id, { id, agent, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...inWorkspace });
+      chats.set(id, { id, agent, title: text, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...inWorkspace });
       running.add(id);
       record(id, { type: "task-started", agent, message: message(text) });
       return structuredClone(chats.get(id)!);

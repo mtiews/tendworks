@@ -1,0 +1,150 @@
+/*
+ * The overview (spec #101): figures, live tiles, attention and next checks. Tokens only.
+ */
+
+.figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.figure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-height: var(--touch-target);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.figure:hover {
+  background: var(--color-hover);
+}
+
+.figure-caption {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+.figure-value {
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.figure-ask {
+  border-color: var(--color-warn);
+}
+
+.figure-bad {
+  border-color: var(--color-error);
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shell-phone .tiles {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.tile {
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  overflow-wrap: anywhere;
+}
+
+.tile > h3 {
+  margin: 0;
+  font-size: var(--text-md);
+}
+
+.tile > p {
+  margin: var(--space-1) 0 var(--space-2);
+}
+
+.tile-ask {
+  border-color: var(--color-warn);
+  background: var(--color-warn-bg);
+}
+
+.tile .transcript-options {
+  display: none;
+}
+
+.last-call {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.overview-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+}
+
+.shell-phone .overview-columns {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.attention {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.attention > li {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.attention-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-height: var(--touch-target);
+  padding: var(--space-2) 0;
+  color: var(--color-text);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.attention-item .item-age {
+  margin-left: auto;
+}
+
+.attention-item .dot {
+  flex: none;
+}
+
+.check {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) 0;
+}
+
+.check-name {
+  font-weight: 600;
+}
+
+.check-next {
+  margin-left: auto;
+}

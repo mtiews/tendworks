@@ -1,9 +1,7 @@
-import { createInMemoryAgentRuntime, emptyConfiguration, type Notification } from "@tendworks/control-plane";
-import type { AgentProfile } from "@tendworks/shared";
-import { act, screen, within } from "@testing-library/react";
+import { createInMemoryRuns, type Notification } from "@tendworks/control-plane";
+import { act, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { API_TOKEN, renderApp, type Platform, type PlatformOptions } from "./support/platform.js";
-import { rows } from "./support/table.js";
 
 /*
  * Lists refresh themselves about every 5 seconds and stop while the tab is hidden (spec #38).
@@ -58,23 +56,22 @@ describe("polling", () => {
     expect(await screen.findByText("Run run-2 of hello-agent completed")).toBeTruthy();
   });
 
-  it("shows on the status page who started working since", async () => {
-    const agentRuntime = createInMemoryAgentRuntime();
-    const developer: AgentProfile.AgentProfile = { apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "developer" }, spec: { harness: "fake" } };
-    open("/ui/", {
-      agentRuntime,
-      configuration: emptyConfiguration({ agentProfiles: [developer] }),
-    });
-    const agents = await screen.findByRole("region", { name: "Agents" });
-    expect(await within(agents).findByText("No agent works right now.")).toBeTruthy();
+  it("shows on the overview who started working since", async () => {
+    const runs = createInMemoryRuns();
+    open("/ui/overview", { runs });
+    expect(await screen.findByRole("link", { name: "0 agents working" })).toBeTruthy();
 
-    agentRuntime.startStep({ agent: "developer", run: "r-1", step: "/do/0/implement" });
+    runs.runs.set("r-1", {
+      id: "r-1",
+      workflow: "hello-agent",
+      status: "running",
+      input: {},
+      steps: [{ name: "implement", reference: "/do/0/implement", status: "running", taskId: "task-1", startedAt: "2026-10-18T10:00:00.000Z" }],
+      createdAt: "2026-10-18T10:00:00.000Z",
+    });
     await wait(5_000);
 
-    expect(rows(await within(agents).findByRole("table", { name: "Agent profiles" }))).toEqual([
-      ["Name", "Harness", "Sandbox", "Skills", "Sessions"],
-      ["developer", "fake", "", "", "1"],
-    ]);
+    expect(await screen.findByRole("link", { name: "1 agent working" })).toBeTruthy();
   });
 
   it("stops while the tab is hidden and refreshes at once when it shows again", async () => {
@@ -93,6 +90,7 @@ describe("polling", () => {
     showTab();
 
     expect(await screen.findByText("Run run-2 of hello-agent completed")).toBeTruthy();
-    expect(requestsTo(platform, "/notifications")).toBe(whileVisible + 1);
+    // The page's list and the shell's badge for failed deliveries both poll at once.
+    expect(requestsTo(platform, "/notifications")).toBe(whileVisible + 2);
   });
 });

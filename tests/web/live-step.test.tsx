@@ -42,7 +42,7 @@ function platformWith(...entries: TranscriptEntry[]) {
   return { runs, agentRuntime, finish };
 }
 
-const step = () => screen.getByRole("region", { name: "/do/0/implement" });
+const step = () => screen.getByRole("region", { name: "implement" });
 const transcriptText = () => within(step()).getByRole("list", { name: "Transcript" }).textContent;
 
 beforeEach(() => {
@@ -59,7 +59,7 @@ describe("live step", () => {
     signedIn();
     renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
 
-    expect(await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByText(/Write before\.txt/)).toBeTruthy();
+    expect(await within(await screen.findByRole("region", { name: "implement" })).findByText(/Write before\.txt/)).toBeTruthy();
     expect(within(step()).getByRole("status").textContent).toBe("Live");
 
     agentRuntime.append("task-live", entry.tool);
@@ -83,7 +83,7 @@ describe("live step", () => {
     const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
     const streams = () => platform.requests.filter((request) => request.url.endsWith("/transcript/stream"));
 
-    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByRole("button", { name: /Write before\.txt/ });
+    await within(await screen.findByRole("region", { name: "implement" })).findByRole("button", { name: /Write before\.txt/ });
     await vi.waitFor(() => expect(streams()).toHaveLength(1));
     agentRuntime.append("task-live", entry.hel);
     expect(await within(step()).findByText("Hel")).toBeTruthy();
@@ -108,7 +108,7 @@ describe("live step", () => {
     const { runs, agentRuntime } = platformWith(entry.started);
     signedIn();
     const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
-    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByText(/Write before\.txt/);
+    await within(await screen.findByRole("region", { name: "implement" })).findByText(/Write before\.txt/);
     await vi.waitFor(() => expect(platform.requests.filter((request) => request.url.endsWith("/transcript/stream"))).toHaveLength(1));
 
     platform.unreachable(true);
@@ -126,7 +126,7 @@ describe("live step", () => {
     signedIn();
     const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
     const streams = () => platform.requests.filter((request) => request.url.endsWith("/transcript/stream"));
-    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByRole("button", { name: /Write before\.txt/ });
+    await within(await screen.findByRole("region", { name: "implement" })).findByRole("button", { name: /Write before\.txt/ });
     await vi.waitFor(() => expect(streams()).toHaveLength(1));
 
     platform.unreachable(true);
@@ -158,7 +158,7 @@ describe("live step", () => {
     signedIn();
     const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
     const streams = () => platform.requests.filter((request) => request.url.endsWith("/transcript/stream"));
-    await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByRole("button", { name: /Write before\.txt/ });
+    await within(await screen.findByRole("region", { name: "implement" })).findByRole("button", { name: /Write before\.txt/ });
     await vi.waitFor(() => expect(streams()).toHaveLength(1));
 
     platform.unreachable(true);
@@ -188,7 +188,7 @@ describe("live step", () => {
     signedIn();
     const { platform } = renderApp({ path: "/ui/runs/run-live", runs, agentRuntime });
 
-    expect(await within(await screen.findByRole("region", { name: "/do/0/implement" })).findByText("Hello there")).toBeTruthy();
+    expect(await within(await screen.findByRole("region", { name: "implement" })).findByText("Hello there")).toBeTruthy();
     expect(within(step()).queryByRole("status")).toBeNull();
     expect(platform.requests.filter((request) => request.url.endsWith("/transcript/stream"))).toHaveLength(0);
   });

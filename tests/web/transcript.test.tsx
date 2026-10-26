@@ -28,7 +28,7 @@ async function showTranscript(entries: Record<string, unknown>[], step: Partial<
   );
   signedIn();
   const { user } = renderApp({ path: "/ui/runs/run-1", runs, agentRuntime });
-  const region = await screen.findByRole("region", { name: "/do/0/implement" });
+  const region = await screen.findByRole("region", { name: "implement" });
   const transcript = await within(region).findByRole("list", { name: "Transcript" });
   return { user, region, transcript };
 }

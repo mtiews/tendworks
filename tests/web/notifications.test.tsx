@@ -2,7 +2,6 @@ import type { Notification } from "@tendworks/control-plane";
 import { screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { API_TOKEN, renderApp, type PlatformOptions } from "./support/platform.js";
-import { rows } from "./support/table.js";
 
 function openNotifications(options: PlatformOptions = {}) {
   window.sessionStorage.setItem("tendworks.token", API_TOKEN);
@@ -46,41 +45,60 @@ const unselected: Notification = {
   deliveries: [],
 };
 
-describe("notifications page", () => {
-  it("lists notifications newest first with type, time, run, delivery status per channel, title and artifacts", async () => {
+const { runId: _runId, ...withoutRun } = unselected;
+
+describe("notifications in the inbox", () => {
+  it("lists notifications newest first as cards with type, time, title, artifacts, delivery per channel and run", async () => {
     openNotifications({ notifications: { list: async () => [failed, delivered, unselected] } });
 
-    const table = await screen.findByRole("table", { name: "Notifications" });
-    expect(rows(table)).toEqual([
-      ["Time", "Type", "Run", "Delivery", "Notification"],
-      [
-        "2026-10-18T11:00:03.000Z",
-        "run.failed",
-        "7f1d2a9e-run-failed",
-        "log: deliveredphone: failed: Pushover refused the message (HTTP 400): application token is invalid",
-        "Run 7f1d2a9e-run-failed of hello-agent failed/do/0/implement: Agent task ended in state TASK_STATE_FAILED",
-      ],
-      ["2026-10-18T10:00:03.000Z", "run.completed", "0b6c4c1e-run-completed", "log: delivered", "Run 0b6c4c1e-run-completed of develop-issue completedpull-requestpreview"],
-      ["2026-10-18T09:00:03.000Z", "approval.requested", "5e0f-run-waiting", "no channel", "Approval needed: Deploy?"],
+    const list = await screen.findByRole("list", { name: "Notifications" });
+    const cards = list.querySelectorAll(":scope > li");
+    expect([...cards].map((card) => card.querySelector(".card-kind")?.textContent)).toEqual(["run.failed", "run.completed", "approval.requested"]);
+    const [first, second, third] = [...cards] as HTMLElement[];
+    expect(first!.querySelector("time")?.getAttribute("datetime")).toBe(failed.createdAt);
+    expect(first!.textContent).toContain("Run 7f1d2a9e-run-failed of hello-agent failed");
+    expect(first!.textContent).toContain("/do/0/implement: Agent task ended in state TASK_STATE_FAILED");
+    expect(within(first!).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "log: delivered",
+      "phone: failed: Pushover refused the message (HTTP 400): application token is invalid",
     ]);
+    expect(within(second!).getAllByRole("link").map((link) => link.textContent)).toEqual(["pull-request", "preview", "Run 0b6c4c1e-run-completed"]);
+    expect(third!.textContent).toContain("Approval needed: Deploy?");
+  });
+
+  it("makes a failed delivery stand out and says when no subscription sends a notification", async () => {
+    openNotifications({ notifications: { list: async () => [failed, unselected] } });
+
+    const list = await screen.findByRole("list", { name: "Notifications" });
+    expect(within(list).getByText(/phone: failed/).className).toContain("state-unhealthy");
+    expect(within(list).getByText(/log: delivered/).className).not.toContain("state-unhealthy");
+    expect(within(list).getByText("No subscription sends this notification to a channel.")).toBeTruthy();
   });
 
   it("links a run notification's artifacts, the first one first", async () => {
     openNotifications({ notifications: { list: async () => [delivered] } });
 
-    const table = await screen.findByRole("table", { name: "Notifications" });
-    expect(within(table).getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
-      ["0b6c4c1e-run-completed", "/ui/runs/0b6c4c1e-run-completed"],
+    const list = await screen.findByRole("list", { name: "Notifications" });
+    expect(within(list).getAllByRole("link").map((link) => [link.textContent, link.getAttribute("href")])).toEqual([
       ["pull-request", "https://git.example/acme/app/pull/7"],
       ["preview", "https://preview.example/app/7"],
+      ["Run 0b6c4c1e-run-completed", "/ui/runs/0b6c4c1e-run-completed"],
     ]);
   });
 
-  it("links each notification to its run", async () => {
-    openNotifications({ notifications: { list: async () => [failed] } });
+  it("leads each notification to its run, and marks one without a run as the platform's", async () => {
+    openNotifications({ notifications: { list: async () => [failed, withoutRun] } });
 
-    const table = await screen.findByRole("table", { name: "Notifications" });
-    expect(within(table).getByRole("link", { name: "7f1d2a9e-run-failed" }).getAttribute("href")).toBe("/ui/runs/7f1d2a9e-run-failed");
+    const list = await screen.findByRole("list", { name: "Notifications" });
+    expect(within(list).getByRole("link", { name: "Run 7f1d2a9e-run-failed" }).getAttribute("href")).toBe("/ui/runs/7f1d2a9e-run-failed");
+    expect(within(list).getByText("platform")).toBeTruthy();
+  });
+
+  it("is the first tab of the inbox", async () => {
+    openNotifications({ notifications: { list: async () => [] } });
+
+    expect(await screen.findByRole("link", { name: "Notifications", current: "page" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Inbox" })).toBeTruthy();
   });
 
   it("says when there are no notifications yet", async () => {

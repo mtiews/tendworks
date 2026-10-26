@@ -123,9 +123,10 @@ describe("chats", () => {
     const got = tendClient("chat", "get", chatId, "-o", "yaml");
 
     expect(await listed.exited, listed.stderr()).toBe(0);
-    expect(listed.stdout()).toMatch(new RegExp(`^${chatId}\\s+fake-assistant\\s+-\\s+input-required`, "m"));
+    expect(listed.stdout()).toMatch(new RegExp(`^${chatId}\\s+Hello\\s+fake-assistant\\s+-\\s+input-required`, "m"));
     expect(await got.exited, got.stderr()).toBe(0);
     expect(got.stdout()).toContain(`id: ${chatId}`);
+    expect(got.stdout()).toContain("title: Hello");
     await client.POST("/chats/{chatId}/end", { params: { path: { chatId } } });
   });
 
