@@ -149,7 +149,7 @@ describe("transcript", () => {
       "Could not resume the session (the session expired); started a new one on the kept workspace",
       "Also add a test",
       "Permission granted: Bash",
-      "Plan: [completed] Write the test [in-progress] Fix it",
+      "Plan 1 of 2 done✓Write the test (completed)●Fix it (in-progress)",
       "Checked out https://example.test/acme/playground.git agent/7 (exit code 0)",
       "Result: pull-request",
       "Results ignored: not a list",

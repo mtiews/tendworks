@@ -183,6 +183,9 @@ export function Transcript({ entries }: TranscriptProps) {
   );
 }
 
+/** How a plan step's state reads in the checklist; the state itself is in words for screen readers. */
+const PLAN_MARK = { completed: "✓", "in-progress": "●", pending: "○" } as const;
+
 function Expandable({ className, time, open, toggle, detail, children }: { className: string; time: string; open: boolean; toggle: () => void; detail: string; children: ReactNode }) {
   const id = useId();
   return (
@@ -228,20 +231,30 @@ function Entry({ entry, showHarness, open, toggle }: { entry: Extract<Item, { ki
       return marker(`Tool result ${entry.status}${entry.output ? `: ${entry.output}` : ""}`);
     case "permission":
       return marker(`Permission ${entry.granted ? "granted" : "refused"}: ${entry.tool}`);
-    case "plan":
-      return marker(
-        <>
-          <span className="label">Plan: </span>
-          <ul className="plan">
+    case "plan": {
+      const done = entry.steps.filter((step) => step.status === "completed").length;
+      return (
+        <li className="entry entry-plan" title={entry.time}>
+          <div className="plan-head">
+            <span className="label">Plan</span>{" "}
+            <span>
+              {done} of {entry.steps.length} done
+            </span>
+          </div>
+          <ol className="plan">
             {entry.steps.map((step, index) => (
-              <li key={index} className={`plan-${step.status}`}>
-                [{step.status}] {step.content}{" "}
+              <li key={index} className={`plan-step plan-${step.status}`}>
+                <span className="plan-mark" aria-hidden="true">
+                  {PLAN_MARK[step.status]}
+                </span>
+                <span>{step.content}</span>
+                <span className="visually-hidden"> ({step.status})</span>
               </li>
             ))}
-          </ul>
-        </>,
-        "entry entry-plan",
+          </ol>
+        </li>
       );
+    }
     case "workspace-checkout":
       return (
         <Expandable className={`entry entry-tool${entry.exitCode === 0 ? "" : " entry-error"}`} time={entry.time} open={open} toggle={toggle} detail={entry.output || "(no output)"}>

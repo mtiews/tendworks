@@ -33,9 +33,67 @@
   border-radius: var(--radius);
 }
 
-.entry-marker,
-.entry-plan {
+.entry-marker {
   font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
+/* The plan as a checklist: done, the step at work, the steps to come (prototype transcript.html, A). */
+.entry-plan {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-surface-raised);
+  font-size: var(--text-sm);
+}
+
+.plan-head {
+  display: flex;
+  margin-bottom: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--color-muted);
+}
+
+.plan-head .label {
+  font-weight: 600;
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.plan-head span:last-child {
+  margin-left: auto;
+}
+
+.plan-step {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+}
+
+.plan-mark {
+  flex: none;
+  width: var(--space-4);
+  text-align: center;
+  font-weight: 700;
+}
+
+.plan-completed {
+  color: var(--color-muted);
+}
+
+.plan-completed .plan-mark {
+  color: var(--color-ok);
+}
+
+.plan-in-progress {
+  font-weight: 600;
+}
+
+.plan-in-progress .plan-mark {
+  color: var(--color-running);
+}
+
+.plan-pending .plan-mark {
   color: var(--color-muted);
 }
 
@@ -97,8 +155,11 @@
 }
 
 .plan {
+  display: grid;
+  gap: var(--space-1);
   margin: 0;
-  padding-left: var(--space-6);
+  padding: 0;
+  list-style: none;
 }
 
 .markdown > :first-child {
