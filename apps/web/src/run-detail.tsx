@@ -6,6 +6,7 @@ import { Artifacts } from "./artifacts.js";
 import { Confirmation } from "./confirm.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { safeHref } from "./markdown.js";
+import { PLATFORM_ASSISTANT } from "./new-chat.js";
 import { RunApprovalRequest } from "./run-approval.js";
 import { Age } from "./time.js";
 import { defaultStep, duration, runArtifacts, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
@@ -189,9 +190,6 @@ function RetryAction({ run }: { run: Run }) {
     </>
   );
 }
-
-/** The profile of the platform assistant, which reads the platform through its MCP server (ADR 0016). */
-const PLATFORM_ASSISTANT = "assistant";
 
 /**
  * Starts a chat with the platform assistant whose first message asks it to analyze the

@@ -7,7 +7,7 @@ import { useLocation } from "./router.js";
 import { usePolling } from "./use-polling.js";
 
 /** The profile chosen unless the operator picks another: the platform assistant. */
-const PLATFORM_ASSISTANT = "assistant";
+export const PLATFORM_ASSISTANT = "assistant";
 
 /** Whom a new chat is with: a profile (`agent`) or a workspace's assistant (`workspace`), as `POST /chats` takes it. */
 type ChatWith = { agent: string } | { workspace: string };
