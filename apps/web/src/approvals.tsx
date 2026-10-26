@@ -22,17 +22,6 @@ export const THEN: Record<Answer["outcome"], string> = { continue: "The run cont
 /** The outcome of the answer a decided request was decided with. */
 export const outcomeOf = (request: ApprovalRequest) => request.answers.find((offered) => offered.label === request.answer)?.outcome;
 
-/** How long before `now` (ms, e.g. when the list was read) `value` was, in the largest whole unit; the exact time stays on hover and in `dateTime`. */
-export function Age({ value, now }: { value: string; now: number }) {
-  const minutes = Math.max(0, Math.floor((now - new Date(value).getTime()) / 60_000));
-  const age =
-    minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : minutes < 48 * 60 ? `${Math.floor(minutes / 60)} h ago` : `${Math.floor(minutes / (24 * 60))} days ago`;
-  return (
-    <time dateTime={value} title={new Date(value).toLocaleString()}>
-      {age}
-    </time>
-  );
-}
 
 /** The decided approval requests (pending ones are answered in the workbench and on the overview): the question, the answer and when it was decided. */
 export function ApprovalRequestsPage() {
@@ -60,7 +49,7 @@ export function ApprovalRequestsPage() {
                 <Question request={request} />
               </div>
               <div>
-                <Link to={`/runs/${encodeURIComponent(request.runId)}`}>Run {request.runId}</Link>
+                <Link to={`/runs/${encodeURIComponent(request.runId)}`} className="mono-id">Run {request.runId}</Link>
               </div>
             </li>
           ))}

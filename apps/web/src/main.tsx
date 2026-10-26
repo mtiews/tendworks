@@ -7,6 +7,7 @@ import "./runs.css";
 import "./approvals.css";
 import "./transcript.css";
 import "./chats.css";
+import "./pages.css";
 import "./overview.css";
 
 const root = document.getElementById("root");

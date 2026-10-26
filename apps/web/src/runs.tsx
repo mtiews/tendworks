@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { useApi } from "./api.js";
 import { answer } from "./answers.js";
-import { Age } from "./approvals.js";
+import { Age } from "./time.js";
 import { Pending } from "./pending.js";
 import { RunDetail } from "./run-detail.js";
 import { defaultRun, groupRuns, matchesFilter, runTitle, runWorkspace, stateOf, type Run, type RunState } from "./run-summary.js";

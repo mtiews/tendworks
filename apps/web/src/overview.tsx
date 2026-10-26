@@ -1,14 +1,15 @@
 import { formatSchedule } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
-import { useCallback, useId, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import { answer } from "./answers.js";
 import { useApi } from "./api.js";
-import { Age, DecisionActions, DecisionFailure, Question, THEN, outcomeOf, type ApprovalRequest, type Outcome } from "./approvals.js";
+import { DecisionActions, DecisionFailure, Question, THEN, outcomeOf, type ApprovalRequest, type Outcome } from "./approvals.js";
+import { LiveMark, Panel } from "./panel.js";
 import { Pending } from "./pending.js";
 import { unhealthyComponents, usePlatformStatus } from "./platform-status.js";
 import { Link } from "./router.js";
 import { runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
-import { Time } from "./time.js";
+import { Age, In } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
 import { TranscriptOf } from "./live-transcript.js";
 import { usePolling, type Polled } from "./use-polling.js";
@@ -20,6 +21,8 @@ type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number
 const DAY_MS = 24 * 60 * 60 * 1_000;
 /** How many transcript entries a live tile shows on a desktop. */
 const TAIL = 6;
+/** How many items "Attention" lists; the rest are a link away. */
+const ATTENTION = 6;
 
 interface Running {
   run: Run;
@@ -46,7 +49,7 @@ export function OverviewPage({ phone }: { phone: boolean }) {
     useCallback(async () => ({ items: (await answer(client.GET("/approval-requests", { params: { query: { status: "pending" } } }))).items, readAt: Date.now() }), [client]),
   );
   const notifications = usePolling(useCallback(async () => (await answer(client.GET("/notifications"))).items, [client]));
-  const triggers = usePolling(useCallback(async () => (await answer(client.GET("/triggers"))).items, [client]));
+  const triggers = usePolling(useCallback(async () => ({ items: (await answer(client.GET("/triggers"))).items, readAt: Date.now() }), [client]));
   const status = usePlatformStatus();
   // The answer to a request is told here, not on its tile: the tile goes once the request is decided.
   const [outcome, setOutcome] = useState<Outcome>();
@@ -65,7 +68,7 @@ export function OverviewPage({ phone }: { phone: boolean }) {
     <>
       <h1>Overview</h1>
       <Figures running={running} waiting={approvals.data?.items} failed={failed} />
-      <Section title="Live">
+      <Panel title="Live" aside={<LiveMark>streaming</LiveMark>}>
         {running === undefined && approvals.data === undefined ? (
           <Pending error={runs.error ?? approvals.error} what="running agents and approval requests" />
         ) : (
@@ -73,7 +76,7 @@ export function OverviewPage({ phone }: { phone: boolean }) {
             {runs.error !== undefined && running === undefined && <Pending error={runs.error} what="runs" />}
             {approvals.error !== undefined && approvals.data === undefined && <Pending error={approvals.error} what="approval requests" />}
             <DecisionOutcome outcome={outcome} />
-            {idle && <p className="muted">Nothing is running and nothing waits for you.{nextCheck(triggers.data)}</p>}
+            {idle && <p className="muted">Nothing is running and nothing waits for you.{nextCheck(triggers.data?.items)}</p>}
             {(running?.length || approvals.data?.items.length) ? <ul className="tiles" aria-label="Live">
               {approvals.data?.items.map((request) => approvals.data && (
                 <li key={request.id}>
@@ -88,10 +91,10 @@ export function OverviewPage({ phone }: { phone: boolean }) {
             </ul> : null}
           </>
         )}
-      </Section>
+      </Panel>
       <div className="overview-columns">
-        <Attention failed={failed} runs={runs} notifications={notifications} status={status} />
-        <NextChecks triggers={triggers} />
+        <Attention failed={failed} runs={runs} readAt={runs.data?.readAt ?? 0} notifications={notifications} status={status} />
+        <NextChecks triggers={triggers} readAt={triggers.data?.readAt ?? 0} />
       </div>
     </>
   );
@@ -105,16 +108,6 @@ function nextCheck(triggers: readonly Trigger[] | undefined): string {
 /** Bindings by their next check, suspended ones last. */
 const sortedByNext = (triggers: readonly Trigger[]) =>
   [...triggers].sort((a, b) => Number(a.suspended ?? false) - Number(b.suspended ?? false) || a.nextExecutionAt.localeCompare(b.nextExecutionAt));
-
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  const id = useId();
-  return (
-    <section aria-labelledby={id} className="section">
-      <h2 id={id}>{title}</h2>
-      {children}
-    </section>
-  );
-}
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -168,20 +161,23 @@ function StepTile({ run, step, phone, readAt }: { run: Run; step: Running["step"
   const workspace = runWorkspace(run);
 
   return (
-    <article className="tile" aria-labelledby={headingId}>
-      <h3 id={headingId}>
-        <Link to={`/runs/${encodeURIComponent(run.id)}`}>{title}</Link>
-      </h3>
-      <p className="muted">
-        {[workspace, key, step.name].filter(Boolean).join(" · ")}
+    <article className="tile tile-terminal" aria-labelledby={headingId}>
+      <header className="tile-head">
+        <h3 id={headingId}>
+          <Link to={`/runs/${encodeURIComponent(run.id)}`}>{title}</Link>
+        </h3>
+        <span className="pill pill-running">{step.name}</span>
+      </header>
+      <div className="terminal">{phone ? <LastToolCall entries={view.phase === "shown" ? view.entries : undefined} /> : <TranscriptOf view={tail} missing="No transcript was found for this step." />}</div>
+      <p className="tile-foot">
+        {[workspace, key].filter(Boolean).join(" ")}
         {run.startedAt && (
           <>
-            {" · "}
+            {workspace || key ? " · " : ""}
             <Age value={run.startedAt} now={readAt} />
           </>
         )}
       </p>
-      {phone ? <LastToolCall entries={view.phase === "shown" ? view.entries : undefined} /> : <TranscriptOf view={tail} missing="No transcript was found for this step." />}
     </article>
   );
 }
@@ -202,13 +198,15 @@ function ApprovalTile({ request, run, readAt, onDone }: { request: ApprovalReque
 
   return (
     <article className="tile tile-ask" aria-labelledby={headingId}>
-      <h3 id={headingId}>
-        Approval request:{" "}
-        <Link to={`/runs/${encodeURIComponent(request.runId)}`}>{named?.title ?? `run ${request.runId}`}</Link>
-      </h3>
-      <p className="muted">
-        {workspace && `${workspace} · `}requested <Age value={request.createdAt} now={readAt} />
-      </p>
+      <header className="tile-head">
+        <h3 id={headingId}>
+          <span className="tile-needs">Needs you</span> <Link to={`/runs/${encodeURIComponent(request.runId)}`}>{named?.title ?? `run ${request.runId}`}</Link>
+        </h3>
+        <span className="pill pill-warn">
+          <Age value={request.createdAt} now={readAt} />
+        </span>
+      </header>
+      {workspace && <p className="tile-foot">{workspace}</p>}
       <div className="approval-question">
         <Question request={request} />
       </div>
@@ -233,11 +231,14 @@ function DecisionOutcome({ outcome }: { outcome: Outcome | undefined }) {
 function Attention({
   failed,
   runs,
+  readAt,
   notifications,
   status,
 }: {
   failed: Run[] | undefined;
   runs: Polled<unknown>;
+  /** When the runs were read: the ages of failed runs count from then. */
+  readAt: number;
   notifications: Polled<ControlPlane.components["schemas"]["NotificationList"]["items"]>;
   status: ReturnType<typeof usePlatformStatus>;
 }) {
@@ -250,76 +251,93 @@ function Attention({
   ].filter((what): what is string => what !== false);
   const nothing = failed?.length === 0 && undelivered?.length === 0 && unhealthy?.length === 0;
 
+  const items = [
+    ...(unhealthy ?? []).map((component) => (
+      <div className="row" key={`c-${component.name}`}>
+        <span className="dot dot-failed" aria-hidden="true" />
+        <span>
+          Component {component.name} is {component.status}
+          {component.message && <span className="muted">: {component.message}</span>}
+        </span>
+      </div>
+    )),
+    ...(failed ?? []).map((run) => (
+      <Link key={`r-${run.id}`} to={`/runs/${encodeURIComponent(run.id)}`} className="row">
+        <span className="dot dot-failed" aria-hidden="true" />
+        <span>
+          Run failed: {runTitle(run).title}
+          {run.error && <span className="muted">: {run.error.title}</span>}
+        </span>
+        <span className="row-end">
+          <Age value={run.finishedAt ?? run.createdAt} now={readAt} />
+        </span>
+      </Link>
+    )),
+    ...(undelivered ?? []).map((notification) => (
+      <Link key={`n-${notification.id}`} to="/notifications" className="row">
+        <span className="dot dot-waiting" aria-hidden="true" />
+        <span title={notification.title}>Notification not delivered: {notification.title}</span>
+      </Link>
+    )),
+  ];
+  const more = items.length - ATTENTION;
+
   return (
-    <Section title="Attention">
+    <Panel title="Attention" aside={items.length > 0 ? String(items.length) : undefined}>
       {problems.map((what) => (
         <p key={what} className="message message-error" role="alert">
           Cannot read {what}. Is the platform running?
         </p>
       ))}
-      <ul className="attention" aria-label="Attention">
-        {unhealthy?.map((component) => (
-          <li key={component.name}>
-            <div className="attention-item">
-              <span className="dot dot-failed" aria-hidden="true" />
-              <span>
-                Component {component.name} is {component.status}
-                {component.message && <span className="muted">: {component.message}</span>}
-              </span>
-            </div>
-          </li>
-        ))}
-        {failed?.map((run) => (
-          <li key={run.id}>
-            <Link to={`/runs/${encodeURIComponent(run.id)}`} className="attention-item">
-              <span className="dot dot-failed" aria-hidden="true" />
-              <span>
-                Run failed: {runTitle(run).title}
-                {run.error && <span className="muted">: {run.error.title}</span>}
-              </span>
-              <span className="item-age">
-                <Time value={run.finishedAt ?? run.createdAt} />
-              </span>
-            </Link>
-          </li>
-        ))}
-        {undelivered?.map((notification) => (
-          <li key={notification.id}>
-            <Link to="/notifications" className="attention-item">
-              <span className="dot dot-waiting" aria-hidden="true" />
-              <span>
-                Notification not delivered: {notification.title}
-              </span>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {items.length > 0 && (
+        <ul className="rows" aria-label="Attention">
+          {items.slice(0, ATTENTION).map((item) => (
+            <li key={item.key}>{item}</li>
+          ))}
+          {more > 0 && (
+            <li>
+              <Link to="/notifications" className="row row-more">
+                {more} more: see the runs and the inbox
+              </Link>
+            </li>
+          )}
+        </ul>
+      )}
       {nothing && <p className="muted">Nothing needs attention.</p>}
       {failed === undefined && undelivered === undefined && unhealthy === undefined && problems.length === 0 && <p className="muted">Loading…</p>}
-    </Section>
+    </Panel>
   );
 }
 
 /** Each trigger binding with when it checks its source next. */
-function NextChecks({ triggers }: { triggers: Polled<Trigger[]> }) {
-  const { data, error } = triggers;
+function NextChecks({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] }>; readAt: number }) {
+  const { error } = triggers;
+  const data = triggers.data?.items;
   return (
-    <Section title="Next trigger checks">
+    <Panel
+      title="Next trigger checks"
+      aside={
+        <Link to="/triggers" label="All trigger bindings">
+          all →
+        </Link>
+      }
+    >
       {data === undefined ? (
         <Pending error={error} what="trigger bindings" />
       ) : data.length === 0 ? (
         <p className="muted">No trigger bindings are configured.</p>
       ) : (
-        <ul className="attention" aria-label="Next trigger checks">
+        <ul className="rows" aria-label="Next trigger checks">
           {sortedByNext(data).map((trigger) => (
-            <li key={trigger.name} className="check">
+            <li key={trigger.name} className="row">
+              <span className={`dot ${trigger.suspended ? "" : "dot-next"}`} aria-hidden="true" />
               <span className="check-name">{trigger.name}</span>
               <span className="muted">{[trigger.workspaces.join(", "), formatSchedule(trigger.schedule)].filter(Boolean).join(" · ")}</span>
-              <span className="check-next">{trigger.suspended ? <span className="muted">suspended</span> : <Time value={trigger.nextExecutionAt} />}</span>
+              <span className="row-end">{trigger.suspended ? "suspended" : <In value={trigger.nextExecutionAt} now={readAt} />}</span>
             </li>
           ))}
         </ul>
       )}
-    </Section>
+    </Panel>
   );
 }

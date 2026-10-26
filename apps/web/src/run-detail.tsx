@@ -6,7 +6,7 @@ import { Artifacts } from "./artifacts.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
-import { Age } from "./approvals.js";
+import { Age } from "./time.js";
 import { defaultStep, duration, runArtifacts, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
 import { Link } from "./router.js";
 import { Time } from "./time.js";

@@ -23,12 +23,13 @@ The pieces arrive ticket by ticket (spec #101); until a page exists, its navigat
 
 ## Theme
 
-"Mission control": dark, dense, monospace transcripts. Design tokens (CSS custom properties) hold dark as designed and light derived from the brand's light colors (`docs/brand/README.md`); the scheme follows the system. Views use tokens only. The Content Security Policy of ADR 0018 holds: no inline styles, no `data:` assets; the brand mark is an inline SVG component. The PWA manifest and the first theme color use the dark colors, since a manifest cannot follow the scheme.
+"Mission control", dark only: graded blue-grey surfaces, dense, monospace transcripts. The brand green marks the brand, the current place, primary actions (outlined, never filled blocks) and success; every other state has its own color (running blue, waiting amber, failed red, tool calls violet), shown as pills with words, the same on runs, notifications, chats and subscriptions, so a screen never reads as all green. Overview, triggers and the inbox frame their content in panels with a title bar; lists inside are compact rows. Design tokens (CSS custom properties) hold all of it; views use tokens only. The Content Security Policy of ADR 0018 holds: no inline styles, no `data:` assets; the brand mark is an inline SVG component. The prototype the look follows is on branch `prototype/web-ui-redesign` (`apps/web/prototype-redesign/combined.html`).
 
 ## Considered Options
 
 - **Keep the top navigation and wrap it on small screens:** a grid of entries over tables that scroll sideways; the operator works from a phone a lot.
 - **Render the rail and the tabs both and hide one with CSS:** duplicate links in the accessibility tree and in tests; choosing the layout in script keeps one navigation.
+- **Light as well, following the system:** the operator works in the dark design only; a second palette doubles every check of the look.
 - **Store the start page on the platform:** needs an endpoint only the UI uses (ADR "UI and CLI are just clients"); the choice is about the device.
 
 ## Consequences

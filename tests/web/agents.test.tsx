@@ -30,7 +30,7 @@ describe("agents page", () => {
     const developer = card("developer");
     expect(developer.getByText("fake")).toBeTruthy();
     expect(developer.getByText("node-dev")).toBeTruthy();
-    expect(developer.getByText("tdd, grill-me")).toBeTruthy();
+    expect([developer.getByText("tdd"), developer.getByText("grill-me")]).toHaveLength(2);
     expect(developer.getByText("1 active")).toBeTruthy();
     expect(developer.getByRole("link", { name: "run r-1 step /do/0/implement" }).getAttribute("href")).toBe("/ui/runs/r-1");
     expect(card("assistant").getByRole("link", { name: `chat ${chat.id}` }).getAttribute("href")).toBe(`/ui/chats/${chat.id}`);
