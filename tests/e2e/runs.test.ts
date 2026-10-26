@@ -61,6 +61,22 @@ describe("runs on the compose stack", () => {
     expect(run.steps[2]?.error).toEqual(error);
   });
 
+  it("retries a failed run with its input and origin, and the retry fails again", { timeout: 90_000 }, async () => {
+    const input = { item: { key: "retry", title: "Report nothing again", number: 13 } };
+    const { data: started } = await client.POST("/runs", { body: { workflow: "requires-pull-request", input } });
+    const failed = await waitForEnd(started!.id);
+    expect(failed.status).toBe("failed");
+
+    const { data: retry, response } = await client.POST("/runs/{runId}/retry", { params: { path: { runId: failed.id } } });
+    const refused = await client.POST("/runs/{runId}/retry", { params: { path: { runId: retry!.id } } });
+
+    expect(response.status).toBe(201);
+    expect(retry).toMatchObject({ workflow: "requires-pull-request", input, startedBy: { kind: "manual", retryOf: failed.id } });
+    // Not failed yet: a run is retried only once it failed.
+    expect(refused.response.status).toBe(409);
+    expect(await waitForEnd(retry!.id)).toMatchObject({ status: "failed", error: { title: "The agent ended without reporting its result" }, startedBy: { retryOf: failed.id } });
+  });
+
   it("neither starts nor lists runs without a token, and lets the read-only token only read", async () => {
     const { response } = await anonymous.POST("/runs", { body: { workflow: "hello-agent" } });
 

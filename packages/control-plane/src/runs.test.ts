@@ -130,6 +130,103 @@ describe("runs API", () => {
     expect(body).toMatchObject({ title: "Run not found", status: 404 });
   });
 
+  describe("retry", () => {
+    const failedRun = (runs: ReturnType<typeof createInMemoryRuns>, overrides: Partial<Run> = {}): Run => {
+      const run: Run = {
+        id: "failed-1",
+        workflow: "build",
+        status: "failed",
+        input: { workspace: "app", item: { number: 7 } },
+        startedBy: { kind: "trigger", binding: "ready", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://issues.example/7" } },
+        error: { type: "https://serverlessworkflow.io/spec/1.0.0/errors/runtime", status: 500, instance: "/do/1/fail", title: "nothing delivered" },
+        steps: [],
+        createdAt: "2026-10-26T08:00:00.000Z",
+        ...overrides,
+      };
+      runs.runs.set(run.id, run);
+      return run;
+    };
+
+    it("starts the failed run's workflow as configured now, with its input and origin, naming the failed run", async () => {
+      const runs = createInMemoryRuns();
+      const failed = failedRun(runs);
+      const { request } = setup(runs);
+
+      const { status, headers, body } = await request("POST", `/runs/${failed.id}/retry`);
+
+      expect(status).toBe(201);
+      const retry = body as Run;
+      expect(retry).toMatchObject({ workflow: "build", status: "pending", input: failed.input, startedBy: { ...failed.startedBy, retryOf: failed.id } });
+      expect(headers.get("location")).toBe(`/runs/${retry.id}`);
+      expect(runs.started).toEqual([
+        { workflow: expect.objectContaining({ document: expect.objectContaining({ name: "build" }) }), input: failed.input, startedBy: { ...failed.startedBy, retryOf: failed.id } },
+      ]);
+    });
+
+    it("names the run it retries, also when that run was itself a retry or started by hand", async () => {
+      const runs = createInMemoryRuns();
+      failedRun(runs, { id: "manual-1", startedBy: { kind: "manual", retryOf: "older" } });
+      const { request } = setup(runs);
+
+      await request("POST", "/runs/manual-1/retry");
+
+      expect(runs.started.map((run) => run.startedBy)).toEqual([{ kind: "manual", retryOf: "manual-1" }]);
+    });
+
+    it("starts another run on every call", async () => {
+      const runs = createInMemoryRuns();
+      const failed = failedRun(runs);
+      const { request } = setup(runs);
+
+      await request("POST", `/runs/${failed.id}/retry`);
+      await request("POST", `/runs/${failed.id}/retry`);
+
+      expect(runs.started).toHaveLength(2);
+    });
+
+    it.each(["pending", "running", "completed"] as const)("refuses a %s run", async (status) => {
+      const runs = createInMemoryRuns();
+      const run = failedRun(runs, { status });
+      const { request } = setup(runs);
+
+      const answer = await request("POST", `/runs/${run.id}/retry`);
+
+      expect(answer).toMatchObject({ status: 409, body: { title: "Run not retryable", detail: `run ${run.id} is ${status}; only a failed run can be retried` } });
+      expect(runs.started).toEqual([]);
+    });
+
+    it("refuses a run whose workflow is no longer configured", async () => {
+      const runs = createInMemoryRuns();
+      const run = failedRun(runs, { workflow: "deploy" });
+      const { request } = setup(runs);
+
+      const answer = await request("POST", `/runs/${run.id}/retry`);
+
+      expect(answer).toMatchObject({ status: 409, body: { title: "Run not retryable", detail: "its workflow 'deploy' is no longer configured (configured: build)" } });
+      expect(runs.started).toEqual([]);
+    });
+
+    it("answers 404 for an unknown run", async () => {
+      const { request } = setup();
+
+      const { status, body } = await request("POST", "/runs/nope/retry");
+
+      expect(status).toBe(404);
+      expect(body).toMatchObject({ title: "Run not found" });
+    });
+
+    it("needs the API token, not the read-only token", async () => {
+      const runs = createInMemoryRuns();
+      const failed = failedRun(runs);
+      const api = createControlPlaneApi({ probes: [], configuration: configuration(), runs, apiToken: "test-token", readToken: "read-token" });
+
+      const response = await api.fetch(new Request(`http://tend.test/runs/${failed.id}/retry`, { method: "POST", headers: { authorization: "Bearer read-token" } }));
+
+      expect(response.status).toBe(403);
+      expect(runs.started).toEqual([]);
+    });
+  });
+
   it("answers 503 when orchestration cannot be reached", async () => {
     const down: RunsPort = {
       start: () => Promise.reject(new Error("connect ECONNREFUSED")),

@@ -3,12 +3,13 @@ import { useCallback, useId, useState, type ReactNode } from "react";
 import { useApi } from "./api.js";
 import { AnswerError, answer } from "./answers.js";
 import { Artifacts } from "./artifacts.js";
+import { Confirmation } from "./confirm.js";
 import { LiveTranscript } from "./live-transcript.js";
 import { safeHref } from "./markdown.js";
 import { RunApprovalRequest } from "./run-approval.js";
 import { Age } from "./time.js";
 import { defaultStep, duration, runArtifacts, runCost, runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
-import { Link } from "./router.js";
+import { Link, useLocation } from "./router.js";
 import { Time } from "./time.js";
 import { usePolling } from "./use-polling.js";
 import type { OpenTranscriptStream } from "./use-transcript.js";
@@ -76,6 +77,7 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
           <p className="failure" role="alert">
             Failed at {current.error.instance}: {describeError(current.error)}
           </p>
+          {canChange && current.status === "failed" && <RetryAction run={current} />}
           {canChange && (
             <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
               Ask the platform assistant
@@ -115,13 +117,18 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
 type Fact = [label: string, value: ReactNode];
 const fact = (label: string, value: ReactNode | undefined): Fact[] => (value === undefined || value === "" ? [] : [[label, value]]);
 
+type Origin = NonNullable<Run["startedBy"]>;
+const withoutRetry = ({ retryOf: _retryOf, ...origin }: Origin): Origin => origin;
+
 function Facts({ run, readAt }: { run: Run; readAt: number }) {
   const fields: Fact[] = [
     ...fact("Run", run.id),
     ...fact("Workflow", run.workflow),
     ...fact("Workspace", runWorkspace(run)),
     ...fact("Status", run.status),
-    ...fact("Started by", run.startedBy && formatOrigin(run.startedBy)),
+    // The retried run gets its own fact, as a link.
+    ...fact("Started by", run.startedBy && formatOrigin(withoutRetry(run.startedBy))),
+    ...fact("Retry of", run.startedBy?.retryOf && <Link to={`/runs/${encodeURIComponent(run.startedBy.retryOf)}`}>{run.startedBy.retryOf}</Link>),
     ...fact("Created", <Time value={run.createdAt} />),
     ...fact("Age", <Age value={run.createdAt} now={readAt} />),
     ...fact("Started", run.startedAt && <Time value={run.startedAt} />),
@@ -138,6 +145,45 @@ function Facts({ run, readAt }: { run: Run; readAt: number }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+/**
+ * Retries a failed run (`tend run retry`) after a confirmation, since each retry starts a
+ * new, possibly paid, run; then opens the new run, or says why the platform refused.
+ */
+function RetryAction({ run }: { run: Run }) {
+  const { client } = useApi();
+  const { navigate } = useLocation();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string>();
+
+  const retry = () => {
+    setBusy(true);
+    setRefused(undefined);
+    answer(client.POST("/runs/{runId}/retry", { params: { path: { runId: run.id } } })).then(
+      (started) => navigate(`/runs/${encodeURIComponent(started.id)}`),
+      (failure: unknown) => {
+        setBusy(false);
+        setConfirming(false);
+        setRefused(failure instanceof AnswerError ? failure.reason : messageOf(failure));
+      },
+    );
+  };
+
+  return (
+    <>
+      <button type="button" aria-expanded={confirming} disabled={busy} onClick={() => setConfirming(true)}>
+        Retry
+      </button>
+      {confirming && (
+        <Confirmation title={`Retry run ${run.id}?`} confirmLabel="Retry run" busy={busy} onConfirm={retry} onCancel={() => setConfirming(false)}>
+          <p>This starts a new run of {run.workflow} with the same input, as the workflow is configured now.</p>
+        </Confirmation>
+      )}
+      {refused && <p className="message message-error">{refused}</p>}
+    </>
   );
 }
 

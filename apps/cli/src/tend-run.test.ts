@@ -243,6 +243,60 @@ describe("tend run get", () => {
   });
 });
 
+describe("tend run retry", () => {
+  const configured = emptyConfiguration({
+    workflowNames: ["hello-agent"],
+    workflow: (name) => (name === "hello-agent" ? ({ document: { name } } as never) : undefined),
+  });
+
+  async function retry(args: string[], token = "test-token") {
+    const runs = createInMemoryRuns();
+    for (const run of [completed, failed]) runs.runs.set(run.id, run);
+    const api = createControlPlaneApi({ probes: [], configuration: configured, apiToken: "test-token", readToken: "test-read-token", runs });
+    let stdout = "";
+    let stderr = "";
+    const exitCode = await runTend(["--token", token, "run", "retry", ...args], {
+      fetch: (request) => api.fetch(request),
+      stdout: (text) => (stdout += text),
+      stderr: (text) => (stderr += text),
+    });
+    return { exitCode, stdout, stderr, runs };
+  }
+
+  it("starts a new run of a failed run's workflow with its input and origin, and names it", async () => {
+    const { exitCode, stdout, runs } = await retry([failed.id]);
+
+    expect(exitCode).toBe(0);
+    expect(runs.started).toEqual([expect.objectContaining({ input: failed.input, startedBy: { ...failed.startedBy, retryOf: failed.id } })]);
+    const [retried] = [...runs.runs.values()].filter((run) => run.startedBy?.retryOf === failed.id);
+    expect(stdout).toBe(`run ${retried!.id} of hello-agent started, retry of ${failed.id}\n`);
+  });
+
+  it("prints the new run as a document with -o json", async () => {
+    const { stdout } = await retry([failed.id, "-o", "json"]);
+
+    expect(JSON.parse(stdout)).toMatchObject({ workflow: "hello-agent", status: "pending", startedBy: { retryOf: failed.id } });
+  });
+
+  it("exits 1 with the reason for a run that did not fail, and for an unknown run", async () => {
+    const notFailed = await retry([completed.id]);
+    const unknown = await retry(["nope"]);
+
+    expect(notFailed.exitCode).toBe(1);
+    expect(notFailed.stderr).toContain(`run ${completed.id} is completed; only a failed run can be retried`);
+    expect(notFailed.runs.started).toEqual([]);
+    expect(unknown).toMatchObject({ exitCode: 1, stderr: expect.stringContaining("run nope not found") });
+  });
+
+  it("says that the read-only token cannot retry", async () => {
+    const { exitCode, stderr, runs } = await retry([failed.id], "test-read-token");
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain("read-only");
+    expect(runs.started).toEqual([]);
+  });
+});
+
 describe("tend run logs", () => {
   const logs = (args: string[]) => tend(["--token", "test-token", "run", "logs", ...args], [running, twoAgents], transcripts);
 

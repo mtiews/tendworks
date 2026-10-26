@@ -10,7 +10,7 @@ export interface Cost {
 }
 
 /** What started a run, as the contract's `runOrigin` carries it. */
-export type RunOrigin = { kind: "manual" } | { kind: "trigger"; binding: string; workspace?: string; item: { key: string; title: string; url?: string } };
+export type RunOrigin = ({ kind: "manual" } | { kind: "trigger"; binding: string; workspace?: string; item: { key: string; title: string; url?: string } }) & { retryOf?: string };
 
 /** When a trigger is checked, as the contract's `TriggerSchedule` carries it. */
 export type Schedule = { cron: string } | { every: { days?: number; hours?: number; minutes?: number; seconds?: number } };
@@ -35,13 +35,14 @@ export function formatSchedule(schedule: Schedule): string {
 /**
  * `manual`, or `trigger <binding> in <workspace>: <item key>` (without ` in …` for a
  * binding without workspaces), with the item's link after it when `url` is set and the
- * item has one; empty for a run without an origin.
+ * item has one; `, retry of <run>` after it for a retry; empty for a run without an origin.
  */
 export function formatOrigin(origin: RunOrigin | undefined, { url = false }: { url?: boolean } = {}): string {
   if (!origin) return "";
-  if (origin.kind === "manual") return "manual";
+  const retry = origin.retryOf === undefined ? "" : `, retry of ${origin.retryOf}`;
+  if (origin.kind === "manual") return `manual${retry}`;
   const workspace = origin.workspace === undefined ? "" : ` in ${origin.workspace}`;
-  return `trigger ${origin.binding}${workspace}: ${origin.item.key}${url && origin.item.url ? ` (${origin.item.url})` : ""}`;
+  return `trigger ${origin.binding}${workspace}: ${origin.item.key}${url && origin.item.url ? ` (${origin.item.url})` : ""}${retry}`;
 }
 
 /** A chat's title (its first message) on one line, cut after `max` characters with an ellipsis. */

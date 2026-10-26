@@ -282,7 +282,7 @@ The compose stack supports one root, since it mounts the variable as one directo
 
 A trigger binding starts a workflow when its trigger fires (ADR 0023): one run per workspace in `spec.workspaces` and per item the trigger reports, with the input `{ workspace: <name>, item: <item> }`. A binding without workspaces starts one run per item without a workspace. A suspended binding (`spec.suspend: true`) is never checked and starts nothing.
 
-- **Once per item:** an item starts at most one run per binding and workspace, also when that run fails (ADR 0006), so a failing issue never starts a paid run at every check. Retry by hand with `POST /runs` and the same input ([Everyday commands](#everyday-commands)).
+- **Once per item:** an item starts at most one run per binding and workspace, also when that run fails (ADR 0006), so a failing issue never starts a paid run at every check. Retry a failed run by hand: `tend run retry <id>`, or Retry on the failed run in the web UI ([Everyday commands](#everyday-commands)). A retry is a new run of the workflow as configured now, with the failed run's input and origin; it does not count as a new firing.
 - **`tend trigger list`** shows each binding's workflow, trigger kind, workspaces, schedule, next execution and last check (`failed` with the reason when the source could not be asked for a workspace or a run could not start). A run's `STARTED BY` reads `trigger <binding> in <workspace>: <item key>`.
 - **Adding a repository** is adding its workspace's name to `spec.workspaces`.
 
@@ -412,7 +412,7 @@ An agent step completes when the agent's turn ends, whatever it delivered. Only 
           detail: '${ "last answer of the agent: \(.lastAnswer)" }'
 ```
 
-The run ends `failed` with this error on the run and on the step (`tend run get`, the web UI), and `run.failed` goes to the subscriptions. `detail` may be a runtime expression; only an inline `error` is supported (no `try`/`catch`, no error references). Retrying the run raises again if the agent again delivers nothing.
+The run ends `failed` with this error on the run and on the step (`tend run get`, the web UI), and `run.failed` goes to the subscriptions. `detail` may be a runtime expression; only an inline `error` is supported (no `try`/`catch`, no error references). Retrying the run (`tend run retry <id>`) raises again if the agent again delivers nothing.
 
 ### Waiting for a human: the human step and policies
 
@@ -672,7 +672,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | 7 | `assistant` chat answers from the live state | `tend chat` or the UI; the full script `scripts/smoke/chat-assistant.sh` needs the fixture configuration (implementation doc, step 16) | read token |
 | 8 | Web UI with live run, chat, phone width | by hand in the browser (implementation doc, steps 19–23) | as 3 and 7 |
 
-- **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; start it again by hand ([Everyday commands](#everyday-commands), "Retry an issue").
+- **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; retry its run by hand ([Everyday commands](#everyday-commands), "Retry a failed run").
 - Revert configuration changes after the tests, or keep them deliberately.
 - Watch a run live: `tend run logs <id> --follow`, or the run in the UI's Runs.
 
@@ -685,9 +685,9 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Status | `tend status`, `curl -s localhost:8080/status` |
 | Services | `docker compose -f deploy/compose.yaml ps` (`-a` shows `agent-secrets` as `Exited (0)`) |
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
-| Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]` |
+| Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]`, `tend run retry <id> [--follow]` |
 | Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
-| Retry an issue (each fires once) | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"develop-issue","input":{"workspace":"playground","item":{"key":"<owner>/<name>#<n>","title":"<title>","number":<n>,"body":"<body>","url":"https://github.com/<owner>/<name>/issues/<n>"}}}'` |
+| Retry a failed run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a new run with the same input and origin, `retryOf` naming the failed run; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
 | Notifications, triggers, workspaces, agents | `tend notification list` (delivery per channel), `tend trigger list` (last check per binding), `tend workspace list` (kind and assistant), `tend agent list` (active sessions per profile) |
 | Chats | `tend chat` (the platform assistant), `tend chat <profile>`, `tend chat --workspace <name>`, `tend workspace list`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
@@ -838,7 +838,7 @@ docker network rm tendworks-sandboxes
 | `tend trigger list` shows `failed ... secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set` | `LAST CHECK` | the token did not reach the server; set it, `up -d --wait` (`restart` keeps the old environment) |
 | binding never checks | `tend trigger list` | `spec.suspend: true`; remove it and restart the server |
 | `tend trigger list` shows `failed ... workspace <y>: could not ask the source: ... 404 ...` | `LAST CHECK` | the issues token does not cover that workspace's private repository; add the repository to the token ([GitHub access](github-agent-access.md)) |
-| issue labelled but no new run | | each issue fires once per binding and workspace, also after a failed run (ADR 0006); start it by hand ([Everyday commands](#everyday-commands), "Retry an issue") |
+| issue labelled but no new run | | each issue fires once per binding and workspace, also after a failed run (ADR 0006); retry its failed run ([Everyday commands](#everyday-commands), "Retry a failed run") |
 | `tend notification list` shows `<channel> failed for <id>: secret TENDWORKS_PLATFORM_PUSHOVER_... is not set` | notifications | the Pushover secrets did not reach the server; set them in `deploy/.env`, `up -d --wait` |
 | `<channel> failed for <id>: Pushover refused the message (HTTP 4xx): ...` | notifications | Pushover's reason, e.g. an invalid application token or user key; fix it in `deploy/.env`, `up -d --wait` |
 | no notification on the phone, `no channel` in `tend notification list` | notifications | no subscription matches that event; check its `spec.scope` (a run without a workspace is in `platform: {}`), `spec.events`, `spec.channels` and that the files end in `.yaml` (`*.yaml.example` is not read); the server log lists channels and subscriptions at start |

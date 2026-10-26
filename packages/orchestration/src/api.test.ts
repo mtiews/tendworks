@@ -155,6 +155,33 @@ describe("orchestration API", () => {
     expect((await request("GET", `/runs/${manual.id}`)).body).toMatchObject({ startedBy: { kind: "manual" } });
   });
 
+  it("records the run a retry retries, with either origin", async () => {
+    const { request } = setup();
+    const item = { key: "acme/playground#7", title: "Fix it" };
+    const origins = [
+      { kind: "manual", retryOf: "run-1" },
+      { kind: "trigger", binding: "ready-issues", workspace: "playground", item, retryOf: "run-2" },
+    ];
+
+    for (const startedBy of origins) {
+      const run = (await request("POST", "/runs", { workflow, startedBy })).body as Run;
+      expect((await request("GET", `/runs/${run.id}`)).body).toMatchObject({ startedBy });
+    }
+  });
+
+  it.each([
+    ["an origin of another kind", { kind: "cron" }],
+    ["a manual origin with other fields", { kind: "manual", binding: "x" }],
+    ["a retryOf that is not a string", { kind: "manual", retryOf: 7 }],
+  ])("refuses %s", async (_, startedBy) => {
+    const { request } = setup();
+
+    const { status, body } = await request("POST", "/runs", { workflow, startedBy });
+
+    expect(status).toBe(400);
+    expect(body).toMatchObject({ title: "Invalid request" });
+  });
+
   it("refuses a malformed traceparent", async () => {
     const { request } = setup();
 
