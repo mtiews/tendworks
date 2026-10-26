@@ -72,9 +72,20 @@ describe("runs on the compose stack", () => {
 
     expect(response.status).toBe(201);
     expect(retry).toMatchObject({ workflow: "requires-pull-request", input, startedBy: { kind: "manual", retryOf: failed.id } });
-    // Not failed yet: a run is retried only once it failed.
+    // Not finished yet: a run is retried only once it finished.
     expect(refused.response.status).toBe(409);
     expect(await waitForEnd(retry!.id)).toMatchObject({ status: "failed", error: { title: "The agent ended without reporting its result" }, startedBy: { retryOf: failed.id } });
+  });
+
+  it("retries a completed run, e.g. one whose result did not fit", { timeout: 90_000 }, async () => {
+    const input = { item: { key: "retry-completed", title: "Do it once more", number: 14 } };
+    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input } });
+    expect((await waitForEnd(started!.id)).status).toBe("completed");
+
+    const { data: retry, response } = await client.POST("/runs/{runId}/retry", { params: { path: { runId: started!.id } } });
+
+    expect(response.status).toBe(201);
+    expect(await waitForEnd(retry!.id)).toMatchObject({ status: "completed", input, startedBy: { kind: "manual", retryOf: started!.id } });
   });
 
   it("neither starts nor lists runs without a token, and lets the read-only token only read", async () => {

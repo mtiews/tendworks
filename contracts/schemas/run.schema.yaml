@@ -85,7 +85,7 @@ $defs:
             $ref: '#/$defs/retryOf'
   retryOf:
     type: string
-    description: Id of the failed run this run retries.
+    description: Id of the finished (failed or completed) run this run retries.
   itemReference:
     title: RunItemReference
     description: The item a trigger fired for.

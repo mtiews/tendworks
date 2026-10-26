@@ -17,6 +17,9 @@ import type { OpenTranscriptStream } from "./use-transcript.js";
 type WorkflowError = NonNullable<Run["error"]>;
 type Tab = "transcript" | "output" | "artifacts";
 
+/** Runs that can be retried: a completed run may have delivered a result that does not fit. */
+const FINISHED: ReadonlySet<Run["status"]> = new Set(["failed", "completed"]);
+
 const describeError = (error: WorkflowError) => `${error.title}${error.detail ? `: ${error.detail}` : ""}`;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -72,12 +75,16 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
       )}
       <Facts run={current} readAt={readAt} />
       <ItemLink run={current} />
+      {canChange && FINISHED.has(current.status) && (
+        <div className="run-actions">
+          <RetryAction run={current} />
+        </div>
+      )}
       {current.error && (
         <div className="banner banner-error">
           <p className="failure" role="alert">
             Failed at {current.error.instance}: {describeError(current.error)}
           </p>
-          {canChange && current.status === "failed" && <RetryAction run={current} />}
           {canChange && (
             <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
               Ask the platform assistant
@@ -149,7 +156,7 @@ function Facts({ run, readAt }: { run: Run; readAt: number }) {
 }
 
 /**
- * Retries a failed run (`tend run retry`) after a confirmation, since each retry starts a
+ * Retries a finished run (`tend run retry`) after a confirmation, since each retry starts a
  * new, possibly paid, run; then opens the new run, or says why the platform refused.
  */
 function RetryAction({ run }: { run: Run }) {

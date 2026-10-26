@@ -398,16 +398,29 @@ describe("run detail", () => {
       expect(window.location.pathname).toBe("/ui/runs/run-3");
     });
 
-    it("offers no retry with read-only access, nor for a run that did not fail", async () => {
+    it("retries a completed run too, e.g. one whose result did not fit", async () => {
+      signedIn();
+      const runs = runsOf(completedRun);
+      const configuredHello = emptyConfiguration({ workflowNames: ["hello-agent"], workflow: (name) => (name === "hello-agent" ? ({ document: { name } } as never) : undefined) });
+      const { user } = renderApp({ path: "/ui/runs/run-4", runs, configuration: configuredHello });
+
+      await user.click(await screen.findByRole("button", { name: "Retry" }));
+      await user.click(within(screen.getByRole("alertdialog", { name: "Retry run run-4?" })).getByRole("button", { name: "Retry run" }));
+
+      expect(await screen.findByRole("link", { name: "run-4" })).toBeTruthy();
+      expect(runs.started.map((run) => run.startedBy)).toEqual([{ kind: "manual", retryOf: "run-4" }]);
+    });
+
+    it("offers no retry with read-only access, nor for a run that has not finished", async () => {
       signedIn(READ_TOKEN);
-      renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun, completedRun), configuration: configured, agentRuntime: createInMemoryAgentRuntime() });
+      renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun, triggeredRun), configuration: configured, agentRuntime: createInMemoryAgentRuntime() });
       expect(await screen.findByRole("alert")).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 
       cleanup();
       signedIn();
-      renderApp({ path: "/ui/runs/run-4", runs: runsOf(failedRun, completedRun), configuration: configured });
-      expect(await screen.findByRole("heading", { level: 1, name: /hello-agent/ })).toBeTruthy();
+      renderApp({ path: "/ui/runs/run-2", runs: runsOf(failedRun, triggeredRun), configuration: configured });
+      expect(await screen.findByRole("heading", { level: 1, name: /Fix the login/ })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
     });
   });
