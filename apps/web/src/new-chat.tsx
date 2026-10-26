@@ -48,8 +48,7 @@ export function NewChat() {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
     return workspace === null ? "" : `workspace:${workspace}`;
   });
-  // A first message suggested by the link that opened the form, e.g. "Ask the platform assistant" on a failed run.
-  const [text, setText] = useState(() => new URLSearchParams(window.location.search).get("text") ?? "");
+  const [text, setText] = useState("");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
   const ids = { chatWith: useId(), text: useId() };

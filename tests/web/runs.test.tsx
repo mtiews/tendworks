@@ -328,24 +328,61 @@ describe("run detail", () => {
     expect(await within(review).findByText("Agent runtime unavailable (503)")).toBeTruthy();
   });
 
-  it("offers to ask the platform assistant why a run failed, with the question written", async () => {
-    signedIn();
-    const configuration = emptyConfiguration({ agentProfiles: [{ apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "assistant" }, spec: { harness: "fake", chat: {} } }] });
-    const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
-    const { user } = renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime, configuration });
+  describe("analyze", () => {
+    const withAssistant = emptyConfiguration({ agentProfiles: [{ apiVersion: "tendworks.dev/v1", kind: "AgentProfile", metadata: { name: "assistant" }, spec: { harness: "fake", chat: {} } }] });
 
-    await user.click(await screen.findByRole("link", { name: "Ask the platform assistant" }));
+    it("starts the platform assistant on a failed run and opens its chat", async () => {
+      signedIn();
+      const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
+      const { user } = renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime, configuration: withAssistant });
 
-    expect(window.location.pathname).toBe("/ui/chats/new");
-    expect((await screen.findByRole<HTMLTextAreaElement>("textbox", { name: "Message" })).value).toBe("Why did run run-3 fail?");
-  });
+      await user.click(await screen.findByRole("button", { name: "Analyze" }));
 
-  it("offers no assistant to ask with read-only access", async () => {
-    signedIn(READ_TOKEN);
-    renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime: createInMemoryAgentRuntime() });
+      const [chat] = [...agentRuntime.chats.values()];
+      expect(chat).toMatchObject({ agent: "assistant", title: "Analyze run run-3: what happened, and why did it fail?" });
+      expect(await screen.findByRole("heading", { level: 1, name: "Analyze run run-3: what happened, and why did it fail?" })).toBeTruthy();
+      expect(window.location.pathname).toBe(`/ui/chats/${chat!.id}`);
+    });
 
-    expect(await screen.findByRole("alert")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Ask the platform assistant" })).toBeNull();
+    it("asks of a completed run whether its result fits", async () => {
+      signedIn();
+      const agentRuntime = createInMemoryAgentRuntime({ chatAgents: ["assistant"] });
+      const { user } = renderApp({ path: "/ui/runs/run-4", runs: runsOf(completedRun), agentRuntime, configuration: withAssistant });
+
+      await user.click(await screen.findByRole("button", { name: "Analyze" }));
+
+      expect(await screen.findByRole("heading", { level: 1, name: "Analyze run run-4: what happened, and does its result fit what the run was for?" })).toBeTruthy();
+    });
+
+    it("says why the platform refused the chat", async () => {
+      signedIn();
+      const agentRuntime = createInMemoryAgentRuntime();
+      const { user } = renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime });
+
+      await user.click(await screen.findByRole("button", { name: "Analyze" }));
+
+      expect(await screen.findByText(/^Chat not allowed: /)).toBeTruthy();
+      expect(agentRuntime.chats.size).toBe(0);
+      expect(window.location.pathname).toBe("/ui/runs/run-3");
+    });
+
+    it("offers no analysis with read-only access, nor for a run that has not finished, and no link of its own in the failure", async () => {
+      signedIn(READ_TOKEN);
+      renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun, triggeredRun), agentRuntime: createInMemoryAgentRuntime() });
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Analyze" })).toBeNull();
+
+      cleanup();
+      signedIn();
+      renderApp({ path: "/ui/runs/run-2", runs: runsOf(failedRun, triggeredRun) });
+      expect(await screen.findByRole("heading", { level: 1, name: /Fix the login/ })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Analyze" })).toBeNull();
+
+      cleanup();
+      renderApp({ path: "/ui/runs/run-3", runs: runsOf(failedRun), agentRuntime: createInMemoryAgentRuntime() });
+      expect(await screen.findByRole("button", { name: "Analyze" })).toBeTruthy();
+      expect(screen.queryByRole("link", { name: "Ask the platform assistant" })).toBeNull();
+    });
   });
 
   describe("retry", () => {

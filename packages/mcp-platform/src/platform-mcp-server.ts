@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ControlPlane } from "@tendworks/shared";
 import createClient, { type Client } from "openapi-fetch";
 import { z } from "zod";
+import { excerpt } from "./transcript-excerpt.js";
 
 export interface PlatformMcpServerOptions {
   /** The public control plane API the tools read through, like any other client. */
@@ -70,8 +71,8 @@ function toolsOn(client: ControlPlaneClient): McpServer {
       annotations: readOnly,
     },
     async ({ limit = 20 }) => {
-      const { data, response } = await client.GET("/runs");
-      return data ? json({ items: data.items.slice(0, limit) }) : failure(response);
+      const { data, error, response } = await client.GET("/runs");
+      return data ? json({ items: data.items.slice(0, limit) }) : failure(response, error);
     },
   );
 
@@ -84,8 +85,28 @@ function toolsOn(client: ControlPlaneClient): McpServer {
       annotations: readOnly,
     },
     async ({ runId }) => {
-      const { data, response } = await client.GET("/runs/{runId}", { params: { path: { runId } } });
-      return data ? json(data) : failure(response);
+      const { data, error, response } = await client.GET("/runs/{runId}", { params: { path: { runId } } });
+      return data ? json(data) : failure(response, error);
+    },
+  );
+
+  server.registerTool(
+    "get_run_transcript",
+    {
+      title: "Get the transcript of a run's step",
+      description:
+        "Reads the transcript of the agent session behind one step of a run: what the agent was asked, what it wrote and thought, the tools it called with their results, and the errors, with secrets redacted. Find the step's taskId with get_run first. Answers the newest entries only, with how many the transcript has in total and how many were left out; ask for only the problems (errors, failed tool calls with their call, harness output, a failed checkout or task) to see why a step failed.",
+      inputSchema: {
+        runId: z.string().min(1).describe("The run's id, as list_runs shows it."),
+        taskId: z.string().min(1).describe("The taskId of the run's step, as get_run shows it."),
+        last: z.number().int().min(1).max(500).optional().describe("How many of the newest entries to read; 50 when not given."),
+        only: z.enum(["problems"]).optional().describe("`problems` reads only the entries that tell what went wrong."),
+      },
+      annotations: readOnly,
+    },
+    async ({ runId, taskId, last = 50, only }) => {
+      const { data, error, response } = await client.GET("/runs/{runId}/tasks/{taskId}/transcript", { params: { path: { runId, taskId } } });
+      return data ? json(excerpt(data.items, { last, only })) : failure(response, error);
     },
   );
 
@@ -98,8 +119,8 @@ function toolsOn(client: ControlPlaneClient): McpServer {
       annotations: readOnly,
     },
     async () => {
-      const { data, response } = await client.GET("/agents");
-      return data ? json(data) : failure(response);
+      const { data, error, response } = await client.GET("/agents");
+      return data ? json(data) : failure(response, error);
     },
   );
 
@@ -111,8 +132,8 @@ function toolsOn(client: ControlPlaneClient): McpServer {
       annotations: readOnly,
     },
     async () => {
-      const { data, response } = await client.GET("/triggers");
-      return data ? json(data) : failure(response);
+      const { data, error, response } = await client.GET("/triggers");
+      return data ? json(data) : failure(response, error);
     },
   );
 
@@ -127,8 +148,9 @@ const unauthorized = () =>
 
 const json = (value: unknown): CallToolResult => ({ content: [{ type: "text", text: JSON.stringify(value, null, 2) }] });
 
-async function failure(response: Response): Promise<CallToolResult> {
-  const problem = (await response.json().catch(() => undefined)) as { title?: string; detail?: string } | undefined;
-  const reason = [problem?.title, problem?.detail].filter(Boolean).join(": ") || `HTTP ${response.status}`;
+/** A tool's answer to a refusal of the control plane, with the reason its problem gives. */
+function failure(response: Response, error: unknown): CallToolResult {
+  const problem = typeof error === "object" && error !== null ? (error as { title?: unknown; detail?: unknown }) : {};
+  const reason = [problem.title, problem.detail].filter((part) => typeof part === "string" && part !== "").join(": ") || `HTTP ${response.status}`;
   return { isError: true, content: [{ type: "text", text: `the control plane answered ${response.status}: ${reason}` }] };
 }

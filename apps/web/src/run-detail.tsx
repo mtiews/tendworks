@@ -78,6 +78,7 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
       {canChange && FINISHED.has(current.status) && (
         <div className="run-actions">
           <RetryAction run={current} />
+          <AnalyzeAction run={current} />
         </div>
       )}
       {current.error && (
@@ -85,11 +86,6 @@ export function RunDetail({ runId, phone }: { runId: string; phone: boolean }) {
           <p className="failure" role="alert">
             Failed at {current.error.instance}: {describeError(current.error)}
           </p>
-          {canChange && (
-            <Link to={`/chats/new?text=${encodeURIComponent(`Why did run ${current.id} fail?`)}`} className="button">
-              Ask the platform assistant
-            </Link>
-          )}
         </div>
       )}
       <RunApprovalRequest runId={current.id} bar={phone} />
@@ -189,6 +185,43 @@ function RetryAction({ run }: { run: Run }) {
           <p>This starts a new run of {run.workflow} with the same input, as the workflow is configured now.</p>
         </Confirmation>
       )}
+      {refused && <p className="message message-error">{refused}</p>}
+    </>
+  );
+}
+
+/** The profile of the platform assistant, which reads the platform through its MCP server (ADR 0016). */
+const PLATFORM_ASSISTANT = "assistant";
+
+/**
+ * Starts a chat with the platform assistant whose first message asks it to analyze the
+ * finished run, then opens the chat, or says why the platform refused (e.g. no `assistant`
+ * profile). Like starting any chat, it needs no confirmation: the assistant only reads.
+ */
+function AnalyzeAction({ run }: { run: Run }) {
+  const { client } = useApi();
+  const { navigate } = useLocation();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string>();
+  const question = run.status === "failed" ? "why did it fail?" : "does its result fit what the run was for?";
+
+  const analyze = () => {
+    setBusy(true);
+    setRefused(undefined);
+    answer(client.POST("/chats", { body: { agent: PLATFORM_ASSISTANT, text: `Analyze run ${run.id}: what happened, and ${question}` } })).then(
+      (chat) => navigate(`/chats/${encodeURIComponent(chat.id)}`),
+      (failure: unknown) => {
+        setBusy(false);
+        setRefused(failure instanceof AnswerError ? failure.reason : messageOf(failure));
+      },
+    );
+  };
+
+  return (
+    <>
+      <button type="button" disabled={busy} onClick={analyze}>
+        Analyze
+      </button>
       {refused && <p className="message message-error">{refused}</p>}
     </>
   );
