@@ -3,7 +3,8 @@
 # name (kind Workspace) and the issue, as a github-issues trigger binding passes them. The agent works on a checkout of the workspace on a branch fixed by the run, so a
 # retry updates the same branch and pull request. The agent opens the pull request itself
 # with the workspace's credential and reports it as its `pull-request` artifact; the run
-# ends with it. A human reviews and merges in the forge.
+# ends with it. When the agent ends its turn without reporting one, the run fails with that
+# error instead of completing. A human reviews and merges in the forge.
 document:
   dsl: '1.0.3'
   namespace: examples
@@ -39,5 +40,20 @@ do:
             issue: $input.item.number,
             branch: $input.branch,
             taskId: .id,
-            pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0])
+            pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]),
+            lastAnswer: .status.message.parts[0].text
           } }
+  - check:
+      switch:
+        - reported:
+            when: '${ .pullRequest != null }'
+            then: end
+        - missing:
+            then: fail
+  - fail:
+      raise:
+        error:
+          type: https://serverlessworkflow.io/spec/1.0.0/errors/runtime
+          status: 500
+          title: The agent ended without reporting a pull request
+          detail: '${ "no pull request artifact; last answer of the agent: \(.lastAnswer // "(none)")" }'

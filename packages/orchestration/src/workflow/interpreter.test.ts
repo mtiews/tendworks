@@ -568,4 +568,113 @@ output:
       steps: [{ name: "implement", status: "completed" }],
     });
   });
+
+  describe("raise", () => {
+    const checked = `
+do:
+  - implement:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://developer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: build it }]
+      output:
+        as: '\${ { pullRequest: ([.artifacts[]? | select(.name == "pull-request") | .parts[0].url][0]), answer: .status.message.parts[0].text } }'
+  - check:
+      switch:
+        - done:
+            when: '\${ .pullRequest != null }'
+            then: end
+        - incomplete:
+            then: fail
+  - fail:
+      raise:
+        error:
+          type: https://serverlessworkflow.io/spec/1.0.0/errors/runtime
+          status: 500
+          title: The agent ended without reporting its result
+          detail: '\${ "no pull request; last answer: \\(.answer)" }'
+  - after:
+      call: a2a
+      with:
+        method: message/send
+        agentCard: { endpoint: agent://reviewer }
+        parameters:
+          message:
+            parts: [{ kind: text, text: never }]
+`;
+    const agent = (artifacts: unknown[]) =>
+      new InMemoryAgentTaskExecutor().agent("developer", () => ({
+        id: "task-1",
+        status: { state: "TASK_STATE_COMPLETED", message: { messageId: "s", role: "ROLE_AGENT", parts: [{ text: "I will continue later." }] } },
+        artifacts: artifacts as never,
+      }));
+
+    it("fails the run with the given error, its detail evaluated, when a switch before it decides so; nothing after it runs", async () => {
+      const executor = agent([]);
+
+      const run = await runWorkflow(workflow(checked), { runId: "run-1", input: {}, executor });
+
+      const error = {
+        type: "https://serverlessworkflow.io/spec/1.0.0/errors/runtime",
+        status: 500,
+        instance: "/do/2/fail",
+        title: "The agent ended without reporting its result",
+        detail: "no pull request; last answer: I will continue later.",
+      };
+      expect(run).toMatchObject({ status: "failed", error });
+      expect(run.steps.map((step) => [step.name, step.status])).toEqual([
+        ["implement", "completed"],
+        ["check", "completed"],
+        ["fail", "failed"],
+      ]);
+      expect(run.steps[2]?.error).toEqual(error);
+      expect(executor.requests).toHaveLength(1);
+    });
+
+    it("is skipped when the switch ends the workflow, and raises again in a retried run", async () => {
+      const done = await runWorkflow(workflow(checked), {
+        runId: "run-1",
+        input: {},
+        executor: agent([{ artifactId: "a", name: "pull-request", parts: [{ url: "https://example.com/pull/1" }] }]),
+      });
+      const first = await runWorkflow(workflow(checked), { runId: "run-1", input: {}, executor: agent([]) });
+      const retried = await runWorkflow(workflow(checked), { runId: "run-1", input: {}, executor: agent([]) });
+
+      expect(done.status).toBe("completed");
+      expect(retried).toEqual(first);
+      expect(retried.status).toBe("failed");
+    });
+
+    it("fails with a literal detail, or none", async () => {
+      const run = await runWorkflow(
+        workflow(`
+do:
+  - fail:
+      raise:
+        error: { type: 'https://example.com/errors/nope', status: 422, title: Nope }
+`),
+        { runId: "run-1", input: {}, executor: new InMemoryAgentTaskExecutor() },
+      );
+
+      expect(run.error).toEqual({ type: "https://example.com/errors/nope", status: 422, instance: "/do/0/fail", title: "Nope" });
+    });
+
+    it("fails the task with an expression error when the detail cannot be evaluated", async () => {
+      const run = await runWorkflow(
+        workflow(`
+do:
+  - fail:
+      raise:
+        error: { type: 'https://example.com/errors/nope', status: 422, title: Nope, detail: '\${ .a.b | error("boom") }' }
+`),
+        { runId: "run-1", input: {}, executor: new InMemoryAgentTaskExecutor() },
+      );
+
+      expect(run.error).toMatchObject({ status: 400, instance: "/do/0/fail", title: "Runtime expression failed" });
+    });
+  });
+
 });

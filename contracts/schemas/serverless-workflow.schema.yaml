@@ -16,7 +16,7 @@ $comment: >-
   with `http` (method, endpoint, headers, body; output `content`); data flow via
   `input.from`, `output.as` and `export.as`; the `then` flow directive (`continue`,
   `exit`, `end` or the name of a task in the same list); task `switch`; task `listen`
-  for one event (`to.one`) filtered by its type; task `call` with the Tendworks custom
+  for one event (`to.one`) filtered by its type; task `raise` with an inline error; task `call` with the Tendworks custom
   function `approval` (the human step); runtime expression arguments
   `$context`, `$input`, `$workflow` and `$runtime`. Add a definition from the official
   schema here when the interpreter learns it.
@@ -93,7 +93,7 @@ $defs:
     description: A discrete unit of work that contributes to achieving the overall objectives defined by the workflow.
     # if/then/else instead of the official oneOf yields one precise error per mistake.
     # tsType tells the type generator what the conditional means.
-    tsType: CallA2ATask | CallHTTPTask | CallApprovalTask | DoTask | SwitchTask | ListenTask
+    tsType: CallA2ATask | CallHTTPTask | CallApprovalTask | DoTask | SwitchTask | ListenTask | RaiseTask
     type: object
     if:
       properties:
@@ -130,7 +130,14 @@ $defs:
         then:
           $ref: '#/$defs/listenTask'
         else:
-          $ref: '#/$defs/doTask'
+          if:
+            properties:
+              raise: true
+            required: [raise]
+          then:
+            $ref: '#/$defs/raiseTask'
+          else:
+            $ref: '#/$defs/doTask'
   callHttpTask:
     title: CallHTTPTask
     description: >-
@@ -447,6 +454,57 @@ $defs:
         description: A runtime expression; the case matches when it yields true.
       then:
         $ref: '#/$defs/flowDirective'
+  raiseTask:
+    type: object
+    title: RaiseTask
+    description: >-
+      Raises an error: the task fails with it, and so does the run (status `failed`,
+      `run.failed`). Use it after a `switch` that found the result of an earlier task
+      incomplete. Only an inline error is supported. The error's `instance` is the
+      reference of the task; `detail` may be a runtime expression.
+    additionalProperties: false
+    required: [raise]
+    properties:
+      raise:
+        type: object
+        title: RaiseTaskConfiguration
+        additionalProperties: false
+        required: [error]
+        properties:
+          error:
+            $ref: '#/$defs/raiseError'
+      input:
+        $ref: '#/$defs/input'
+      output:
+        $ref: '#/$defs/output'
+      export:
+        $ref: '#/$defs/export'
+      then:
+        $ref: '#/$defs/flowDirective'
+      metadata:
+        $ref: '#/$defs/taskMetadata'
+  raiseError:
+    type: object
+    title: RaiseError
+    description: The error to raise (RFC 7807 problem details).
+    additionalProperties: false
+    required: [type, status, title]
+    properties:
+      type:
+        type: string
+        title: RaiseErrorType
+        description: A URI identifying the error type, e.g. `https://serverlessworkflow.io/spec/1.0.0/errors/runtime`.
+        minLength: 1
+      status:
+        type: integer
+        title: RaiseErrorStatus
+      title:
+        type: string
+        title: RaiseErrorTitle
+      detail:
+        type: string
+        title: RaiseErrorDetail
+        description: A human-readable explanation; may be a runtime expression.
   listenTask:
     type: object
     title: ListenTask

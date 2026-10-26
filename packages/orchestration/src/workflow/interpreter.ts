@@ -146,6 +146,15 @@ export async function runWorkflow(workflow: Workflow.Workflow, options: RunOptio
           .map((entry) => Object.values(entry)[0]!)
           .find((candidate) => candidate.when === undefined || evaluate(candidate.when, input, variables(input)) === true);
         if (matched) then = matched.then;
+      } else if ("raise" in task) {
+        const { type, status, title, detail } = task.raise.error;
+        throw new TaskFailure({
+          type,
+          status,
+          instance: reference,
+          title,
+          ...(detail === undefined ? {} : { detail: String(evaluateTemplate(detail, input, variables(input))) }),
+        });
       } else if ("listen" in task) {
         rawOutput = await listen(task, reference);
       } else if ("call" in task && task.call === "http") {
