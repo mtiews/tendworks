@@ -317,13 +317,14 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     )
     .argument("[profile]", `agent profile that allows chats (default: ${PLATFORM_ASSISTANT}, the platform assistant)`)
     .option("--workspace <name>", "chat with the assistant of this workspace about its contents (tend workspace list shows those with one; read-only unless the workspace allows writing)")
-    .action(async (profile: string | undefined, options: { workspace?: string }, command: Command) => {
+    .option("-v, --verbose", VERBOSE_HELP)
+    .action(async (profile: string | undefined, options: { workspace?: string; verbose?: boolean }, command: Command) => {
       if (profile !== undefined && options.workspace !== undefined) {
         throw new Error("give either a profile or --workspace: a workspace's assistant is held with the profile its workspace names");
       }
       const { baseUrl, client } = controlPlane(command);
       const chatWith = options.workspace === undefined ? { agent: profile ?? PLATFORM_ASSISTANT } : { workspace: options.workspace };
-      await startChat({ chatWith, client, baseUrl, io });
+      await startChat({ chatWith, client, baseUrl, io, verbose: options.verbose === true });
     });
 
   /** A chat by id, or a clear error when there is none. */
@@ -363,13 +364,16 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .command("attach")
     .description("print the history of a chat and continue it live, from any client; Ctrl+C cancels a running turn and leaves while the agent waits")
     .argument("<id>", "chat id")
+    .option("-v, --verbose", VERBOSE_HELP)
     .action(async (chatId: string, _options: unknown, command: Command) => {
+      // The parent `chat` takes --verbose too, wherever it stands.
+      const verbose = command.optsWithGlobals<{ verbose?: boolean }>().verbose === true;
       const { baseUrl, client } = controlPlane(command);
       const found = await getChat(client, baseUrl, chatId);
       const terminal = chatTerminal(io);
       try {
         io.stdout(`chat ${chatId} with ${found.agent}${onWorkspace(found)} (${found.status}); type /end to end it\n`);
-        await converse({ chatId, client, baseUrl, io, terminal, sent: [] });
+        await converse({ chatId, client, baseUrl, io, terminal, sent: [], verbose });
       } finally {
         await terminal.close();
       }
@@ -759,11 +763,13 @@ async function startChat({
   client,
   baseUrl,
   io,
+  verbose,
 }: {
   chatWith: { agent: string } | { workspace: string };
   client: ControlPlaneClient;
   baseUrl: string;
   io: TendIo;
+  verbose: boolean;
 }) {
   const terminal = chatTerminal(io);
   try {
@@ -787,10 +793,27 @@ async function startChat({
       throw new AnswerError(started.response, started.error);
     }
     io.stdout(`chat ${started.data.id} with ${started.data.agent}${onWorkspace(started.data)}; type /end to end it\n`);
-    await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first] });
+    await converse({ chatId: started.data.id, client, baseUrl, io, terminal, sent: [first], verbose });
   } finally {
     await terminal.close();
   }
+}
+
+const VERBOSE_HELP = "show the whole transcript: tool calls with input and output, thoughts and harness output (default: the messages, one line per turn with its duration and cost, resume markers and errors)";
+
+/** Entries `tend chat` shows without --verbose: the conversation, and what explains a delay or a failure. */
+function isConcise(entry: TranscriptEntry): boolean {
+  if (entry.type === "workspace-checkout") return entry.exitCode !== 0;
+  if (entry.type === "turn-ended") return entry.reason !== "completed";
+  return CONCISE_TYPES.has(entry.type);
+}
+
+const CONCISE_TYPES = new Set<string>(["message-chunk", "task-started", "message-received", "task-resumed", "task-ended", "session-resumed", "session-resume-failed", "error"]);
+
+/** `12s` or `2m05s`, for the time between two timestamps. */
+function formatDuration(from: string, to: string): string {
+  const seconds = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 1000));
+  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 const textOf = (message: { parts: ({ text: string } | object)[] }) => message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join(" ");
@@ -810,6 +833,7 @@ async function converse({
   io,
   terminal,
   sent,
+  verbose,
 }: {
   chatId: string;
   client: ControlPlaneClient;
@@ -818,6 +842,8 @@ async function converse({
   terminal: ChatTerminal;
   /** Messages this client sent whose echo in the transcript is not printed again, as they are on the screen already. */
   sent: string[];
+  /** Print the whole transcript, not only the conversation and one line per turn. */
+  verbose: boolean;
 }) {
   const sleep = sleepOf(io);
   const unreachable = (cause: unknown): never => {
@@ -840,6 +866,9 @@ async function converse({
     terminal.read();
   };
   const printer = entryPrinter(write, "table");
+  // The turn in progress: when it started; and the chat's cost when the last turn ended.
+  let turnStart: string | undefined;
+  let costBefore = 0;
 
   /** The transcript so far; the position of its last entry. */
   const history = async (): Promise<number> => {
@@ -893,17 +922,28 @@ async function converse({
           const { entry } = event;
           if (entry.type === "task-started" || entry.type === "message-received") {
             waiting = false;
+            turnStart = entry.time;
             const own = sent.indexOf(textOf(entry.message));
             if (own >= 0) sent.splice(own, 1);
             else printer.entry(entry);
           } else if (entry.type === "input-required") {
             printer.endStep();
-            if (entry.cost) write(`(${formatCost(entry.cost)} so far)\n`);
+            if (verbose) {
+              if (entry.cost) write(`(${formatCost(entry.cost)} so far)\n`);
+            } else {
+              const turn = [turnStart === undefined ? undefined : formatDuration(turnStart, entry.time), entry.cost ? formatCost({ ...entry.cost, amount: entry.cost.amount - costBefore }) : undefined];
+              const parts = [turn.filter(Boolean).join(", "), entry.cost ? `chat ${formatCost(entry.cost)}` : undefined].filter(Boolean);
+              if (parts.length > 0) write(`(turn ${parts.join("; ")})\n`);
+            }
+            if (entry.cost) costBefore = entry.cost.amount;
             waiting = true;
             cancelling = false;
             prompt();
-          } else {
+          } else if (verbose || isConcise(entry)) {
             printer.entry(entry);
+          } else {
+            // A hidden entry ends the agent's line: text after it starts a line of its own.
+            printer.endStep();
           }
           break;
         }

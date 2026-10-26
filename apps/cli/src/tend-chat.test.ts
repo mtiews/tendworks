@@ -419,3 +419,86 @@ describe("tend chat attach", () => {
     expect(out()).toContain(`chat ${id} has ended`);
   });
 });
+
+describe("tend chat attach: concise and verbose output", () => {
+  /** Waits until the attached client prompts, then leaves. */
+  async function attached<T extends { input: { close(): void }; out(): string }>(client: T) {
+    await until(() => client.out().endsWith("> "));
+    client.input.close();
+    return client;
+  }
+
+  /** A chat whose one turn used a tool, thought, hit a resumed session and an error, before it answered. */
+  async function busyChat(agentRuntime: ReturnType<typeof platform>["agentRuntime"]) {
+    const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
+    const add = (entry: Record<string, unknown>) =>
+      agentRuntime.append(chat.id, { position: agentRuntime.transcripts.get(chat.id)!.length, time: new Date().toISOString(), ...entry } as never);
+    add({ type: "session-started", sessionId: "s1" });
+    add({ type: "thought-chunk", text: "Let me think." });
+    add({ type: "tool-call", title: "list_runs", toolCallId: "t1" });
+    add({ type: "tool-result", toolCallId: "t1", status: "completed", output: "two runs" });
+    add({ type: "harness-output", text: "harness noise" });
+    add({ type: "session-resumed", sessionId: "s1" });
+    add({ type: "error", message: "something broke" });
+    agentRuntime.finishTurn(chat.id, "Two runs.", { amount: 0.01, currency: "USD" });
+    return chat.id;
+  }
+
+  it("shows the conversation, one line per turn, resume markers and errors by default", async () => {
+    const { agentRuntime, tend } = platform();
+    const id = await busyChat(agentRuntime);
+
+    const { exitCode, out } = await attached(tend(["chat", "attach", id]));
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toMatch(/task\s+assistant: Hello/);
+    expect(out()).toMatch(/agent\s+Two runs\./);
+    expect(out()).toMatch(/session\s+resumed s1/);
+    expect(out()).toMatch(/error\s+something broke/);
+    expect(out()).toMatch(/\(turn \d+s, 0\.01 USD; chat 0\.01 USD\)/);
+    for (const hidden of ["list_runs", "two runs", "Let me think", "harness noise", "started s1"]) expect(out()).not.toContain(hidden);
+  });
+
+  it("shows the whole transcript with --verbose", async () => {
+    const { agentRuntime, tend } = platform();
+    const id = await busyChat(agentRuntime);
+
+    const { exitCode, out } = await attached(tend(["chat", "attach", id, "--verbose"]));
+
+    expect(await exitCode).toBe(0);
+    for (const shown of ["list_runs", "two runs", "Let me think", "harness noise", "started s1", "resumed s1", "something broke", "(0.01 USD so far)"]) {
+      expect(out()).toContain(shown);
+    }
+  });
+
+  it("shows the cost of each turn and of the chat", async () => {
+    const { agentRuntime, tend } = platform();
+    const id = await existingChat(agentRuntime, "One.", "Two.");
+
+    const { exitCode, out } = await attached(tend(["chat", "attach", id, "-v"]));
+    const concise = await attached(tend(["chat", "attach", id]));
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toContain("(0.02 USD so far)");
+    expect(await concise.exitCode).toBe(0);
+    expect(concise.out()).toMatch(/\(turn \d+s, 0\.01 USD; chat 0\.01 USD\)/);
+    expect(concise.out()).toMatch(/\(turn \d+s, 0\.01 USD; chat 0\.02 USD\)/);
+  });
+
+  it("is concise by default in a new chat, and verbose with --verbose", async () => {
+    const quiet = chat(["assistant"], ["Hi."]);
+    await until(() => quiet.out().includes("> "));
+    quiet.input.type("Hello");
+    await until(() => /\(turn /.test(quiet.out()));
+    quiet.input.close();
+    expect(await quiet.exitCode).toBe(0);
+    expect(quiet.out()).not.toContain("so far");
+
+    const loud = chat(["assistant", "--verbose"], ["Hi."]);
+    await until(() => loud.out().includes("> "));
+    loud.input.type("Hello");
+    await until(() => loud.out().includes("so far"));
+    loud.input.close();
+    expect(await loud.exitCode).toBe(0);
+  });
+});
