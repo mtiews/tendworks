@@ -238,8 +238,10 @@ describe("control plane: runs, through orchestration", () => {
     expect((await client.GET("/runs/{runId}", { params: { path: { runId: "missing" } } })).response.status).toBe(404);
   });
 
-  it("retries a failed run, and refuses an unknown run and one that did not fail", async () => {
+  it("retries a finished run, failed or completed, and refuses an unknown run and one still at work", async () => {
     const client = controlPlane();
+    // Its slow agent never finishes, so its run stays at work.
+    const busy = controlPlane({}, { sleep: () => new Promise<void>(() => {}) });
     const settled = async (runId: string) => {
       for (let attempt = 0; attempt < 100; attempt++) {
         const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId } } });
@@ -251,6 +253,7 @@ describe("control plane: runs, through orchestration", () => {
     const input = { item: { key: "hello", title: "Say hello", number: 1 } };
     const { data: failing } = await client.POST("/runs", { body: { workflow: "requires-pull-request", input } });
     const { data: completing } = await client.POST("/runs", { body: { workflow: "hello-agent", input } });
+    const { data: working } = await busy.POST("/runs", { body: { workflow: "slow-agent" } });
     await settled(failing!.id);
     await settled(completing!.id);
 
@@ -258,7 +261,8 @@ describe("control plane: runs, through orchestration", () => {
 
     expect(retried.response.status).toBe(201);
     expect(retried.data?.startedBy).toEqual({ kind: "manual", retryOf: failing!.id });
-    expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: completing!.id } } })).response.status).toBe(409);
+    expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: completing!.id } } })).response.status).toBe(201);
+    expect((await busy.POST("/runs/{runId}/retry", { params: { path: { runId: working!.id } } })).response.status).toBe(409);
     expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: "missing" } } })).response.status).toBe(404);
   });
 

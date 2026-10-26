@@ -106,9 +106,10 @@ describe("runs through the control plane, orchestration and the fake agent", () 
     expect(await settled(retry!.id)).toMatchObject({ status: "failed", error: { title: "The agent ended without reporting its result" } });
   });
 
-  it("refuses to retry a run that did not fail", async () => {
-    const client = platform();
-    const { data: started } = await client.POST("/runs", { body: { workflow: "hello-agent", input: { item: { key: "hello", title: "Say hello", number: 1 } } } });
+  it("refuses to retry a run still at work", async () => {
+    // The slow agent never finishes, so its run stays at work.
+    const client = platform(() => new Promise<void>(() => {}));
+    const { data: started } = await client.POST("/runs", { body: { workflow: "slow-agent" } });
 
     const { response, error } = await client.POST("/runs/{runId}/retry", { params: { path: { runId: started!.id } } });
 

@@ -169,12 +169,13 @@ paths:
       operationId: retryRun
       security:
         - apiToken: []
-      summary: Retry a failed run
+      summary: Retry a finished run
       description: >-
-        Starts a new run of the failed run's workflow, as it is configured now, with the
-        failed run's input and origin; the new run's `startedBy.retryOf` names the failed
-        run. Trigger bindings are not involved: a retry does not count as a new firing.
-        Each call starts another run.
+        Starts a new run of a finished run's workflow, as it is configured now, with the
+        finished run's input and origin; the new run's `startedBy.retryOf` names the
+        finished run. A finished run is `failed` or `completed`: a completed run may have
+        delivered a result that does not fit. Trigger bindings are not involved: a retry
+        does not count as a new firing. Each call starts another run.
       parameters:
         - name: runId
           in: path
@@ -218,8 +219,8 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "409":
           description: >-
-            The run cannot be retried: it has not failed, or its workflow is no longer
-            configured.
+            The run cannot be retried: it has not finished (`pending`, `running`), or its
+            workflow is no longer configured.
           content:
             application/json:
               schema:

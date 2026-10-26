@@ -140,8 +140,8 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
 
   run
     .command("retry")
-    .description("start a failed run again: a new run of its workflow, as configured now, with its input and origin")
-    .argument("<id>", "id of the failed run")
+    .description("start a finished run (failed or completed) again: a new run of its workflow, as configured now, with its input and origin")
+    .argument("<id>", "id of the finished run")
     .option("-f, --follow", "then stream the new run's agent steps as they come, like run logs --follow")
     .addOption(outputOption())
     .action(async (runId: string, options: { output: OutputFormat; follow?: boolean }, command: Command) => {

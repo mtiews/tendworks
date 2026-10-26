@@ -251,7 +251,7 @@ describe("tend run retry", () => {
 
   async function retry(args: string[], token = "test-token") {
     const runs = createInMemoryRuns();
-    for (const run of [completed, failed]) runs.runs.set(run.id, run);
+    for (const run of [completed, failed, running]) runs.runs.set(run.id, run);
     const api = createControlPlaneApi({ probes: [], configuration: configured, apiToken: "test-token", readToken: "test-read-token", runs });
     let stdout = "";
     let stderr = "";
@@ -278,13 +278,20 @@ describe("tend run retry", () => {
     expect(JSON.parse(stdout)).toMatchObject({ workflow: "hello-agent", status: "pending", startedBy: { retryOf: failed.id } });
   });
 
-  it("exits 1 with the reason for a run that did not fail, and for an unknown run", async () => {
-    const notFailed = await retry([completed.id]);
+  it("retries a completed run too", async () => {
+    const { exitCode, runs } = await retry([completed.id]);
+
+    expect(exitCode).toBe(0);
+    expect(runs.started).toEqual([expect.objectContaining({ startedBy: { kind: "manual", retryOf: completed.id } })]);
+  });
+
+  it("exits 1 with the reason for a run that has not finished, and for an unknown run", async () => {
+    const notFinished = await retry([running.id]);
     const unknown = await retry(["nope"]);
 
-    expect(notFailed.exitCode).toBe(1);
-    expect(notFailed.stderr).toContain(`run ${completed.id} is completed; only a failed run can be retried`);
-    expect(notFailed.runs.started).toEqual([]);
+    expect(notFinished.exitCode).toBe(1);
+    expect(notFinished.stderr).toContain(`run ${running.id} cannot be retried: run ${running.id} is running; only a finished run can be retried`);
+    expect(notFinished.runs.started).toEqual([]);
     expect(unknown).toMatchObject({ exitCode: 1, stderr: expect.stringContaining("run nope not found") });
   });
 

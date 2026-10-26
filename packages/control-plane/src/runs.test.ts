@@ -184,14 +184,25 @@ describe("runs API", () => {
       expect(runs.started).toHaveLength(2);
     });
 
-    it.each(["pending", "running", "completed"] as const)("refuses a %s run", async (status) => {
+    it("retries a completed run too, e.g. one whose result did not fit", async () => {
+      const runs = createInMemoryRuns();
+      const completed = failedRun(runs, { id: "completed-1", status: "completed", output: { pullRequest: null } });
+      const { request } = setup(runs);
+
+      const { status } = await request("POST", `/runs/${completed.id}/retry`);
+
+      expect(status).toBe(201);
+      expect(runs.started.map((run) => run.startedBy)).toEqual([{ ...completed.startedBy, retryOf: completed.id }]);
+    });
+
+    it.each(["pending", "running"] as const)("refuses a %s run, which still works on its item", async (status) => {
       const runs = createInMemoryRuns();
       const run = failedRun(runs, { status });
       const { request } = setup(runs);
 
       const answer = await request("POST", `/runs/${run.id}/retry`);
 
-      expect(answer).toMatchObject({ status: 409, body: { title: "Run not retryable", detail: `run ${run.id} is ${status}; only a failed run can be retried` } });
+      expect(answer).toMatchObject({ status: 409, body: { title: "Run not retryable", detail: `run ${run.id} is ${status}; only a finished run can be retried` } });
       expect(runs.started).toEqual([]);
     });
 
