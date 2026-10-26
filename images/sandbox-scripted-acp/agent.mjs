@@ -4,10 +4,11 @@
 // directory ($CLAUDE_CONFIG_DIR, on the session volume) and can resume a session only
 // while that file exists.
 //
-// A new session's turn writes before.txt into the working directory and then works for
-// SCRIPTED_TURN_SECONDS (default 90), long enough to restart the platform; a turn that
-// gets to the end writes after.txt. The reply lists the .txt files and says whether the
-// session was resumed. No model, no network, no credentials.
+// A new session's turn writes before.txt into the working directory and then works for as
+// long as the prompt asks ("work for 15 seconds"), else SCRIPTED_TURN_SECONDS (default 90),
+// long enough to restart the platform; a turn that gets to the end writes after.txt. The
+// reply lists the .txt files and says whether the session was resumed. No model, no
+// network, no credentials.
 //
 // A prompt that starts with "chat:" is a chat turn instead (end-to-end chat tests): it
 // answers at once with every chat prompt of the session so far ("I remember: a | b"),
@@ -37,7 +38,9 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 
 const configDir = process.env.CLAUDE_CONFIG_DIR ?? "/tmp/scripted-acp";
-const turnMs = Number(process.env.SCRIPTED_TURN_SECONDS ?? "90") * 1000;
+const defaultTurnSeconds = Number(process.env.SCRIPTED_TURN_SECONDS ?? "90");
+/** How long a new session's turn works: what the prompt asks ("work for 15 seconds"), else the default. */
+const turnMsOf = (said) => Number(/\bwork for (\d+) seconds?\b/.exec(said)?.[1] ?? defaultTurnSeconds) * 1000;
 const sessionFile = (sessionId) => join(configDir, "projects", `${sessionId}.jsonl`);
 const sessions = new Map(); // sessionId -> { cwd, resumed, mcpServers }
 let cancel = () => {};
@@ -130,7 +133,7 @@ const connection = acp
     if (!session.resumed) {
       await update(ctx, { sessionUpdate: "tool_call", toolCallId: "write-before", title: "Write before.txt", status: "completed" });
       writeFileSync(join(session.cwd, "before.txt"), "before\n");
-      const ended = await Promise.race([cancelled, new Promise((resolve) => setTimeout(() => resolve("worked"), turnMs))]);
+      const ended = await Promise.race([cancelled, new Promise((resolve) => setTimeout(() => resolve("worked"), turnMsOf(said)))]);
       if (ended === "cancelled") return { stopReason: "cancelled" };
     }
     await update(ctx, { sessionUpdate: "tool_call", toolCallId: "write-after", title: "Write after.txt", status: "completed" });

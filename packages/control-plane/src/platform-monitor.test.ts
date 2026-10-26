@@ -1,6 +1,6 @@
 import type { PlatformEvents } from "@tendworks/shared";
 import { describe, expect, it, vi } from "vitest";
-import { createPlatformMonitor, type PlatformStatus } from "./platform-monitor.js";
+import { createPlatformMonitor, platformCheckIntervalMs, PlatformCheckIntervalError, type PlatformStatus } from "./platform-monitor.js";
 
 type Component = PlatformStatus["components"][number];
 const healthy = (name: string): Component => ({ name, status: "healthy" });
@@ -151,5 +151,47 @@ describe("the platform monitor", () => {
     fail = false;
     await monitor.tick();
     expect(published).toHaveLength(1);
+  });
+});
+
+describe("the platform check interval (TEND_PLATFORM_CHECK_SECONDS)", () => {
+  it("is one minute when unset or empty, as compose passes an unset variable", () => {
+    expect(platformCheckIntervalMs(undefined)).toBe(60_000);
+    expect(platformCheckIntervalMs("")).toBe(60_000);
+  });
+
+  it("is the configured number of seconds", () => {
+    expect(platformCheckIntervalMs("5")).toBe(5_000);
+    expect(platformCheckIntervalMs("300")).toBe(300_000);
+  });
+
+  it.each(["0", "-5", "1.5", "five", "5s", " 5", "1e3", "9999999999"])("refuses %j", (value) => {
+    expect(() => platformCheckIntervalMs(value)).toThrow(PlatformCheckIntervalError);
+    expect(() => platformCheckIntervalMs(value)).toThrow(`TEND_PLATFORM_CHECK_SECONDS: ${JSON.stringify(value)} is not a whole number of seconds from 1 to 2147483`);
+  });
+
+  it("drives the monitor: every 60 s without the setting, every 5 s with TEND_PLATFORM_CHECK_SECONDS=5", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const [value, expected] of [
+        [undefined, 3],
+        ["5", 25],
+      ] as const) {
+        let checks = 0;
+        const monitor = createPlatformMonitor({
+          check: async () => {
+            checks += 1;
+            return { status: "healthy", components: [], checkedAt: "2026-10-25T10:00:00Z" };
+          },
+          publisher: { publish: async () => {} },
+        });
+        monitor.start(platformCheckIntervalMs(value));
+        await vi.advanceTimersByTimeAsync(120_000);
+        monitor.stop();
+        expect(checks).toBe(expected);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

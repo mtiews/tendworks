@@ -9,6 +9,8 @@ import {
   createControlPlaneApi,
   createHeartbeat,
   createPlatformMonitor,
+  platformCheckIntervalMs,
+  PlatformCheckIntervalError,
   createOrchestrationClient,
   createStoppedControlPlaneApi,
   createStoreProbe,
@@ -74,6 +76,16 @@ const readToken = process.env.TEND_API_READ_TOKEN || undefined;
 const tokenProblems = apiTokenProblems({ ...(apiToken === undefined ? {} : { apiToken }), ...(readToken === undefined ? {} : { readToken }) });
 if (apiToken === undefined || readToken === undefined || tokenProblems.length > 0) {
   for (const problem of tokenProblems) console.error(problem);
+  process.exit(1);
+}
+
+// How often the platform monitor checks (ADR 0026): one minute unless TEND_PLATFORM_CHECK_SECONDS says otherwise.
+let platformCheckMs: number;
+try {
+  platformCheckMs = platformCheckIntervalMs(process.env.TEND_PLATFORM_CHECK_SECONDS);
+} catch (error) {
+  if (!(error instanceof PlatformCheckIntervalError)) throw error;
+  console.error(error.message);
   process.exit(1);
 }
 
@@ -202,7 +214,7 @@ const port = Number(env("PORT", "8080"));
 const server = serve({ fetch: (request) => (new URL(request.url).pathname === MCP_PATH ? mcp.fetch(request) : api.fetch(request)), port }, () => console.log(`control plane listening on :${port}`));
 triggerGateway.start();
 
-// The control plane checks the components behind GET /status about every minute and publishes
+// The control plane checks the components behind GET /status every minute, or every TEND_PLATFORM_CHECK_SECONDS, and publishes
 // platform.health-changed after two equal results in a row (ADR 0026); human interaction
 // turns it into platform.degraded or platform.recovered.
 // The one check behind GET /status that monitor and heartbeat share.
@@ -212,7 +224,7 @@ const platformMonitor = createPlatformMonitor({
   publisher: { publish: (event) => bus.publish(pool, event) },
   onError: (error) => console.error("platform health check failed:", error),
 });
-platformMonitor.start();
+platformMonitor.start(platformCheckMs);
 
 // While GET /status is healthy, the server calls TEND_HEARTBEAT_URL about every five minutes,
 // so an external monitor alarms when it stops (ADR 0026). Unset: no heartbeat.

@@ -32,6 +32,29 @@ export interface PlatformMonitor {
 
 const SOURCE = "/tendworks/control-plane";
 const DEFAULT_INTERVAL_MS = 60_000;
+/** The longest interval a Node.js timer keeps; a longer one fires at once. */
+const MAX_INTERVAL_SECONDS = Math.floor((2 ** 31 - 1) / 1000);
+
+export class PlatformCheckIntervalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PlatformCheckIntervalError";
+  }
+}
+
+/**
+ * The monitor's interval in milliseconds from `TEND_PLATFORM_CHECK_SECONDS`: whole seconds,
+ * one minute when unset or empty (compose passes an unset variable as empty). Throws a
+ * {@link PlatformCheckIntervalError} for anything else, so the server refuses it at startup.
+ */
+export function platformCheckIntervalMs(value: string | undefined): number {
+  if (value === undefined || value === "") return DEFAULT_INTERVAL_MS;
+  const seconds = /^[1-9]\d*$/.test(value) ? Number(value) : NaN;
+  if (!(seconds <= MAX_INTERVAL_SECONDS)) {
+    throw new PlatformCheckIntervalError(`TEND_PLATFORM_CHECK_SECONDS: ${JSON.stringify(value)} is not a whole number of seconds from 1 to ${MAX_INTERVAL_SECONDS}`);
+  }
+  return seconds * 1000;
+}
 
 /**
  * Watches the components behind `GET /status` and publishes `platform.health-changed` when

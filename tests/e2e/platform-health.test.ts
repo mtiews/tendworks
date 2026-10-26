@@ -31,12 +31,14 @@ describe("platform health on the compose stack", () => {
     await compose("up", "-d", "--wait", "worker");
   });
 
-  it("notifies the platform's subscribers when the worker stops, and when it runs again", { timeout: 420_000 }, async () => {
+  it("notifies the platform's subscribers when the worker stops, and when it runs again", { timeout: 120_000 }, async () => {
     const stoppedAt = new Date().toISOString();
     await compose("stop", "worker");
 
-    // The control plane checks about every minute and publishes after two equal results in a row.
-    const degraded = await waitFor("platform.degraded", notificationOf("platform.degraded", stoppedAt), 180_000);
+    // The control plane publishes after two equal results in a row. It checks every minute by
+    // default; `pnpm e2e` sets TEND_PLATFORM_CHECK_SECONDS=5 (tests/fixtures/fixture-configuration.ts),
+    // so each change shows within about 10 s.
+    const degraded = await waitFor("platform.degraded", notificationOf("platform.degraded", stoppedAt), 45_000);
     expect(degraded.title).toContain("worker");
     expect(degraded).not.toHaveProperty("runId");
     // The fixture subscription platform-log (tests/fixtures/config/notifications) selects it for fake-log.
@@ -45,7 +47,7 @@ describe("platform health on the compose stack", () => {
     const startedAt = new Date().toISOString();
     await compose("up", "-d", "--wait", "worker");
 
-    const recovered = await waitFor("platform.recovered", notificationOf("platform.recovered", startedAt), 180_000);
+    const recovered = await waitFor("platform.recovered", notificationOf("platform.recovered", startedAt), 45_000);
     expect(recovered.title).toContain("worker");
     expect(recovered.deliveries).toEqual([{ channel: "fake-log", status: "delivered", attemptedAt: expect.any(String) }]);
   });
