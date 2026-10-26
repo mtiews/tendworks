@@ -16,3 +16,7 @@ The control plane therefore gets a second token next to `TEND_API_TOKEN` (ADR 00
 - Every sandbox still reaches the control plane's published port on the network (`host.docker.internal` on Docker Desktop; on Linux compose publishes it on `127.0.0.1` only, which sandboxes do not reach, so the platform MCP server needs an address sandboxes can reach there); the tokens, not the network, are the guard until the egress proxy closes it.
 - The `tend` CLI and scripts need a token for reading too.
 - One static read token has no identity and is shared by all chat sessions; rotating it means changing `deploy/.env` and restarting server and worker.
+
+## Update (#124)
+
+A fifth tool, `get_run_transcript`, reads the transcript of a run's step (`GET /runs/{runId}/tasks/{taskId}/transcript`, secrets redacted) with the caller's token, so the assistant can tell why a step failed, not only that it did. It answers the newest entries only (`last`, 50 by default) and can keep only the problems (`only: problems`), so the answer fits an agent's context window. It stays read-only: no new endpoint, no new token.

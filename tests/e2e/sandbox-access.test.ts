@@ -108,7 +108,7 @@ describe("the platform MCP server", () => {
 
     const [anonymous, tools, agents] = JSON.parse(answers) as { status: number; body?: { result: { tools?: { name: string }[]; content?: { text: string }[] } } }[];
     expect(anonymous?.status).toBe(401);
-    expect(tools?.body?.result.tools?.map((tool) => tool.name).sort()).toEqual(["get_run", "list_agents", "list_runs", "list_triggers"]);
+    expect(tools?.body?.result.tools?.map((tool) => tool.name).sort()).toEqual(["get_run", "get_run_transcript", "list_agents", "list_runs", "list_triggers"]);
     const listed = JSON.parse(agents?.body?.result.content?.[0]?.text ?? "{}") as { items: { name: string }[] };
     expect(listed.items.map((agent) => agent.name)).toContain("assistant");
   });

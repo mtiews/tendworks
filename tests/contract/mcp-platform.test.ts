@@ -9,6 +9,7 @@ import {
   createInMemoryTriggers,
   loadConfiguration,
   type AgentRuntimePort,
+  type TranscriptEntry,
 } from "@tendworks/control-plane";
 import { createPlatformMcpServer } from "@tendworks/mcp-platform";
 import { describe, expect, it } from "vitest";
@@ -61,7 +62,27 @@ function platform(agentRuntime: AgentRuntimePort = createInMemoryAgentRuntime())
     return (await response.json()) as { id: string };
   }
 
-  return { connect, startRun, runs };
+  /** Starts a run whose one step handed task `taskId` to an agent and failed. */
+  async function failedRunWithTask(taskId: string) {
+    const started = await startRun("hello-agent");
+    const run = runs.runs.get(started.id)!;
+    run.status = "failed";
+    run.steps = [{ name: "implement", reference: "/do/0/implement", status: "failed", taskId, transcript: `memory:${taskId}`, startedAt: time }];
+    return started;
+  }
+
+  return { connect, startRun, failedRunWithTask, runs };
+}
+
+const time = "2026-10-19T10:00:00.000Z";
+
+/** A transcript of `count` entries: the task started, then chunks of the agent's message. */
+function transcriptOf(count: number): TranscriptEntry[] {
+  return Array.from({ length: count }, (_, position): TranscriptEntry =>
+    position === 0
+      ? { position, time, type: "task-started", agent: "developer", message: { messageId: "m-1", role: "ROLE_USER", parts: [{ text: "build it" }] } }
+      : { position, time, type: "message-chunk", text: `chunk ${position}` },
+  );
 }
 
 /** The JSON a tool answered with. */
@@ -135,6 +156,54 @@ describe("the platform MCP server", () => {
     expect(result.content).toEqual([{ type: "text", text: expect.stringMatching(/404/) }]);
   });
 
+  it("reads the newest entries of a run's transcript, and as many as asked for", async () => {
+    const agentRuntime = createInMemoryAgentRuntime();
+    const { connect, failedRunWithTask } = platform(agentRuntime);
+    const run = await failedRunWithTask("task-1");
+    const entries = transcriptOf(60);
+    agentRuntime.transcripts.set("task-1", entries);
+    const client = await connect(READ_TOKEN);
+
+    const newest = answer(await client.callTool({ name: "get_run_transcript", arguments: { runId: run.id, taskId: "task-1" } }));
+    const fewer = answer(await client.callTool({ name: "get_run_transcript", arguments: { runId: run.id, taskId: "task-1", last: 2 } }));
+
+    expect(newest).toEqual({ total: 60, omitted: 10, items: entries.slice(10) });
+    expect(fewer).toEqual({ total: 60, omitted: 58, items: entries.slice(58) });
+  });
+
+  it("reads only what went wrong in a run's transcript when asked to", async () => {
+    const agentRuntime = createInMemoryAgentRuntime();
+    const { connect, failedRunWithTask } = platform(agentRuntime);
+    const run = await failedRunWithTask("task-1");
+    const entries: TranscriptEntry[] = [
+      ...transcriptOf(2),
+      { position: 2, time, type: "tool-call", toolCallId: "call-1", title: "pnpm check", kind: "execute" },
+      { position: 3, time, type: "tool-result", toolCallId: "call-1", status: "failed", output: "2 tests failed" },
+      { position: 4, time, type: "tool-call", toolCallId: "call-2", title: "git status", kind: "execute" },
+      { position: 5, time, type: "tool-result", toolCallId: "call-2", status: "completed", output: "clean" },
+      { position: 6, time, type: "error", message: "the turn timed out" },
+      { position: 7, time, type: "task-ended", state: "TASK_STATE_FAILED", message: "the turn timed out" },
+    ];
+    agentRuntime.transcripts.set("task-1", entries);
+    const client = await connect(READ_TOKEN);
+
+    const result = answer(await client.callTool({ name: "get_run_transcript", arguments: { runId: run.id, taskId: "task-1", only: "problems" } }));
+
+    expect(result).toEqual({ total: 8, omitted: 4, items: [entries[2], entries[3], entries[6], entries[7]] });
+  });
+
+  it("answers a run or task that does not exist with the control plane's reason", async () => {
+    const { connect, failedRunWithTask } = platform();
+    const run = await failedRunWithTask("task-1");
+    const client = await connect(READ_TOKEN);
+
+    const noRun = await client.callTool({ name: "get_run_transcript", arguments: { runId: "no-such-run", taskId: "task-1" } });
+    const noTask = await client.callTool({ name: "get_run_transcript", arguments: { runId: run.id, taskId: "task-9" } });
+
+    expect(noRun).toMatchObject({ isError: true, content: [{ type: "text", text: "the control plane answered 404: Run not found" }] });
+    expect(noTask).toMatchObject({ isError: true, content: [{ type: "text", text: expect.stringMatching(/^the control plane answered 404: Task not found: /) }] });
+  });
+
   it("lists the agent profiles with the agent sessions working right now", async () => {
     const agentRuntime = createInMemoryAgentRuntime();
     const { connect } = platform(agentRuntime);
@@ -164,12 +233,12 @@ describe("the platform MCP server", () => {
     expect(result.items.filter((agent) => agent.sessions !== undefined)).toEqual([]);
   });
 
-  it("offers only the four tools, all of them read-only", async () => {
+  it("offers only the five tools, all of them read-only", async () => {
     const client = await platform().connect(READ_TOKEN);
 
     const { tools } = await client.listTools();
 
-    expect(tools.map((tool) => tool.name).sort()).toEqual(["get_run", "list_agents", "list_runs", "list_triggers"]);
+    expect(tools.map((tool) => tool.name).sort()).toEqual(["get_run", "get_run_transcript", "list_agents", "list_runs", "list_triggers"]);
     for (const tool of tools) expect(tool.annotations, tool.name).toMatchObject({ readOnlyHint: true, destructiveHint: false });
   });
 

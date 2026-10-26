@@ -7,7 +7,7 @@ import { useLocation } from "./router.js";
 import { usePolling } from "./use-polling.js";
 
 /** The profile chosen unless the operator picks another: the platform assistant. */
-const PLATFORM_ASSISTANT = "assistant";
+export const PLATFORM_ASSISTANT = "assistant";
 
 /** Whom a new chat is with: a profile (`agent`) or a workspace's assistant (`workspace`), as `POST /chats` takes it. */
 type ChatWith = { agent: string } | { workspace: string };
@@ -48,8 +48,7 @@ export function NewChat() {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
     return workspace === null ? "" : `workspace:${workspace}`;
   });
-  // A first message suggested by the link that opened the form, e.g. "Ask the platform assistant" on a failed run.
-  const [text, setText] = useState(() => new URLSearchParams(window.location.search).get("text") ?? "");
+  const [text, setText] = useState("");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
   const ids = { chatWith: useId(), text: useId() };

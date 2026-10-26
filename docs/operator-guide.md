@@ -455,7 +455,7 @@ Every policy that applies to the run's workflow and names the action counts; the
 
 | Chat | Start | Works in | Platform tools |
 | --- | --- | --- | --- |
-| Platform assistant (profile `assistant`) | `tend chat` | an empty workspace, no repository credential | yes: `list_runs`, `get_run`, `list_triggers`, `list_agents` through the platform MCP server, with the read-only token |
+| Platform assistant (profile `assistant`) | `tend chat` | an empty workspace, no repository credential | yes: `list_runs`, `get_run`, `get_run_transcript`, `list_triggers`, `list_agents` through the platform MCP server, with the read-only token |
 | Another chat profile | `tend chat <profile>` | an empty workspace | only if the profile lists `mcp: [tendworks]` |
 | [Workspace assistant](#workspace-assistants) | `tend chat --workspace <name>` | the workspace, read-only unless it allows writing | only if its profile lists `mcp: [tendworks]` (the starter's `workspace-assistant` does not) |
 
@@ -687,6 +687,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]`, `tend run retry <id> [--follow]` |
 | Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
+| Ask why a run failed | Analyze on a finished run in the web UI: a chat with the platform assistant on that run, which reads its steps and transcripts (`get_run`, `get_run_transcript`); or `tend chat` and name the run |
 | Retry a run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a finished run (failed or completed) starts again as a new run with the same input and origin, `retryOf` naming it; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
 | Notifications, triggers, workspaces, agents | `tend notification list` (delivery per channel), `tend trigger list` (last check per binding), `tend workspace list` (kind and assistant), `tend agent list` (active sessions per profile) |
