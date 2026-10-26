@@ -164,6 +164,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /runs/{runId}/retry:
+    post:
+      operationId: retryRun
+      security:
+        - apiToken: []
+      summary: Retry a finished run
+      description: >-
+        Starts a new run of a finished run's workflow, as it is configured now, with the
+        finished run's input and origin; the new run's `startedBy.retryOf` names the
+        finished run. A finished run is `failed` or `completed`: a completed run may have
+        delivered a result that does not fit. Trigger bindings are not involved: a retry
+        does not count as a new firing. Each call starts another run.
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Retry started.
+          headers:
+            Location:
+              description: URL of the new run.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/run.schema.yaml#/$defs/run"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No run with this id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: >-
+            The run cannot be retried: it has not finished (`pending`, `running`), or its
+            workflow is no longer configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: Orchestration, which owns runs, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /runs/{runId}:
     get:
       operationId: getRun

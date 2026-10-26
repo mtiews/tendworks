@@ -142,6 +142,7 @@ describe("control plane: a stopped platform", () => {
   const requests: [string, string, RequestInit][] = [
     ["GET", "/access", read],
     ["POST", "/runs", json({ workflow: "hello-agent" })],
+    ["POST", "/runs/r-1/retry", read],
     ["GET", "/runs", read],
     ["GET", "/runs/r-1", read],
     ["GET", "/runs/r-1/tasks/t-1/transcript", read],
@@ -237,12 +238,41 @@ describe("control plane: runs, through orchestration", () => {
     expect((await client.GET("/runs/{runId}", { params: { path: { runId: "missing" } } })).response.status).toBe(404);
   });
 
+  it("retries a finished run, failed or completed, and refuses an unknown run and one still at work", async () => {
+    const client = controlPlane();
+    // Its slow agent never finishes, so its run stays at work.
+    const busy = controlPlane({}, { sleep: () => new Promise<void>(() => {}) });
+    const settled = async (runId: string) => {
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const { data: run } = await client.GET("/runs/{runId}", { params: { path: { runId } } });
+        if (run?.status === "completed" || run?.status === "failed") return run;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      throw new Error("the run did not finish");
+    };
+    const input = { item: { key: "hello", title: "Say hello", number: 1 } };
+    const { data: failing } = await client.POST("/runs", { body: { workflow: "requires-pull-request", input } });
+    const { data: completing } = await client.POST("/runs", { body: { workflow: "hello-agent", input } });
+    const { data: working } = await busy.POST("/runs", { body: { workflow: "slow-agent" } });
+    await settled(failing!.id);
+    await settled(completing!.id);
+
+    const retried = await client.POST("/runs/{runId}/retry", { params: { path: { runId: failing!.id } } });
+
+    expect(retried.response.status).toBe(201);
+    expect(retried.data?.startedBy).toEqual({ kind: "manual", retryOf: failing!.id });
+    expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: completing!.id } } })).response.status).toBe(201);
+    expect((await busy.POST("/runs/{runId}/retry", { params: { path: { runId: working!.id } } })).response.status).toBe(409);
+    expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: "missing" } } })).response.status).toBe(404);
+  });
+
   it("answers 503 when orchestration cannot be reached", async () => {
     const client = controlPlane({ runs: unreachableOrchestration() });
 
     expect((await client.POST("/runs", { body: { workflow: "hello-agent" } })).response.status).toBe(503);
     expect((await client.GET("/runs")).response.status).toBe(503);
     expect((await client.GET("/runs/{runId}", { params: { path: { runId: "r-1" } } })).response.status).toBe(503);
+    expect((await client.POST("/runs/{runId}/retry", { params: { path: { runId: "r-1" } } })).response.status).toBe(503);
   });
 });
 
@@ -579,8 +609,9 @@ describe("control plane: the API token", () => {
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
+    const retried = await client.POST("/runs/{runId}/retry", { params: { path: { runId: "r-1" } } });
 
-    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended, retried].map(({ response }) => response.status)).toEqual([401, 401, 401, 401, 401, 401, 401, 401]);
   });
 
   it("refuses operations that change state with the read-only token", async () => {
@@ -595,8 +626,9 @@ describe("control plane: the API token", () => {
     const sent = await client.POST("/chats/{chatId}/messages", { params: { path: { chatId: "c-1" } }, body: { text: "Hi" } });
     const cancelled = await client.POST("/chats/{chatId}/cancel", { params: { path: { chatId: "c-1" } } });
     const ended = await client.POST("/chats/{chatId}/end", { params: { path: { chatId: "c-1" } } });
+    const retried = await client.POST("/runs/{runId}/retry", { params: { path: { runId: "r-1" } } });
 
-    expect([started, decided, asked, chatted, sent, cancelled, ended].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403]);
+    expect([started, decided, asked, chatted, sent, cancelled, ended, retried].map(({ response }) => response.status)).toEqual([403, 403, 403, 403, 403, 403, 403, 403]);
   });
 
   it("refuses reading without a token, except the platform status", async () => {

@@ -176,6 +176,32 @@ export function createControlPlaneApi({
     return c.json(run satisfies Schemas["run"], 201, { location: `/runs/${run.id}` });
   });
 
+  app.post("/runs/:runId/retry", authenticated, async (c) => {
+    const finished = await runs.get(c.req.param("runId"));
+    if (!finished) return problem(404, "Run not found");
+    // A completed run may have delivered the wrong result; a run at work still works on its item.
+    if (finished.status !== "failed" && finished.status !== "completed") {
+      return problem(409, "Run not retryable", `run ${finished.id} is ${finished.status}; only a finished run can be retried`);
+    }
+    // The workflow as configured now, so a fixed workflow takes effect.
+    const definition = configuration.workflow(finished.workflow);
+    if (!definition) {
+      return problem(409, "Run not retryable", `its workflow '${finished.workflow}' is no longer configured (configured: ${configuration.workflowNames.join(", ") || "none"})`);
+    }
+    const run = await runs
+      .start({
+        workflow: definition as unknown as Record<string, unknown>,
+        input: finished.input as Record<string, unknown>,
+        startedBy: { ...(finished.startedBy ?? { kind: "manual" }), retryOf: finished.id },
+      })
+      .catch((error: unknown) => {
+        if (error instanceof RunRejectedError) return problem(409, "Run not retryable", error.detail ?? error.title);
+        throw error;
+      });
+    if (run instanceof Response) return run;
+    return c.json(run satisfies Schemas["run"], 201, { location: `/runs/${run.id}` });
+  });
+
   app.get("/runs", async (c) => c.json({ items: await runs.list() } satisfies Schemas["RunList"], 200));
 
   app.get("/runs/:runId", async (c) => {

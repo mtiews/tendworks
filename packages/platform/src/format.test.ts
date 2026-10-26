@@ -34,6 +34,13 @@ describe("formatting for clients", () => {
     expect(formatOrigin(undefined)).toBe("");
   });
 
+  it("names the run a retry retries after its origin", () => {
+    expect(formatOrigin({ kind: "manual", retryOf: "run-1" })).toBe("manual, retry of run-1");
+    expect(formatOrigin({ kind: "trigger", binding: "ready", item: { key: "acme/app#7", title: "Fix", url: "https://x.test/7" }, retryOf: "run-2" }, { url: true })).toBe(
+      "trigger ready: acme/app#7 (https://x.test/7), retry of run-2",
+    );
+  });
+
   it("shows a trigger's schedule as its interval or its cron expression", () => {
     expect(formatSchedule({ every: { minutes: 5, seconds: 30 } })).toBe("every 5m30s");
     expect(formatSchedule({ every: { days: 1 } })).toBe("every 1d");

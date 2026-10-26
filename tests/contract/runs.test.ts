@@ -83,6 +83,40 @@ describe("runs through the control plane, orchestration and the fake agent", () 
     expect(transcript?.items).toEqual([expect.objectContaining({ position: 0, type: "task-started", agent: "fake-slow-developer" })]);
   });
 
+  it("retries a failed run: a new run with the same input and origin that names the failed one, and fails again", async () => {
+    const client = platform();
+    const settled = async (runId: string) => {
+      let run: Run | undefined;
+      for (let attempt = 0; attempt < 100 && !["completed", "failed"].includes(run?.status ?? ""); attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        run = (await client.GET("/runs/{runId}", { params: { path: { runId } } })).data;
+      }
+      return run;
+    };
+    const input = { item: { key: "hello", title: "Say hello", number: 1 } };
+    const startedBy = { kind: "trigger" as const, binding: "issue-ready-for-agent", item: { key: "hello", title: "Say hello" } };
+    const { data: first } = await client.POST("/runs", { body: { workflow: "requires-pull-request", input, startedBy } });
+    expect(await settled(first!.id)).toMatchObject({ status: "failed" });
+
+    const { data: retry, response } = await client.POST("/runs/{runId}/retry", { params: { path: { runId: first!.id } } });
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get("location")).toBe(`/runs/${retry!.id}`);
+    expect(retry).toMatchObject({ workflow: "requires-pull-request", input, startedBy: { ...startedBy, retryOf: first!.id } });
+    expect(await settled(retry!.id)).toMatchObject({ status: "failed", error: { title: "The agent ended without reporting its result" } });
+  });
+
+  it("refuses to retry a run still at work", async () => {
+    // The slow agent never finishes, so its run stays at work.
+    const client = platform(() => new Promise<void>(() => {}));
+    const { data: started } = await client.POST("/runs", { body: { workflow: "slow-agent" } });
+
+    const { response, error } = await client.POST("/runs/{runId}/retry", { params: { path: { runId: started!.id } } });
+
+    expect(response.status).toBe(409);
+    expect(error).toMatchObject({ title: "Run not retryable" });
+  });
+
   it("passes orchestration's refusal on as 404 for an unknown run", async () => {
     const { response, error } = await platform().GET("/runs/{runId}", { params: { path: { runId: "missing" } } });
 

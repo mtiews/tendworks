@@ -223,6 +223,21 @@
   margin: 0 0 var(--space-4);
 }
 
+/* What the operator can do with a finished run, e.g. retry it; its confirmation below. */
+.run-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+}
+
+.run-actions .confirmation,
+.run-actions .message {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 .banner {
   display: flex;
   flex-wrap: wrap;

@@ -139,6 +139,24 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     });
 
   run
+    .command("retry")
+    .description("start a finished run (failed or completed) again: a new run of its workflow, as configured now, with its input and origin")
+    .argument("<id>", "id of the finished run")
+    .option("-f, --follow", "then stream the new run's agent steps as they come, like run logs --follow")
+    .addOption(outputOption())
+    .action(async (runId: string, options: { output: OutputFormat; follow?: boolean }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const { data, error, response } = await client.POST("/runs/{runId}/retry", { params: { path: { runId } } }).catch((cause: unknown) => {
+        throw new UnreachableError(baseUrl, cause);
+      });
+      if (response.status === 404) throw new Error(`run ${runId} not found`);
+      if (response.status === 409) throw new Error(`run ${runId} cannot be retried: ${error?.detail ?? error?.title ?? "refused"}`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, (started) => `run ${started.id} of ${started.workflow} started, retry of ${runId}\n`));
+      if (options.follow) await followRun({ runId: data.id, client, baseUrl, output: options.output, io });
+    });
+
+  run
     .command("logs")
     .description("print the transcript of each agent step of a run, finished or running")
     .argument("<id>", "run id")

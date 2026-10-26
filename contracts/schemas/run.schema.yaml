@@ -54,7 +54,8 @@ $defs:
     description: >-
       What started the run, as its starter declared it: `manual` (a client such as the
       CLI or a script) or `trigger` (a trigger binding, for the item it fired for and the
-      workspace the run works in).
+      workspace the run works in). A retry (`POST /runs/{runId}/retry`) keeps the origin
+      of the run it retries and names that run in `retryOf`.
     oneOf:
       - title: ManualRunOrigin
         type: object
@@ -63,6 +64,8 @@ $defs:
         properties:
           kind:
             const: manual
+          retryOf:
+            $ref: '#/$defs/retryOf'
       - title: TriggerRunOrigin
         type: object
         additionalProperties: false
@@ -78,6 +81,11 @@ $defs:
             description: Workspace the run works in; absent for a binding without workspaces.
           item:
             $ref: '#/$defs/itemReference'
+          retryOf:
+            $ref: '#/$defs/retryOf'
+  retryOf:
+    type: string
+    description: Id of the finished (failed or completed) run this run retries.
   itemReference:
     title: RunItemReference
     description: The item a trigger fired for.
