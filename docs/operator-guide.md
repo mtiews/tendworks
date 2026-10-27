@@ -199,7 +199,7 @@ Rules the loader enforces:
 | Kind | Where | Typical changes | Read by |
 | --- | --- | --- | --- |
 | `Workspace` | `workspaces/*.yaml` | a repository (`spec.git`) or host directory (`spec.directory`) agents work in, its credential and its assistant: [Workspaces](#workspaces) | server and worker |
-| `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.suspend`, `spec.trigger` (`schedule` or `github-issues`): [Trigger bindings](#trigger-bindings) | server |
+| `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.suspend`, `spec.trigger` (`schedule`, `github-issues` or `manual`): [Trigger bindings](#trigger-bindings) | server |
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | the prompt text; new workflows calling `agent://<profile>` in a workspace; a [human step](#waiting-for-a-human-the-human-step-and-policies) `call: approval` where a workflow waits for you | server |
 | `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.priority` (the default), `spec.pushover`: [Notifications](#notifications) | server |
 | `Subscription` | any `*.yaml`, e.g. `notifications/` | `spec.scope` (`workspace: <name>` or `platform: {}`), `spec.events`, `spec.channels`, `spec.priority`: [Notifications](#notifications) | server |
@@ -281,10 +281,10 @@ The compose stack supports one root, since it mounts the variable as one directo
 
 ### Trigger bindings
 
-A trigger binding starts a workflow when its trigger fires (ADR 0023): one run per workspace in `spec.workspaces` and per item the trigger reports, with the input `{ workspace: <name>, item: <item> }`. A binding without workspaces starts one run per item without a workspace. A suspended binding (`spec.suspend: true`) is never checked and starts nothing.
+A trigger binding starts a workflow when its trigger fires (ADR 0023): one run per workspace in `spec.workspaces` and per item the trigger reports, with the input `{ workspace: <name>, item: <item> }`. A binding without workspaces starts one run per item without a workspace. A suspended binding (`spec.suspend: true`) is never checked, cannot be fired and starts nothing.
 
 - **Once per item:** an item starts at most one run per binding and workspace, also when that run fails (ADR 0006), so a failing issue never starts a paid run at every check. Retry a finished run by hand, failed or completed (e.g. a result that does not fit): `tend run retry <id>`, or Retry on the run in the web UI ([Everyday commands](#everyday-commands)). A retry is a new run of the workflow as configured now, with the finished run's input and origin; it does not count as a new firing. A run still at work cannot be retried.
-- **`tend trigger list`** shows each binding's workflow, trigger kind, workspaces, schedule, next execution and last check (`failed` with the reason when the source could not be asked for a workspace or a run could not start). A run's `STARTED BY` reads `trigger <binding> in <workspace>: <item key>`.
+- **`tend trigger list`** shows each binding's workflow, trigger kind, workspaces, schedule, next execution and last check (`failed` with the reason when the source could not be asked for a workspace or a run could not start). A `manual` binding shows `-` as schedule and next execution, and its last firing as its last check. A run's `STARTED BY` reads `trigger <binding> in <workspace>: <item key>`.
 - **Adding a repository** is adding its workspace's name to `spec.workspaces`.
 
 #### `schedule`
@@ -335,11 +335,40 @@ spec:
 - Each workspace must be a git workspace whose `url` is `https://github.com/<owner>/<name>` (with or without `.git`). A binding without workspaces, with a directory workspace or with a repository elsewhere stops the server at start ([Troubleshooting](#troubleshooting)). GitHub Enterprise Server is not supported.
 - Before you remove `suspend: true`: the [GitHub access](#before-the-first-real-run-github-access) checks, and no open issue carries the label that you do not want worked, since each starts a paid run.
 
+#### `manual`
+
+A workflow you start only now and then, when you decide (a review, a release), with the workspaces it may run in (ADR 0028):
+
+```yaml
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: playground-check
+spec:
+  workflow: check-workspace
+  workspaces: [playground]
+  trigger:
+    manual: {}
+```
+
+- It never fires on its own. You fire it through the API with the API token (the read-only token gets `403`):
+
+  ```bash
+  curl -X POST localhost:8080/triggers/playground-check/fire -H "authorization: Bearer $TEND_API_TOKEN"
+  # only in one of its workspaces:
+  curl -X POST localhost:8080/triggers/playground-check/fire -H "authorization: Bearer $TEND_API_TOKEN" \
+    -H 'content-type: application/json' -d '{"workspace":"playground"}'
+  ```
+
+  The answer (`201`) lists the started runs: `{"items":[{"workspace":"playground","runId":"..."}]}`.
+- Each firing starts one run per workspace of the binding (or only in the one you name), also while earlier runs are still at work, and each is a paid agent session. The item is the firing: `key` = its time, `title` `started by hand`. A run's `STARTED BY` reads `trigger <binding> in <workspace>: <time>`, and its notifications go to that workspace's subscriptions.
+- `404`: no such binding; `409`: the binding is suspended or fires on its own (`schedule`, `github-issues` cannot be fired); `400`: the workspace is not one of the binding's. `tend trigger list` shows the last firing as the binding's last check.
+
 ### Notifications
 
 Human interaction records a notification for every started, completed or failed run (`run.started`, `run.completed`, `run.failed`) and every approval request (`approval.requested`), whether or not anyone subscribed. A **notification channel** only says how you are reached (Pushover with its credentials, a default priority). A **subscription** sends events of one scope to channels (ADR 0025, 0026). Without a matching subscription, a notification is only recorded and listed.
 
-- **Scope:** `workspace: <name>` is a project; its subscriptions apply to everyone working in it. `platform: {}` holds the events of runs without a workspace (e.g. started with `tend run start`) and, opt-in, the platform's own events. A run's workspace is the one its trigger binding started it in, else the first one a step handed to its agent.
+- **Scope:** `workspace: <name>` is a project; its subscriptions apply to everyone working in it. `platform: {}` holds the events of runs without a workspace (e.g. started through `POST /runs`, or by a binding without workspaces) and, opt-in, the platform's own events. A run's workspace is the one its trigger binding started it in, else the first one a step handed to its agent.
 - **Events:** a workspace has `run.started`, `run.completed`, `run.failed`, `approval.requested`; the platform has the same for runs without a workspace, plus `platform.degraded` and `platform.recovered`. The server checks the platform's components (the worker's included) every minute (`TEND_PLATFORM_CHECK_SECONDS`, default `60`); a change counts after two equal results in a row, so a single failed check notifies nobody. The notification names the affected components and their messages. The check state is kept in memory: after a server restart a platform that was degraded is reported healthy again until a check fails twice. The server refuses, when it loads the configuration, a subscription with an unknown workspace or channel, an event outside its scope, or an empty `events` or `channels`.
 - **Matching:** a notification is delivered once per channel that any matching subscription names, with the highest `priority` of those subscriptions, else the channel's `priority`, else 0. `priority` goes from -2 (no alert) to 1 (high).
 
@@ -687,7 +716,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Services | `docker compose -f deploy/compose.yaml ps` (`-a` shows `agent-secrets` as `Exited (0)`) |
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]`, `tend run retry <id> [--follow]` |
-| Start a run by hand | `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` |
+| Start a workflow by hand | fire a [`manual` trigger binding](#manual): `curl -X POST localhost:8080/triggers/<binding>/fire -H "authorization: Bearer $TEND_API_TOKEN"`; a run in its workspaces, with the binding as origin. For scripts without a binding: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` (no workspace in its origin) |
 | Ask why a run failed | Analyze on a finished run in the web UI: a chat with the platform assistant on that run, which reads its steps and transcripts (`get_run`, `get_run_transcript`); or `tend chat` and name the run |
 | Retry a run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a finished run (failed or completed) starts again as a new run with the same input and origin, `retryOf` naming it; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |

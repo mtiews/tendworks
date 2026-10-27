@@ -1,5 +1,6 @@
 import type { TriggerSources } from "@tendworks/trigger-gateway";
 import { createGithubIssuesSource } from "@tendworks/trigger-source-github-issues";
+import { createManualSource } from "@tendworks/trigger-source-manual";
 import { createScheduleSource } from "@tendworks/trigger-source-schedule";
 
 /**
@@ -9,4 +10,5 @@ import { createScheduleSource } from "@tendworks/trigger-source-schedule";
 export const TRIGGER_SOURCES: TriggerSources = {
   schedule: createScheduleSource,
   "github-issues": createGithubIssuesSource,
+  manual: createManualSource,
 };

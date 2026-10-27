@@ -21,16 +21,16 @@ export interface Checks {
  * The checks of a binding around `now`. The API gives only the next and the last check, so
  * an interval is projected from the next check in both directions, while a cron expression
  * (which the browser does not evaluate) shows just the next and the last check. A suspended
- * binding checks nothing.
+ * binding checks nothing; a binding fired by hand has no schedule, so it shows its last firing only.
  */
 export function checksAround(trigger: Trigger, now: number): Checks {
   if (trigger.suspended) return { past: [], future: [], dense: false };
-  const next = new Date(trigger.nextExecutionAt).getTime();
+  const next = trigger.nextExecutionAt === undefined ? Number.NaN : new Date(trigger.nextExecutionAt).getTime();
   const last = trigger.lastEvaluation ? new Date(trigger.lastEvaluation.at).getTime() : undefined;
   const times = new Set<number>();
   if (next > now) times.add(next);
   if (last !== undefined) times.add(last);
-  if ("every" in trigger.schedule) {
+  if (trigger.schedule && "every" in trigger.schedule) {
     const every = trigger.schedule.every;
     const interval = (Object.keys(UNIT_MS) as (keyof typeof UNIT_MS)[]).reduce((sum, unit) => sum + (every[unit] ?? 0) * UNIT_MS[unit], 0);
     if (interval > 0 && Number.isFinite(next)) {

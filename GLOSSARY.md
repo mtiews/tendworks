@@ -42,10 +42,10 @@ What an agent session works on, declared once by name: a git repository on any h
 _Avoid_: repository (one kind of workspace), project, checkout (what the agent runtime makes of a git workspace)
 
 **Trigger binding**:
-Starts a workflow when its trigger fires: one run per workspace it names and per item its trigger source reports, with the input `{ workspace, item }`. An item starts at most one run per binding and workspace. A suspended binding starts nothing.
+Starts a workflow when its trigger fires: one run per workspace it names and per item its trigger source reports, with the input `{ workspace, item }`. An item starts at most one run per binding and workspace. A suspended binding starts nothing. A binding of kind `manual` never fires on its own; the operator fires it.
 
 **Trigger source**:
-What fires a trigger binding, selected by its kind: `schedule` (cron or interval; the tick is the item) or `github-issues` (the issues of each workspace's repository). Each reports items with a stable key, a title and a link.
+What fires a trigger binding, selected by its kind: `schedule` (cron or interval; the tick is the item), `github-issues` (the issues of each workspace's repository) or `manual` (fired by hand through the API; each firing is the item). Each reports items with a stable key, a title and a link.
 
 **Isolation class**:
 How strongly a sandbox is separated from its host: `container`, `gvisor` or `microvm`. Chosen by the operator per sandbox template.

@@ -1,9 +1,16 @@
-import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type Trigger } from "@tendworks/control-plane";
+import { createControlPlaneApi, createInMemoryRuns, createInMemoryTriggers, emptyConfiguration, type Trigger } from "@tendworks/control-plane";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { runTend } from "./tend.js";
 
 const triggers: Trigger[] = [
+  {
+    name: "architecture-review",
+    workflow: "review-workspace",
+    kind: "manual",
+    workspaces: ["app"],
+    lastEvaluation: { at: "2026-10-18T09:30:00.000Z", status: "succeeded", startedRuns: 1 },
+  },
   {
     name: "github-issues",
     workflow: "develop-issue",
@@ -31,7 +38,7 @@ async function tend(args: string[]) {
     configuration: emptyConfiguration(),
     apiToken: "test-token",
     runs: createInMemoryRuns(),
-    triggers: { list: async () => triggers },
+    triggers: createInMemoryTriggers(triggers),
   });
   let stdout = "";
   let stderr = "";
@@ -50,6 +57,7 @@ describe("tend trigger list", () => {
     expect(exitCode).toBe(0);
     expect(stdout.trimEnd().split("\n")).toEqual([
       expect.stringMatching(/^NAME\s+WORKFLOW\s+TRIGGER\s+WORKSPACES\s+SCHEDULE\s+NEXT EXECUTION\s+LAST CHECK$/),
+      expect.stringMatching(/^architecture-review\s+review-workspace\s+manual\s+app\s+-\s+-\s+succeeded 2026-10-18T09:30:00.000Z, 1 run started$/),
       expect.stringMatching(
         /^github-issues\s+develop-issue\s+github-issues\s+app,web\s+every 1m\s+2026-10-18T10:01:00.000Z\s+failed 2026-10-18T10:00:00.000Z: secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set$/,
       ),

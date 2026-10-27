@@ -3,7 +3,7 @@ import type { TriggerBinding, TriggerGateway as Contract, Workspace } from "@ten
 import type { FiringKey, FiringStore } from "./firings/firing-store.js";
 import type { RunStarter } from "./runs.js";
 import { checkSchedule, latestExecution, nextExecution } from "./schedule.js";
-import type { TriggerItem, TriggerKind, TriggerSettings, TriggerSource, TriggerSourceContext, TriggerSourceFactory, TriggerSources } from "./sources/trigger-source.js";
+import type { TriggerItem, TriggerKind, TriggerSchedule, TriggerSettings, TriggerSource, TriggerSourceContext, TriggerSourceFactory, TriggerSources } from "./sources/trigger-source.js";
 import { triggerFired } from "./trigger-events.js";
 
 export type Trigger = Contract.components["schemas"]["trigger"];
@@ -42,12 +42,33 @@ export interface TriggerGateway {
    * starts a run for every new (workspace, item). Records how the check went.
    */
   check(binding: string): Promise<CheckResult>;
+  /**
+   * Fires a binding whose source has no schedule (kind `manual`, ADR 0028) as a check of it
+   * at now would: over all its workspaces, or only `workspace`. Records how it went as the
+   * binding's last check. Rejects with a {@link FireRefusedError} when the binding cannot
+   * be fired.
+   */
+  fire(binding: string, options?: { workspace?: string }): Promise<CheckResult>;
   /** The bindings, ordered by name, with their next scheduled execution and how their last check went. */
   triggers(): Promise<Trigger[]>;
-  /** Checks every binding that is not suspended at its scheduled executions until {@link stop}. */
+  /** Checks every binding that is not suspended and has a schedule at its scheduled executions until {@link stop}. */
   start(): void;
   /** Stops scheduling and waits for running checks. */
   stop(): Promise<void>;
+}
+
+/** Why a binding cannot be fired. */
+export type FireRefusal = "unknown-binding" | "suspended" | "fires-on-its-own" | "unknown-workspace";
+
+/** A firing the gateway refused; the message says why. */
+export class FireRefusedError extends Error {
+  constructor(
+    readonly reason: FireRefusal,
+    message: string,
+  ) {
+    super(message);
+    this.name = "FireRefusedError";
+  }
 }
 
 /** setTimeout cannot wait longer; a later execution is reached in several waits. */
@@ -83,10 +104,32 @@ export function createTriggerGateway({
   async function check(name: string, execution?: Date): Promise<CheckResult> {
     const bound = byName.get(name);
     if (!bound) throw new Error(`unknown trigger binding '${name}'`);
+    const { schedule } = bound.source;
+    if (!schedule) throw new Error(`trigger binding '${name}' has no schedule; fire it instead`);
+    return evaluateAndRecord(name, bound, execution ?? latestExecution(schedule, now()));
+  }
+
+  async function fire(name: string, { workspace }: { workspace?: string } = {}): Promise<CheckResult> {
+    const bound = byName.get(name);
+    if (!bound) throw new FireRefusedError("unknown-binding", `no trigger binding '${name}'`);
+    const { spec } = bound.binding;
+    if (spec.suspend) throw new FireRefusedError("suspended", `trigger binding '${name}' is suspended`);
+    if (bound.source.schedule) {
+      throw new FireRefusedError("fires-on-its-own", `trigger binding '${name}' of kind '${bound.kind}' fires on its own; only a binding of kind 'manual' can be fired`);
+    }
+    const names = spec.workspaces ?? [];
+    if (workspace !== undefined && !names.includes(workspace)) {
+      throw new FireRefusedError("unknown-workspace", `trigger binding '${name}' does not start runs in workspace '${workspace}' (workspaces: ${names.join(", ") || "none"})`);
+    }
+    return evaluateAndRecord(name, bound, now(), workspace === undefined ? undefined : [workspace]);
+  }
+
+  /** Evaluates the binding for `execution` over `only` its given workspaces (default: all), and records how it went. */
+  async function evaluateAndRecord(name: string, bound: Bound, execution: Date, only?: string[]): Promise<CheckResult> {
     const at = now().toISOString();
     let result: CheckResult;
     try {
-      result = await evaluate(name, bound, execution ?? latestExecution(bound.source.schedule, now()));
+      result = await evaluate(name, bound, execution, only);
     } catch (error) {
       await store.recordEvaluation(name, { at, status: "failed", startedRuns: 0, message: errorMessage(error) });
       throw error;
@@ -97,8 +140,9 @@ export function createTriggerGateway({
     return result;
   }
 
-  async function evaluate(name: string, { binding, source }: Bound, execution: Date): Promise<CheckResult> {
-    const { workflow, workspaces: names } = binding.spec;
+  async function evaluate(name: string, { binding, source }: Bound, execution: Date, only?: string[]): Promise<CheckResult> {
+    const { workflow } = binding.spec;
+    const names = only ?? binding.spec.workspaces;
     const result: CheckResult = { fired: [], failed: [] };
     // Without workspaces the binding is asked once, for no workspace.
     for (const workspaceName of names?.length ? names : [undefined]) {
@@ -139,10 +183,7 @@ export function createTriggerGateway({
   async function scheduledCheck(name: string, execution: Date): Promise<void> {
     if (running.has(name)) return;
     const done = check(name, execution).then(
-      ({ fired, failed }) => {
-        for (const { workspace, item, runId } of fired) log(`trigger ${name}: ${workspace === undefined ? "" : `workspace ${workspace}: `}${item} started run ${runId}`);
-        for (const failure of failed) log(`trigger ${name}: ${describeFailure(failure)}`);
-      },
+      (result) => report(name, result),
       (error: unknown) => log(`trigger ${name}: check failed: ${errorMessage(error)}`),
     );
     running.set(name, done);
@@ -150,18 +191,28 @@ export function createTriggerGateway({
     running.delete(name);
   }
 
-  function schedule(name: string, at: Date): void {
+  function report(name: string, { fired, failed }: CheckResult): void {
+    for (const { workspace, item, runId } of fired) log(`trigger ${name}: ${workspace === undefined ? "" : `workspace ${workspace}: `}${item} started run ${runId}`);
+    for (const failure of failed) log(`trigger ${name}: ${describeFailure(failure)}`);
+  }
+
+  function schedule(name: string, every: TriggerSchedule, at: Date): void {
     if (!started) return;
     const wait = at.getTime() - now().getTime();
     const timer = setTimeout(() => {
-      if (wait > MAX_TIMER_MS) return schedule(name, at);
-      void scheduledCheck(name, at).then(() => schedule(name, nextExecution(byName.get(name)!.source.schedule, now())));
+      if (wait > MAX_TIMER_MS) return schedule(name, every, at);
+      void scheduledCheck(name, at).then(() => schedule(name, every, nextExecution(every, now())));
     }, Math.max(0, Math.min(wait, MAX_TIMER_MS)));
     timers.set(name, timer);
   }
 
   return {
     check: (name) => check(name),
+    async fire(name, options) {
+      const result = await fire(name, options);
+      report(name, result);
+      return result;
+    },
     async triggers() {
       const evaluations = await store.lastEvaluations();
       return [...byName.values()]
@@ -172,8 +223,8 @@ export function createTriggerGateway({
             workflow: spec.workflow,
             kind,
             workspaces: [...(spec.workspaces ?? [])],
-            schedule: structuredClone(source.schedule),
-            nextExecutionAt: nextExecution(source.schedule, now()).toISOString(),
+            // A binding without a schedule is only fired, never checked on its own.
+            ...(source.schedule ? { schedule: structuredClone(source.schedule), nextExecutionAt: nextExecution(source.schedule, now()).toISOString() } : {}),
             ...(spec.suspend ? { suspended: true } : {}),
             ...(lastEvaluation ? { lastEvaluation } : {}),
           };
@@ -184,7 +235,7 @@ export function createTriggerGateway({
       if (started) return;
       started = true;
       for (const [name, { binding, source }] of byName) {
-        if (!binding.spec.suspend) schedule(name, nextExecution(source.schedule, now()));
+        if (!binding.spec.suspend && source.schedule) schedule(name, source.schedule, nextExecution(source.schedule, now()));
       }
     },
     async stop() {
@@ -213,7 +264,7 @@ function bind(binding: TriggerBinding.TriggerBinding, sources: TriggerSources, s
   let source: TriggerSource;
   try {
     source = createSource(kind, settings, sources, { secrets, workspaces: bound });
-    checkSchedule(source.schedule);
+    if (source.schedule) checkSchedule(source.schedule);
   } catch (error) {
     throw new Error(`trigger binding '${name}': ${errorMessage(error)}`, { cause: error });
   }

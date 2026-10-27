@@ -47,6 +47,9 @@
       "path": "packages/trigger-source-github-issues"
     },
     {
+      "path": "packages/trigger-source-manual"
+    },
+    {
       "path": "packages/trigger-source-schedule"
     }
   ]

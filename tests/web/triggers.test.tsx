@@ -39,6 +39,14 @@ const triggers: Trigger[] = [
     lastEvaluation: { at: "2026-10-18T10:00:00.000Z", status: "succeeded", startedRuns: 2 },
   },
   { name: "morning", workflow: "triage", kind: "schedule", workspaces: ["web"], schedule: { cron: "0 2 * * *" }, nextExecutionAt: "2026-10-18T20:00:00.000Z" },
+  // Fired by hand only: no schedule, no next check (ADR 0028).
+  {
+    name: "architecture-review",
+    workflow: "review-workspace",
+    kind: "manual",
+    workspaces: ["app"],
+    lastEvaluation: { at: "2026-10-18T09:30:00.000Z", status: "succeeded", startedRuns: 1 },
+  },
 ];
 
 describe("triggers page", () => {
@@ -59,6 +67,7 @@ describe("triggers page", () => {
       ["nightly", "schedule", "triage", "app", "cron 0 2 * * *", "suspended", "not checked yet"],
       ["hourly", "fake", "implement-issue", "none", "every 1h", "2026-10-18T11:00:00.000Z", "succeeded 2026-10-18T10:00:00.000Z, 2 runs started"],
       ["morning", "schedule", "triage", "web", "cron 0 2 * * *", "2026-10-18T20:00:00.000Z", "not checked yet"],
+      ["architecture-review", "manual", "review-workspace", "app", "by hand", "-", "succeeded 2026-10-18T09:30:00.000Z, 1 run started"],
     ]);
   });
 
@@ -79,6 +88,7 @@ describe("triggers page", () => {
     expect(says("hourly")).toBe("12 checks in the last 12 hours, 12 checks in the next 12 hours");
     // A cron expression shows its next check only (the browser does not evaluate it).
     expect(says("morning")).toBe("0 checks in the last 12 hours, 1 check in the next 12 hours");
+    expect(says("architecture-review")).toBe("fired by hand, no scheduled checks");
   });
 
   it("shows cards without a table or timeline on a phone", async () => {
@@ -92,6 +102,9 @@ describe("triggers page", () => {
     expect(card.getByText("implement-issue")).toBeTruthy();
     expect(card.getByText("every 1h")).toBeTruthy();
     expect(within(within(cards).getByText("nightly").closest("li") as HTMLElement).getByText("suspended")).toBeTruthy();
+    const manual = within(within(cards).getByText("architecture-review").closest("li") as HTMLElement);
+    expect(manual.getByText("by hand")).toBeTruthy();
+    expect(manual.getByText("fired by hand")).toBeTruthy();
   });
 
   it("says when there are no bindings", async () => {
@@ -101,7 +114,7 @@ describe("triggers page", () => {
   });
 
   it("says when the trigger gateway cannot be reached", async () => {
-    renderApp({ path: "/ui/triggers", triggers: { list: () => Promise.reject(new Error("connection refused")) } });
+    renderApp({ path: "/ui/triggers", triggers: { ...createInMemoryTriggers(), list: () => Promise.reject(new Error("connection refused")) } });
 
     expect((await screen.findByRole("alert")).textContent).toBe("Cannot read the trigger bindings. Is the platform running?");
   });

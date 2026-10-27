@@ -18,3 +18,63 @@ paths:
             application/json:
               schema:
                 $ref: "../schemas/trigger.schema.yaml#/$defs/triggerList"
+  /triggers/{name}/fire:
+    post:
+      operationId: fireTrigger
+      summary: Fire a trigger binding that never fires on its own
+      description: >-
+        Fires a binding of kind `manual` (ADR 0028) as a check of it would: one new item,
+        one run per workspace of the binding (or only in `workspace`), `trigger.fired`
+        per started run, and the firing recorded as the binding's last check.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/trigger.schema.yaml#/$defs/fireRequest"
+      responses:
+        "201":
+          description: >-
+            The runs the firing started. A workspace whose run could not be started is
+            missing here and named in the binding's last check.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/trigger.schema.yaml#/$defs/fireResult"
+        "400":
+          description: The request is malformed, or `workspace` is not one of the binding's.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No trigger binding with this name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The binding is suspended, or it fires on its own (e.g. `schedule`, `github-issues`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+components:
+  schemas:
+    Problem:
+      type: object
+      description: RFC 7807 problem details.
+      required: [title, status]
+      properties:
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string

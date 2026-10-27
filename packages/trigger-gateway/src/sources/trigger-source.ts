@@ -12,7 +12,7 @@ export type TriggerSchedule = TriggerBinding.TriggerSchedule;
 
 /** One check of a source, for one workspace of the binding or for none. */
 export interface SourceCheck {
-  /** The scheduled execution the check belongs to. */
+  /** The scheduled execution the check belongs to, or the time of the firing for a source without a schedule. */
   at: Date;
   /** The workspace the items are asked for; absent for a binding without workspaces. */
   workspace?: Workspace.Workspace;
@@ -21,13 +21,15 @@ export interface SourceCheck {
 /**
  * A trigger source: the gateway asks it at the executions of its schedule for the items
  * of each workspace, and starts one run per new (workspace, item). Deduplication is the
- * gateway's job, so a source may report the same item at every check.
+ * gateway's job, so a source may report the same item at every check. A source without a
+ * schedule is never checked on its own: the gateway asks it only when its binding is
+ * fired (ADR 0028).
  *
  * @port
  */
 export interface TriggerSource {
-  /** When the gateway checks this source. */
-  readonly schedule: TriggerSchedule;
+  /** When the gateway checks this source; absent when it is only asked as its binding is fired. */
+  readonly schedule?: TriggerSchedule;
   /** The items at this check. Rejects when the source cannot be asked; the message names secrets, never values. */
   items(check: SourceCheck): Promise<TriggerItem[]>;
 }

@@ -126,6 +126,7 @@ describe("loadConfiguration", () => {
       "agents/developer.md": agent("developer"),
       "triggers/ready.yaml": trigger("ready", "build"),
       "triggers/nightly.yaml": trigger("nightly", "build", "schedule: { cron: '0 2 * * *' }", "workspaces: [app]"),
+      "triggers/review.yaml": trigger("review", "build", "manual: {}", "workspaces: [app]"),
       "workspaces/app.yaml": workspace("app"),
     });
 
@@ -144,6 +145,12 @@ describe("loadConfiguration", () => {
         metadata: { name: "ready" },
         spec: { workflow: "build", trigger: { schedule: { every: { minutes: 5 } } } },
       },
+      {
+        apiVersion: "tendworks.dev/v1",
+        kind: "TriggerBinding",
+        metadata: { name: "review" },
+        spec: { workflow: "build", trigger: { manual: {} }, workspaces: ["app"] },
+      },
     ]);
   });
 
@@ -158,6 +165,7 @@ describe("loadConfiguration", () => {
       "triggers/e.yaml": trigger("twice", "build", "schedule: { every: { minutes: 5 } }\n    github-issues: { labels: [ready], every: { minutes: 5 }, token: { secretRef: { name: TENDWORKS_PLATFORM_GITHUB_TOKEN } } }"),
       "triggers/f.yaml": trigger("unknown", "build", "webhook: { path: /hook }"),
       "triggers/g.yaml": trigger("faked", "build", "fake: { every: { minutes: 5 } }"),
+      "triggers/h.yaml": trigger("manually", "build", "manual: { every: { minutes: 5 } }"),
     });
 
     expect(issuesOf(dir)).toEqual([
@@ -167,6 +175,7 @@ describe("loadConfiguration", () => {
       "triggers/f.yaml: /spec/trigger: unsupported property 'webhook'",
       // The test-only kind fake is not deployed with the platform.
       "triggers/g.yaml: /spec/trigger: unsupported property 'fake'",
+      "triggers/h.yaml: /spec/trigger/manual: unsupported property 'every'",
       "triggers/c.yaml: trigger binding 'ghostly' starts workflow 'ghost', but no workflow 'ghost' is configured",
     ]);
   });

@@ -79,6 +79,7 @@ import {
   type TriggerSource,
 } from "@tendworks/trigger-gateway";
 import { createGithubIssuesSource } from "@tendworks/trigger-source-github-issues";
+import { createManualSource } from "@tendworks/trigger-source-manual";
 import { createScheduleSource } from "@tendworks/trigger-source-schedule";
 
 /*
@@ -112,7 +113,7 @@ export const PORTS: Record<string, Record<string, unknown>> = {
 
   "trigger-gateway/EventPublisher": port<TriggerEventPublisher<never>>({ outbox: createTriggerOutbox, "in-memory": InMemoryTriggerEventPublisher }),
   "trigger-gateway/FiringStore": port<FiringStore>({ postgres: createPostgresFiringStore, "in-memory": createInMemoryFiringStore }),
-  "trigger-gateway/TriggerSource": port<TriggerSource>({ schedule: createScheduleSource, "github-issues": createGithubIssuesSource, fake: createFakeTriggerSource }),
+  "trigger-gateway/TriggerSource": port<TriggerSource>({ schedule: createScheduleSource, "github-issues": createGithubIssuesSource, manual: createManualSource, fake: createFakeTriggerSource }),
   "trigger-gateway/RunStarter": port<RunStarter>({ "control-plane": createControlPlaneRunStarter, "in-memory": createInMemoryRunStarter }),
 
   "human-interaction/ApprovalEventPublisher": port<ApprovalEventPublisher<never>>({ "event-bus": createPostgresEventBus, "in-memory": createInMemoryEventBus }),

@@ -5,6 +5,7 @@ import { client } from "./support/control-plane.js";
 type Run = ControlPlane.components["schemas"]["run"];
 
 const SCHEDULE = "schedule-over-two-workspaces"; // tests/fixtures/config/triggers, schedule over two workspaces
+const MANUAL = "manual-over-two-workspaces"; // tests/fixtures/config/triggers, fired by hand over the same two workspaces
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -29,7 +30,7 @@ describe("triggers on the compose stack", () => {
     expect(response.status).toBe(200);
     const trigger = data?.items.find((item) => item.name === SCHEDULE);
     expect(trigger).toMatchObject({ workflow: "scheduled-noop", kind: "schedule", workspaces: ["fake-playground", "scripted-playground"], schedule: { every: { seconds: 20 } } });
-    const next = new Date(trigger!.nextExecutionAt).getTime();
+    const next = new Date(trigger!.nextExecutionAt!).getTime();
     // A schedule answers every check.
     expect(trigger?.lastEvaluation === undefined || trigger.lastEvaluation.status === "succeeded").toBe(true);
     expect(next).toBeGreaterThan(Date.now() - 1_000);
@@ -51,5 +52,28 @@ describe("triggers on the compose stack", () => {
     for (const [workspace, run] of byWorkspace) {
       expect(run).toMatchObject({ workflow: "scheduled-noop", startedBy: { kind: "trigger", binding: SCHEDULE, workspace } });
     }
+  });
+
+  it("fires a manual binding over two workspaces: one run per workspace with the trigger origin, never on its own", { timeout: 30_000 }, async () => {
+    const listed = (await client.GET("/triggers")).data?.items.find((item) => item.name === MANUAL);
+    expect(listed).toMatchObject({ workflow: "scheduled-noop", kind: "manual", workspaces: ["fake-playground", "scripted-playground"] });
+    expect(listed?.nextExecutionAt).toBeUndefined();
+    const before = new Set([...(await runsByItem(MANUAL)).values()].flat().map((run) => run.id));
+
+    const { data, response } = await client.POST("/triggers/{name}/fire", { params: { path: { name: MANUAL } } });
+
+    expect(response.status).toBe(201);
+    expect(data?.items.map((item) => item.workspace)).toEqual(["fake-playground", "scripted-playground"]);
+    const started = [...(await runsByItem(MANUAL)).values()].flat().filter((run) => !before.has(run.id));
+    expect(started.map((run) => run.id).sort()).toEqual(data!.items.map((item) => item.runId).sort());
+    for (const { workspace, runId } of data!.items) {
+      expect(started.find((run) => run.id === runId)).toMatchObject({
+        workflow: "scheduled-noop",
+        input: { workspace },
+        startedBy: { kind: "trigger", binding: MANUAL, workspace, item: { title: "started by hand" } },
+      });
+    }
+    const after = (await client.GET("/triggers")).data?.items.find((item) => item.name === MANUAL);
+    expect(after?.lastEvaluation).toMatchObject({ status: "succeeded", startedRuns: 2 });
   });
 });

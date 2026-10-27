@@ -393,3 +393,144 @@ describe("trigger gateway", () => {
     );
   });
 });
+
+describe("firing a manual trigger binding", () => {
+  // Like the manual source package: no schedule, one item per firing keyed by its time.
+  const byHand: TriggerSources = { manual: () => ({ items: async ({ at }) => [{ key: at.toISOString(), title: "started by hand" }] }) };
+  const manual = (spec: Partial<Omit<Binding["spec"], "trigger">> = {}, name = "architecture-review"): Binding => ({
+    apiVersion: "tendworks.dev/v1",
+    kind: "TriggerBinding",
+    metadata: { name },
+    spec: { workflow: "review-workspace", trigger: { manual: {} }, ...spec },
+  });
+
+  function manualSetup(bindings: Binding[]) {
+    let clock = new Date(NOW).getTime();
+    const runs = createInMemoryRunStarter();
+    const store = createInMemoryFiringStore();
+    const gateway = createTriggerGateway({
+      bindings,
+      workspaces: WORKSPACES,
+      sources: { ...byHand, fake: createFakeTriggerSource },
+      store,
+      runs,
+      now: () => new Date(clock),
+      log: () => {},
+    });
+    return { runs, store, gateway, tick: (ms: number) => (clock += ms) };
+  }
+  const startedByHand = { key: NOW, title: "started by hand" };
+
+  it("starts one run per workspace of the binding, with the workspace, the item and the binding as origin", async () => {
+    const { runs, gateway } = manualSetup([manual({ workspaces: ["app", "web"] })]);
+
+    const result = await gateway.fire("architecture-review");
+
+    expect(result).toEqual({
+      fired: [
+        { workspace: "app", item: NOW, runId: "run-1" },
+        { workspace: "web", item: NOW, runId: "run-2" },
+      ],
+      failed: [],
+    });
+    expect(runs.started.map(({ workflow, input, startedBy }) => ({ workflow, input, startedBy }))).toEqual([
+      { workflow: "review-workspace", input: { workspace: "app", item: startedByHand }, startedBy: { kind: "trigger", binding: "architecture-review", workspace: "app", item: startedByHand } },
+      { workflow: "review-workspace", input: { workspace: "web", item: startedByHand }, startedBy: { kind: "trigger", binding: "architecture-review", workspace: "web", item: startedByHand } },
+    ]);
+  });
+
+  it("starts one run without a workspace for a binding without workspaces", async () => {
+    const { runs, gateway } = manualSetup([manual()]);
+
+    await gateway.fire("architecture-review");
+
+    expect(runs.started.map((run) => run.input)).toEqual([{ item: startedByHand }]);
+  });
+
+  it("starts a run only in the workspace the firing names, and refuses one that is not the binding's", async () => {
+    const { runs, gateway } = manualSetup([manual({ workspaces: ["app", "web"] }), manual({ workspaces: ["app"] }, "app-only")]);
+
+    await gateway.fire("architecture-review", { workspace: "web" });
+
+    expect(runs.started.map((run) => run.input.workspace)).toEqual(["web"]);
+    await expect(gateway.fire("app-only", { workspace: "web" })).rejects.toMatchObject({
+      reason: "unknown-workspace",
+      message: "trigger binding 'app-only' does not start runs in workspace 'web' (workspaces: app)",
+    });
+    await expect(gateway.fire("architecture-review", { workspace: "mobile" })).rejects.toMatchObject({ reason: "unknown-workspace" });
+    expect(runs.started).toHaveLength(1);
+  });
+
+  it("starts new runs at every firing", async () => {
+    const { runs, gateway, tick } = manualSetup([manual({ workspaces: ["app"] })]);
+
+    await gateway.fire("architecture-review");
+    tick(1_000);
+    await gateway.fire("architecture-review");
+
+    expect(runs.started.map((run) => (run.input.item as TriggerItem).key)).toEqual([NOW, "2026-10-18T10:02:31.000Z"]);
+  });
+
+  it("records each started run as trigger.fired and the firing as the binding's last check", async () => {
+    const { runs, store, gateway, tick } = manualSetup([manual({ workspaces: ["app"] })]);
+
+    await gateway.fire("architecture-review");
+    expect(await store.publisher.events()).toMatchObject([
+      {
+        type: "dev.tendworks.trigger.fired",
+        subject: "triggers/architecture-review",
+        runid: "run-1",
+        data: { binding: "architecture-review", workflow: "review-workspace", workspace: "app", item: startedByHand },
+      },
+    ]);
+    expect((await gateway.triggers())[0]?.lastEvaluation).toEqual({ at: NOW, status: "succeeded", startedRuns: 1 });
+
+    tick(1_000);
+    runs.fail(new Error("control plane answered HTTP 503"));
+    const failed = await gateway.fire("architecture-review");
+    expect(failed.fired).toEqual([]);
+    expect((await gateway.triggers())[0]?.lastEvaluation).toEqual({
+      at: "2026-10-18T10:02:31.000Z",
+      status: "failed",
+      startedRuns: 0,
+      message: "workspace app: 2026-10-18T10:02:31.000Z could not start a run: control plane answered HTTP 503",
+    });
+  });
+
+  it("refuses an unknown binding, a suspended one and one that fires on its own", async () => {
+    const { runs, gateway } = manualSetup([manual({ suspend: true }), binding([item(1)])]);
+
+    await expect(gateway.fire("nightly")).rejects.toMatchObject({ reason: "unknown-binding", message: "no trigger binding 'nightly'" });
+    await expect(gateway.fire("architecture-review")).rejects.toMatchObject({
+      reason: "suspended",
+      message: "trigger binding 'architecture-review' is suspended",
+    });
+    await expect(gateway.fire("ready-issues")).rejects.toMatchObject({
+      reason: "fires-on-its-own",
+      message: "trigger binding 'ready-issues' of kind 'fake' fires on its own; only a binding of kind 'manual' can be fired",
+    });
+    expect(runs.started).toEqual([]);
+  });
+
+  it("lists a manual binding without schedule and next execution", async () => {
+    const { gateway } = manualSetup([manual({ workspaces: ["app"] })]);
+
+    expect(await gateway.triggers()).toEqual([{ name: "architecture-review", workflow: "review-workspace", kind: "manual", workspaces: ["app"] }]);
+  });
+
+  it("never checks a manual binding on its own once started", async () => {
+    vi.useFakeTimers({ now: new Date(NOW) });
+    try {
+      const { runs, gateway } = manualSetup([manual({ workspaces: ["app"] })]);
+
+      gateway.start();
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      await gateway.stop();
+
+      expect(runs.started).toEqual([]);
+      await expect(gateway.check("architecture-review")).rejects.toThrow("trigger binding 'architecture-review' has no schedule; fire it instead");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

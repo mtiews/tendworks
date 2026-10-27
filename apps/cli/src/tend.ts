@@ -515,8 +515,9 @@ function formatTriggerList(list: TriggerList): string {
       trigger.workflow,
       trigger.kind,
       trigger.workspaces.join(",") || "-",
-      formatSchedule(trigger.schedule),
-      trigger.suspended ? "suspended" : trigger.nextExecutionAt,
+      // A manual binding has neither: it is only fired.
+      trigger.schedule ? formatSchedule(trigger.schedule) : "-",
+      trigger.suspended ? "suspended" : (trigger.nextExecutionAt ?? "-"),
       formatEvaluation(trigger.lastEvaluation),
     ]),
   ];

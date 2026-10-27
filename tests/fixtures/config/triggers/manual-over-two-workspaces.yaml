@@ -1,0 +1,12 @@
+# A manual binding over two workspaces, for the contract and end-to-end tests: never
+# checked on its own; each firing through POST /triggers/manual-over-two-workspaces/fire
+# starts one scheduled-noop run per workspace (ADR 0028).
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: manual-over-two-workspaces
+spec:
+  workflow: scheduled-noop
+  workspaces: [fake-playground, scripted-playground]
+  trigger:
+    manual: {}

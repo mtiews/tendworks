@@ -42,7 +42,15 @@ export {
   type RunsPort,
   type StartRunRequest,
 } from "./runs.js";
-export { createInMemoryTriggers, createTriggerGatewayClient, type Trigger, type TriggersPort } from "./triggers.js";
+export {
+  createInMemoryTriggers,
+  createTriggerGatewayClient,
+  TriggerFireRefusedError,
+  type FireTriggerRequest,
+  type FireTriggerResult,
+  type Trigger,
+  type TriggersPort,
+} from "./triggers.js";
 export type { ComponentStatus, HealthProbe, PlatformStatus, RuntimeBundle } from "./status.js";
 export { checkPlatform } from "./status.js";
 export { createStoppedControlPlaneApi, type StoppedControlPlaneApiOptions } from "./stopped.js";

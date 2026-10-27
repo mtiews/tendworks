@@ -14,7 +14,8 @@ type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number
 
 /**
  * The trigger bindings (`GET /triggers`, ADR 0023): source, workflow, workspaces, schedule,
- * next and last check. A table on a desktop, with a timeline of the checks of the last and
+ * next and last check. A binding fired by hand (kind `manual`, ADR 0028) has no schedule
+ * and no next check; its last check is its last firing. A table on a desktop, with a timeline of the checks of the last and
  * next 12 hours; cards on a phone. Read-only: the API offers no suspend or resume.
  */
 export function TriggersPage({ phone }: { phone: boolean }) {
@@ -39,7 +40,15 @@ export function TriggersPage({ phone }: { phone: boolean }) {
             <li key={trigger.name} className="binding">
               <div className="card-head">
                 <span className="card-kind">{trigger.name}</span>
-                {trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <span>next <In value={trigger.nextExecutionAt} now={readAt} /></span>}
+                {trigger.suspended ? (
+                  <Pill tone="neutral">suspended</Pill>
+                ) : trigger.nextExecutionAt === undefined ? (
+                  <span className="muted">fired by hand</span>
+                ) : (
+                  <span>
+                    next <In value={trigger.nextExecutionAt} now={readAt} />
+                  </span>
+                )}
               </div>
               <dl className="facts">
                 <dt>Source</dt>
@@ -51,7 +60,7 @@ export function TriggersPage({ phone }: { phone: boolean }) {
                 <dt>Workspaces</dt>
                 <dd>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</dd>
                 <dt>Schedule</dt>
-                <dd>{formatSchedule(trigger.schedule)}</dd>
+                <dd>{scheduleOf(trigger)}</dd>
                 <dt>Last check</dt>
                 <dd>
                   <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
@@ -85,8 +94,16 @@ export function TriggersPage({ phone }: { phone: boolean }) {
                   </td>
                   <td>{trigger.workflow}</td>
                   <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
-                  <td>{formatSchedule(trigger.schedule)}</td>
-                  <td>{trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <In value={trigger.nextExecutionAt} now={readAt} />}</td>
+                  <td>{scheduleOf(trigger)}</td>
+                  <td>
+                    {trigger.suspended ? (
+                      <Pill tone="neutral">suspended</Pill>
+                    ) : trigger.nextExecutionAt === undefined ? (
+                      <span className="muted">-</span>
+                    ) : (
+                      <In value={trigger.nextExecutionAt} now={readAt} />
+                    )}
+                  </td>
                   <td>
                     <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
                   </td>
@@ -101,6 +118,9 @@ export function TriggersPage({ phone }: { phone: boolean }) {
     </>
   );
 }
+
+/** The schedule, or `by hand` for a binding that never fires on its own. */
+const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : "by hand");
 
 /** `failed <at>: <why>` or `succeeded <at>, <n> runs started`, as `tend trigger list` says it. */
 function Evaluation({ evaluation, now }: { evaluation: Trigger["lastEvaluation"]; now: number }) {
@@ -151,7 +171,13 @@ function Timeline({ triggers, now }: { triggers: readonly Trigger[]; now: number
 }
 
 const describe = (trigger: Trigger, { past, future, dense }: Checks) =>
-  trigger.suspended ? "suspended, no checks" : dense ? `checks continuously (${formatSchedule(trigger.schedule)})` : `${count(past.length, "check")} in the last 12 hours, ${count(future.length, "check")} in the next 12 hours`;
+  trigger.suspended
+    ? "suspended, no checks"
+    : !trigger.schedule
+      ? "fired by hand, no scheduled checks"
+      : dense
+        ? `checks continuously (${formatSchedule(trigger.schedule)})`
+        : `${count(past.length, "check")} in the last 12 hours, ${count(future.length, "check")} in the next 12 hours`;
 
 function Track({ checks }: { checks: Checks }) {
   // Drawn as SVG so the positions are attributes: the CSP allows no inline styles (ADR 0018).
