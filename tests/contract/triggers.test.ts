@@ -138,8 +138,8 @@ describe("firing a manual trigger binding through the control plane and the trig
     const runs = (await client.GET("/runs")).data?.items ?? [];
     const item = { key: "2026-10-18T10:00:05.000Z", title: "started by hand" };
     expect(data?.items.map(({ runId }) => runs.find((run) => run.id === runId)).map((run) => [run?.workflow, run?.input, run?.startedBy])).toEqual([
-      ["scheduled-noop", { workspace: "fake-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "fake-playground", item }],
-      ["scheduled-noop", { workspace: "scripted-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "scripted-playground", item }],
+      ["scheduled-noop", { focus: "architecture", workspace: "fake-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "fake-playground", item }],
+      ["scheduled-noop", { focus: "architecture", workspace: "scripted-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "scripted-playground", item }],
     ]);
     const listed = (await client.GET("/triggers")).data?.items.find((trigger) => trigger.name === MANUAL);
     expect(listed?.lastEvaluation).toEqual({ at: "2026-10-18T10:00:05.000Z", status: "succeeded", startedRuns: 2 });

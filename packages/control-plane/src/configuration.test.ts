@@ -473,6 +473,27 @@ do:
     ]);
   });
 
+  it("loads a binding's fixed input, and refuses one that sets the workspace or the item", () => {
+    const files = {
+      "workflows/review.sw.yaml": workflow("review"),
+      "agents/developer.md": agent("developer"),
+      "workspaces/app.yaml": workspace("app"),
+      "triggers/review.yaml": trigger("review", "review", "manual: {}", "input: { focus: security, depth: { files: 20 } }"),
+    };
+    expect(loadConfiguration(folder(files)).triggerBindings[0]?.spec.input).toEqual({ focus: "security", depth: { files: 20 } });
+
+    const dir = folder({
+      ...files,
+      "triggers/elsewhere.yaml": trigger("elsewhere", "review", "manual: {}", "input: { workspace: app }"),
+      "triggers/both.yaml": trigger("both", "review", undefined, "input: { item: { key: x, title: y }, workspace: app, focus: security }"),
+    });
+
+    expect(issuesOf(dir)).toEqual([
+      "triggers/both.yaml: trigger binding 'both' sets 'workspace', 'item' in spec.input, but the platform passes them to each run; remove them",
+      "triggers/elsewhere.yaml: trigger binding 'elsewhere' sets 'workspace' in spec.input, but the platform passes them to each run; remove them",
+    ]);
+  });
+
   it("refuses a workspace whose enabled assistant's profile is not configured or allows no chats", () => {
     const dir = folder({
       "agents/workspace-assistant.md": agent("workspace-assistant", "harness: fake\n  chat: {}"),
@@ -508,19 +529,28 @@ do:
   it("loads the starter configuration with real profiles only and no binding that fires by itself", () => {
     const starter = loadConfiguration(fileURLToPath(new URL("../../../examples/config", import.meta.url)));
 
-    expect(starter.workflowNames).toEqual(["check-workspace", "develop-issue", "hello-developer", "restart-developer"]);
+    expect(starter.workflowNames).toEqual(["check-workspace", "develop-issue", "hello-developer", "restart-developer", "review-workspace"]);
     expect(starter.agentProfiles.map((profile) => [profile.metadata.name, profile.spec.harness]).sort()).toEqual([
       ["assistant", "claude-code"],
       ["developer", "claude-code"],
       ["workspace-assistant", "claude-code"],
     ]);
+    // Manual bindings never fire by themselves, so they need no suspend.
     expect(starter.triggerBindings.map((binding) => [binding.metadata.name, binding.spec.suspend])).toEqual([
+      ["playground-architecture-review", undefined],
       ["playground-nightly-check", true],
       ["playground-ready-for-agent", true],
+      ["playground-security-review", undefined],
     ]);
     expect(starter.triggerBindings.map((binding) => [binding.metadata.name, Object.keys(binding.spec.trigger), binding.spec.workspaces])).toEqual([
+      ["playground-architecture-review", ["manual"], ["playground"]],
       ["playground-nightly-check", ["schedule"], ["playground"]],
       ["playground-ready-for-agent", ["github-issues"], ["playground"]],
+      ["playground-security-review", ["manual"], ["playground"]],
+    ]);
+    expect(starter.triggerBindings.filter((binding) => binding.spec.input).map((binding) => [binding.metadata.name, binding.spec.workflow, binding.spec.input])).toEqual([
+      ["playground-architecture-review", "review-workspace", { focus: "architecture" }],
+      ["playground-security-review", "review-workspace", { focus: "security" }],
     ]);
     expect(starter.notificationChannels).toEqual([]);
     expect(starter.subscriptions).toEqual([]);

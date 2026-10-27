@@ -164,6 +164,14 @@ describe("trigger gateway", () => {
     ]);
   });
 
+  it("merges the binding's fixed input into each run's input, next to the workspace and the item", async () => {
+    const { runs, gateway } = setup([binding([item(1)], { workspaces: ["app"], input: { focus: "security", depth: { files: 20 } } })]);
+
+    await gateway.check("ready-issues");
+
+    expect(runs.started.map((run) => run.input)).toEqual([{ focus: "security", depth: { files: 20 }, workspace: "app", item: item(1) }]);
+  });
+
   it("asks the source once per workspace, handing it the workspace and the execution the check belongs to", async () => {
     const { checks, sources } = liveSource(({ workspace }) => (workspace?.metadata.name === "web" ? [item(3)] : []));
     const { runs, gateway } = setup([binding([], { workspaces: ["app", "web"] })], { sources });
@@ -445,6 +453,19 @@ describe("firing a manual trigger binding", () => {
     await gateway.fire("architecture-review");
 
     expect(runs.started.map((run) => run.input)).toEqual([{ item: startedByHand }]);
+  });
+
+  it("starts each run with the binding's fixed input next to the workspace and the item", async () => {
+    const { runs, gateway } = manualSetup([manual({ workspaces: ["app", "web"], input: { focus: "architecture" } }), manual({ input: { focus: "security" } }, "security-review")]);
+
+    await gateway.fire("architecture-review");
+    await gateway.fire("security-review");
+
+    expect(runs.started.map((run) => run.input)).toEqual([
+      { focus: "architecture", workspace: "app", item: startedByHand },
+      { focus: "architecture", workspace: "web", item: startedByHand },
+      { focus: "security", item: startedByHand },
+    ]);
   });
 
   it("starts a run only in the workspace the firing names, and refuses one that is not the binding's", async () => {

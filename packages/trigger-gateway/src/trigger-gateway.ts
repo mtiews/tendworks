@@ -145,7 +145,7 @@ export function createTriggerGateway({
   }
 
   async function evaluate(name: string, { binding, source }: Bound, execution: Date, only?: string[]): Promise<CheckResult> {
-    const { workflow } = binding.spec;
+    const { workflow, input = {} } = binding.spec;
     const names = only ?? binding.spec.workspaces;
     const result: CheckResult = { fired: [], failed: [] };
     // Without workspaces the binding is asked once, for no workspace.
@@ -169,7 +169,8 @@ export function createTriggerGateway({
         let runId: string;
         try {
           const startedBy = { kind: "trigger" as const, binding: name, ...scope, item: reference };
-          runId = (await runs.start({ workflow, input: { ...scope, item: structuredClone(item) }, traceparent, startedBy })).id;
+          // The platform's workspace and item come last: the fixed input never overrides them.
+          runId = (await runs.start({ workflow, input: { ...structuredClone(input), ...scope, item: structuredClone(item) }, traceparent, startedBy })).id;
         } catch (error) {
           await store.release(key);
           result.failed.push({ ...scope, item: item.key, error: errorMessage(error) });

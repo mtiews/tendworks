@@ -175,8 +175,8 @@ Running runs resume after either, and the worker takes up open chats again.
 | --- | --- |
 | Agent profiles | `developer` (implements an issue and opens the pull request), `assistant` (the [platform assistant](#chats-and-assistants)), `workspace-assistant` (the default [workspace assistant](#workspace-assistants)) |
 | Workspace | `playground`: git, `https://github.com/mtiews/tendworks-playground.git`, credential `TENDWORKS_AGENT_PLAYGROUND_TOKEN`, read-only assistant enabled |
-| Workflows | `develop-issue` (issue → pull request), `check-workspace` (build and test a workspace, report, change nothing), `hello-developer`, `restart-developer` (smoke tests) |
-| Trigger bindings | `playground-ready-for-agent` (`github-issues`), `playground-nightly-check` (`schedule`); both suspended |
+| Workflows | `develop-issue` (issue → pull request), `check-workspace` (build and test a workspace, report, change nothing), `review-workspace` (review a workspace with a `focus`, report, change nothing), `hello-developer`, `restart-developer` (smoke tests) |
+| Trigger bindings | `playground-ready-for-agent` (`github-issues`), `playground-nightly-check` (`schedule`), both suspended; `playground-architecture-review` and `playground-security-review` (`manual`, `review-workspace` with the fixed input `focus: architecture` or `focus: security`), which start only when you fire them |
 | Notification channel | `notifications/phone.yaml.example`: a Pushover template that does nothing until you rename it ([Pushover on your phone](#pushover-on-your-phone)) |
 | Sandbox template, skill | `claude-code`, `tdd` |
 
@@ -190,7 +190,7 @@ Rules the loader enforces:
 
 - Every `*.yaml`, `*.yml` and `*.md` file below the directory is read, recursively; other files (such as `*.yaml.example`) are not. Hidden files and directories (`.git`, `.github`) are skipped, so the repository can carry its own CI. Each YAML file must be a workflow (has `document`) or a known `kind`; anything else stops the server (`neither a workflow nor a document with a kind`).
 - `.md` files count only under `agents/`; other Markdown (e.g. `skills/README.md`, `SKILL.md`) is not configuration.
-- Names are unique per kind; invalid configuration stops server or worker before they accept requests, with every issue in the log. So do references to something not configured: a binding or workflow naming an unknown workspace, a binding naming an unknown workflow, a policy naming an unknown workflow, a workspace assistant whose profile is missing or allows no chats.
+- Names are unique per kind; invalid configuration stops server or worker before they accept requests, with every issue in the log. So do references to something not configured: a binding or workflow naming an unknown workspace, a binding naming an unknown workflow, a policy naming an unknown workflow, a workspace assistant whose profile is missing or allows no chats, a binding whose `spec.input` sets `workspace` or `item`.
 - Server and worker run as user `node` (uid 1000); the files must be readable by it.
 - Secrets never go here, only references ([Secrets](#secrets)).
 
@@ -199,7 +199,7 @@ Rules the loader enforces:
 | Kind | Where | Typical changes | Read by |
 | --- | --- | --- | --- |
 | `Workspace` | `workspaces/*.yaml` | a repository (`spec.git`) or host directory (`spec.directory`) agents work in, its credential and its assistant: [Workspaces](#workspaces) | server and worker |
-| `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.suspend`, `spec.trigger` (`schedule`, `github-issues` or `manual`): [Trigger bindings](#trigger-bindings) | server |
+| `TriggerBinding` | `triggers/*.yaml` | `spec.workflow`, `spec.workspaces`, `spec.input`, `spec.suspend`, `spec.trigger` (`schedule`, `github-issues` or `manual`): [Trigger bindings](#trigger-bindings) | server |
 | Workflow (Serverless Workflow 1.0 subset) | `workflows/*.sw.yaml` | the prompt text; new workflows calling `agent://<profile>` in a workspace; a [human step](#waiting-for-a-human-the-human-step-and-policies) `call: approval` where a workflow waits for you | server |
 | `NotificationChannel` | `notifications/*.yaml` | `spec.integration: pushover`, `spec.priority` (the default), `spec.pushover`: [Notifications](#notifications) | server |
 | `Subscription` | any `*.yaml`, e.g. `notifications/` | `spec.scope` (`workspace: <name>` or `platform: {}`), `spec.events`, `spec.channels`, `spec.priority`: [Notifications](#notifications) | server |
@@ -281,11 +281,12 @@ The compose stack supports one root, since it mounts the variable as one directo
 
 ### Trigger bindings
 
-A trigger binding starts a workflow when its trigger fires (ADR 0023): one run per workspace in `spec.workspaces` and per item the trigger reports, with the input `{ workspace: <name>, item: <item> }`. A binding without workspaces starts one run per item without a workspace. A suspended binding (`spec.suspend: true`) is never checked, cannot be fired and starts nothing.
+A trigger binding starts a workflow when its trigger fires (ADR 0023): one run per workspace in `spec.workspaces` and per item the trigger reports, with the input `{ ...spec.input, workspace: <name>, item: <item> }`. A binding without workspaces starts one run per item without a workspace. A suspended binding (`spec.suspend: true`) is never checked, cannot be fired and starts nothing.
 
 - **Once per item:** an item starts at most one run per binding and workspace, also when that run fails (ADR 0006), so a failing issue never starts a paid run at every check. Retry a finished run by hand, failed or completed (e.g. a result that does not fit): `tend run retry <id>`, or Retry on the run in the web UI ([Everyday commands](#everyday-commands)). A retry is a new run of the workflow as configured now, with the finished run's input and origin; it does not count as a new firing. A run still at work cannot be retried.
 - **`tend trigger list`** shows each binding's workflow, trigger kind, workspaces, schedule, next execution and last check (`failed` with the reason when the source could not be asked for a workspace or a run could not start). A `manual` binding shows `-` as schedule and next execution, and its last firing as its last check. A run's `STARTED BY` reads `trigger <binding> in <workspace>: <item key>`.
 - **Adding a repository** is adding its workspace's name to `spec.workspaces`.
+- **Fixed input:** `spec.input` (optional, any kind of binding) is an object merged into every run's input, so one workflow serves several bindings with different settings, e.g. `input: { focus: security }` (the workflow reads it as `.focus`). `workspace` and `item` are the platform's: a binding whose `spec.input` sets either stops the server at start, with the reason in the log.
 
 #### `schedule`
 
@@ -337,34 +338,38 @@ spec:
 
 #### `manual`
 
-A workflow you start only now and then, when you decide (a review, a release), with the workspaces it may run in (ADR 0028):
+A workflow you start only now and then, when you decide (a review, a release), with the workspaces it may run in (ADR 0028). The starter's `triggers/playground-architecture-review.yaml`:
 
 ```yaml
 apiVersion: tendworks.dev/v1
 kind: TriggerBinding
 metadata:
-  name: playground-check
+  name: playground-architecture-review
 spec:
-  workflow: check-workspace
+  workflow: review-workspace
   workspaces: [playground]
+  input:
+    focus: architecture
   trigger:
     manual: {}
 ```
 
+- **The review examples:** `review-workspace` has the developer review a workspace's default branch, read-only (`write: false`), with the `focus` its binding passes in `spec.input`, and report its findings by severity (`tend run get <id>` shows the report under OUTPUT, with `focus`). `playground-architecture-review` (`focus: architecture`) and `playground-security-review` (`focus: security`) both start it; another focus is a third binding with its own `input`, and another repository a workspace added to `workspaces`.
+
 - It never fires on its own. You fire it with `tend` and the API token (the read-only token is refused):
 
   ```bash
-  tend trigger fire playground-check
+  tend trigger fire playground-architecture-review
   # only in one of its workspaces, then follow the run live:
-  tend trigger fire playground-check --workspace playground --follow
+  tend trigger fire playground-architecture-review --workspace playground --follow
   ```
 
-  `tend` prints one line per started run: `run <id> started by trigger playground-check in workspace playground`. `--follow` streams the run like `tend run logs --follow` and needs exactly one run: over several workspaces, name one with `--workspace`, or `tend` refuses before anything starts. Through the API, which `tend` uses:
+  `tend` prints one line per started run: `run <id> started by trigger playground-architecture-review in workspace playground`. `--follow` streams the run like `tend run logs --follow` and needs exactly one run: over several workspaces, name one with `--workspace`, or `tend` refuses before anything starts. Through the API, which `tend` uses:
 
   ```bash
-  curl -X POST localhost:8080/triggers/playground-check/fire -H "authorization: Bearer $TEND_API_TOKEN"
+  curl -X POST localhost:8080/triggers/playground-architecture-review/fire -H "authorization: Bearer $TEND_API_TOKEN"
   # only in one of its workspaces:
-  curl -X POST localhost:8080/triggers/playground-check/fire -H "authorization: Bearer $TEND_API_TOKEN" \
+  curl -X POST localhost:8080/triggers/playground-architecture-review/fire -H "authorization: Bearer $TEND_API_TOKEN" \
     -H 'content-type: application/json' -d '{"workspace":"playground"}'
   ```
 
@@ -709,6 +714,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | 6 | Workspace assistant answers about the repository and cannot push | by hand: `tend chat --workspace playground` (the start line says `read-only`); ask what the repository contains: the answer names its files. Then ask it to commit a small change and push it: the push fails, and no new branch appears on GitHub | agent token of `playground` |
 | 7 | `assistant` chat answers from the live state | `tend chat` or the UI; the full script `scripts/smoke/chat-assistant.sh` needs the fixture configuration (implementation doc, step 16) | read token |
 | 8 | Web UI with live run, chat, phone width | by hand in the browser (implementation doc, steps 19–23) | as 3 and 7 |
+| 9 | Review started by hand | `tend trigger fire playground-architecture-review --follow`: one `review-workspace` run, `STARTED BY` `trigger playground-architecture-review in playground: <time>`, its input with `focus: architecture`; it completes with an architecture report under OUTPUT (`tend run get <id>`); no branch or commit appears in the repository. `playground-security-review` the same with `focus: security` | agent token of `playground` |
 
 - **Each labelled issue starts one paid run, once** (ADR 0006). The scripts refuse to run while other open issues carry `ready-for-agent`. A failed issue is not retried; retry its run by hand ([Everyday commands](#everyday-commands), "Retry a run").
 - Revert configuration changes after the tests, or keep them deliberately.
@@ -906,7 +912,7 @@ Milestone 3 is accepted on the operator's Ubuntu host by following only this gui
 
 | # | Check | How | Passes when |
 | --- | --- | --- | --- |
-| 1 | Fresh installation | `docker compose -f deploy/compose.yaml down -v` on the old stack ([Reset](#reset)), then [Install](#install) from the release candidate tag with your own configuration directory (a copy of `examples/config`) | `tend status` healthy; `tend workspace list` lists `playground`; `tend trigger list` lists both starter bindings as suspended; `scripts/smoke/hello-developer.sh` PASS |
+| 1 | Fresh installation | `docker compose -f deploy/compose.yaml down -v` on the old stack ([Reset](#reset)), then [Install](#install) from the release candidate tag with your own configuration directory (a copy of `examples/config`) | `tend status` healthy; `tend workspace list` lists `playground`; `tend trigger list` lists the starter bindings, `playground-ready-for-agent` and `playground-nightly-check` suspended; `scripts/smoke/hello-developer.sh` PASS |
 | 2 | A real repository as a workspace | [Your own repository](#git-workspaces) (or `playground` pointed at it), its agent token and the issues token as in [GitHub access](#before-the-first-real-run-github-access) | `scripts/check-github-agent-access.sh --repo OWNER/NAME --env-file deploy/.env --write-tests` passes for the agent token |
 | 3 | `develop-issue` through the `github-issues` trigger | remove `suspend: true` from `playground-ready-for-agent` (its `workspaces` naming your workspace), `restart server`, label an issue `ready-for-agent`; or `TEND_PLAYGROUND=OWNER/NAME scripts/smoke/pull-request.sh <issue>` | the run's `STARTED BY` names the binding, the workspace and the issue; the run completes with the pull request as the `pull-request` artifact of its one step; the pull request is open for you, nothing merged |
 | 4 | The Pushover message opens the pull request | [Pushover on your phone](#pushover-on-your-phone), steps 1–8, with the run of 3 | the phone shows the run's `completed` message; tapping it opens that pull request; `tend notification list` shows `phone delivered` with the pull request as `LINK` |
@@ -923,3 +929,10 @@ Milestone 4 (issue #87, `v0.4.0`) is accepted on the same host with these checks
 | M4-2 | Degraded, then recovered | subscribe the platform (`subscription-platform.yaml.example`), `docker compose -f deploy/compose.yaml stop worker`, wait about three minutes, start it again | a `platform.degraded` message naming the worker, then `platform.recovered` |
 | M4-3 | Heartbeat | set `TEND_HEARTBEAT_URL` ([Heartbeat](#heartbeat-when-the-platform-itself-is-down)), then `stop server` | the monitor shows the pings and alarms after its grace time |
 | M4-4 | Release | tag `v0.4.0` on the accepted commit | the tag's [release notes](releases/v0.4.0.md) match what was accepted |
+
+Workflows started by hand (spec #130, `v0.5.0`) are accepted on the same host with these checks:
+
+| # | Check | How | Passes when |
+| --- | --- | --- | --- |
+| M5-1 | A manual review | [First test workloads](#first-test-workloads), 9, with `playground-architecture-review` naming your workspace | one `review-workspace` run per workspace, started by the binding with `focus: architecture` in its input, completes with a report; `tend trigger list` shows the firing as its last check; no branch or commit appears in the repository |
+| M5-2 | Release | tag `v0.5.0` on the accepted commit | the tag's [release notes](releases/v0.5.0.md) match what was accepted |

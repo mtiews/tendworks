@@ -69,7 +69,7 @@ describe("triggers on the compose stack", () => {
     for (const { workspace, runId } of data!.items) {
       expect(started.find((run) => run.id === runId)).toMatchObject({
         workflow: "scheduled-noop",
-        input: { workspace },
+        input: { focus: "architecture", workspace },
         startedBy: { kind: "trigger", binding: MANUAL, workspace, item: { title: "started by hand" } },
       });
     }

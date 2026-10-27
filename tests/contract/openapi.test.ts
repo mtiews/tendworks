@@ -716,7 +716,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "manual-over-two-workspaces", "playground-nightly-check", "playground-ready-for-agent", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "manual-over-two-workspaces", "playground-architecture-review", "playground-nightly-check", "playground-ready-for-agent", "playground-security-review", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 

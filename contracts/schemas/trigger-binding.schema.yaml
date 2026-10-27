@@ -4,8 +4,8 @@ title: TriggerBinding
 description: >-
   Binds a trigger to a workflow and a list of workspaces (ADR 0023). When the trigger
   fires, the trigger gateway starts one run of `spec.workflow` per workspace and per item
-  its trigger source reports, with the input `{ workspace, item }`. An item starts at most
-  one run per binding and workspace.
+  its trigger source reports, with the input `{ ...spec.input, workspace, item }`. An item
+  starts at most one run per binding and workspace.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -42,6 +42,15 @@ properties:
           Names of configured workspaces (kind Workspace). The binding starts one run per
           workspace and item, with the workspace's name as `workspace` in the input.
           Without workspaces it starts one run per item, without a workspace.
+      input:
+        type: object
+        title: TriggerBindingInput
+        additionalProperties: true
+        description: >-
+          Fixed input merged into every run the binding starts, so one workflow serves
+          several bindings with different settings (e.g. `focus: security`). The run's
+          input is `{ ...input, workspace, item }`; the keys `workspace` and `item` are the
+          platform's and are refused when the configuration loads.
       suspend:
         type: boolean
         description: >-

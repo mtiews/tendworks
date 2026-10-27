@@ -1,0 +1,49 @@
+# Review by hand: the developer agent reviews a workspace's default branch with a focus and
+# reports what it found; it changes nothing. Input: { focus, workspace, item }, as a manual
+# trigger binding passes them: `focus` from the binding's fixed input (spec.input), the
+# workspace and the firing from the platform. One workflow serves several bindings
+# (triggers/playground-architecture-review.yaml, triggers/playground-security-review.yaml);
+# a focus other than architecture or security is reviewed as named.
+# The task asks for the workspace read-only (write: false), so the agent works on the
+# default branch without the workspace's credential, and nothing it does reaches the
+# repository.
+document:
+  dsl: '1.0.3'
+  namespace: examples
+  name: review-workspace
+  version: '0.1.0'
+  summary: Asks the developer agent to review a workspace with a focus and report its findings.
+do:
+  - review:
+      call: a2a
+      with:
+        method: message/send
+        agentCard:
+          endpoint: agent://developer
+        parameters:
+          message:
+            parts:
+              - kind: text
+                text: >-
+                  ${ "This task is a review, not an issue. Review the repository checked out in your working directory. "
+                  + (if .focus == "architecture" then
+                      "Focus on its architecture: module boundaries and dependencies between them, coupling, duplicated or misplaced responsibilities, and where the code departs from its documented design (README, docs, ADRs)."
+                    elif .focus == "security" then
+                      "Focus on security: handling of secrets and credentials, input validation, injection, authentication and authorization, unsafe defaults, and dependencies with known vulnerabilities."
+                    else
+                      "Focus on: \(.focus // "overall code quality")."
+                    end)
+                  + " Do not change, commit or push anything and open no pull request. Answer with a short report: your findings ordered by severity, each with the file, why it matters and a suggested fix." }
+            metadata:
+              dev.tendworks/workspace:
+                name: '${ .workspace }'
+                write: false
+      output:
+        as: >-
+          ${ {
+            workspace: $input.workspace,
+            focus: ($input.focus // null),
+            reviewedAt: ($input.item.key // null),
+            taskId: .id,
+            report: .status.message.parts[0].text
+          } }

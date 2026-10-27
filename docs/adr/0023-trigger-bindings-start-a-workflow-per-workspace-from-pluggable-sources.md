@@ -1,6 +1,6 @@
 # Trigger bindings start a workflow per workspace from pluggable trigger sources
 
-A trigger binding names a workflow, a trigger and a list of workspaces (ADR 0022). When the trigger fires, the trigger gateway starts one run per workspace, or per item and workspace for triggers that produce items. The workflow receives `{ workspace, item }` as input and decides the branch itself: one per issue for development, the default branch for a scan. A binding without workspaces starts runs without one.
+A trigger binding names a workflow, a trigger and a list of workspaces (ADR 0022). When the trigger fires, the trigger gateway starts one run per workspace, or per item and workspace for triggers that produce items. The workflow receives `{ workspace, item }` as input (plus the binding's fixed `spec.input`, ADR 0028) and decides the branch itself: one per issue for development, the default branch for a scan. A binding without workspaces starts runs without one.
 
 Trigger kinds:
 
