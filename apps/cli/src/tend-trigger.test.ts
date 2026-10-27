@@ -80,7 +80,7 @@ describe("tend trigger fire", () => {
     { name: "architecture-review", workflow: "review-workspace", kind: "manual", workspaces: ["app", "web"] },
     { name: "security-review", workflow: "review-workspace", kind: "manual", workspaces: ["app"] },
     { name: "cleanup", workflow: "cleanup", kind: "manual", workspaces: [] },
-    { name: "paused-review", workflow: "review-workspace", kind: "manual", workspaces: ["app"], suspended: true },
+    { name: "paused-review", workflow: "review-workspace", kind: "manual", workspaces: ["app", "web"], suspended: true },
     triggers[1]!,
   ];
   const started: Run = {
@@ -169,6 +169,14 @@ describe("tend trigger fire", () => {
     expect(stderr).toContain("--follow follows one run, but trigger binding architecture-review would start 2 (app, web); name one with --workspace");
   });
 
+  it("says a suspended binding is suspended, also with --follow over several workspaces", async () => {
+    const { exitCode, stderr, fired } = await fire(["paused-review", "--follow"]);
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe("tend: trigger binding paused-review cannot be fired: trigger binding 'paused-review' is suspended\n");
+    expect(fired).toEqual([]);
+  });
+
   it("allows --follow over several workspaces once --workspace names one", async () => {
     const { exitCode, fired } = await fire(["architecture-review", "--workspace", "app", "--follow"]);
 
@@ -210,6 +218,18 @@ describe("tend trigger fire", () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toBe("tend: cannot reach the control plane at http://localhost:8080 (fetch failed)\n");
+  });
+
+  it("says so when the control plane cannot reach the trigger gateway", async () => {
+    let stderr = "";
+    const exitCode = await runTend(["--token", "test-token", "trigger", "fire", "security-review"], {
+      fetch: async () => Response.json({ title: "Trigger gateway unavailable", status: 503, detail: "connection refused" }, { status: 503 }),
+      stdout: () => {},
+      stderr: (text) => (stderr += text),
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe("tend: the control plane cannot reach the trigger gateway (connection refused)\n");
   });
 
   it("exits 1 when the firing started no run", async () => {

@@ -222,7 +222,7 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     .option("--workspace <name>", "start the run only in this workspace of the binding")
     .option("-f, --follow", "then stream the started run's agent steps as they come, like run logs --follow; needs exactly one run")
     .addOption(outputOption())
-    .action(async (name: string, options: { workspace?: string; follow?: boolean; output: OutputFormat }, command: Command) => {
+    .action(async (binding: string, options: { workspace?: string; follow?: boolean; output: OutputFormat }, command: Command) => {
       const { baseUrl, client } = controlPlane(command);
       const unreachable = (cause: unknown): never => {
         throw new UnreachableError(baseUrl, cause);
@@ -231,19 +231,22 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
         // Refused before firing: once runs are started, they cost.
         const { data, error, response } = await client.GET("/triggers").catch(unreachable);
         if (!data) throw new AnswerError(response, error);
-        const workspaces = data.items.find((candidate) => candidate.name === name)?.workspaces ?? [];
+        const found = data.items.find((candidate) => candidate.name === binding);
+        // A suspended binding goes on to be refused as such.
+        const workspaces = found?.suspended ? [] : (found?.workspaces ?? []);
         if (workspaces.length > 1) {
-          throw new Error(`--follow follows one run, but trigger binding ${name} would start ${workspaces.length} (${workspaces.join(", ")}); name one with --workspace`);
+          throw new Error(`--follow follows one run, but trigger binding ${binding} would start ${workspaces.length} (${workspaces.join(", ")}); name one with --workspace`);
         }
       }
       const { data, error, response } = await client
-        .POST("/triggers/{name}/fire", { params: { path: { name } }, body: options.workspace === undefined ? {} : { workspace: options.workspace } })
+        .POST("/triggers/{name}/fire", { params: { path: { name: binding } }, body: options.workspace === undefined ? {} : { workspace: options.workspace } })
         .catch(unreachable);
-      if (response.status === 404) throw new Error(`trigger binding ${name} not found`);
-      if (response.status === 400 || response.status === 409) throw new Error(`trigger binding ${name} cannot be fired: ${error?.detail ?? error?.title ?? "refused"}`);
+      if (response.status === 404) throw new Error(`trigger binding ${binding} not found`);
+      if (response.status === 400 || response.status === 409) throw new Error(`trigger binding ${binding} cannot be fired: ${error?.detail ?? error?.title ?? "refused"}`);
+      if (response.status === 503) throw new Error(`the control plane cannot reach the trigger gateway (${error?.detail ?? error?.title ?? "HTTP 503"})`);
       if (!data) throw new AnswerError(response, error);
-      io.stdout(render(data, options.output, (result) => formatFireResult(name, result)));
-      if (data.items.length === 0) throw new Error(`trigger binding ${name} started no run; tend trigger list shows why in its last check`);
+      io.stdout(render(data, options.output, (result) => formatFireResult(binding, result)));
+      if (data.items.length === 0) throw new Error(`trigger binding ${binding} started no run; tend trigger list shows why in its last check`);
       if (options.follow) await followRun({ runId: data.items[0]!.runId, client, baseUrl, output: options.output, io });
     });
 
