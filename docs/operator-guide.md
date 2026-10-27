@@ -351,7 +351,15 @@ spec:
     manual: {}
 ```
 
-- It never fires on its own. You fire it through the API with the API token (the read-only token gets `403`):
+- It never fires on its own. You fire it with `tend` and the API token (the read-only token is refused):
+
+  ```bash
+  tend trigger fire playground-check
+  # only in one of its workspaces, then follow the run live:
+  tend trigger fire playground-check --workspace playground --follow
+  ```
+
+  `tend` prints one line per started run: `run <id> started by trigger playground-check in workspace playground`. `--follow` streams the run like `tend run logs --follow` and needs exactly one run: over several workspaces, name one with `--workspace`, or `tend` refuses before anything starts. Through the API, which `tend` uses:
 
   ```bash
   curl -X POST localhost:8080/triggers/playground-check/fire -H "authorization: Bearer $TEND_API_TOKEN"
@@ -716,7 +724,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Services | `docker compose -f deploy/compose.yaml ps` (`-a` shows `agent-secrets` as `Exited (0)`) |
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]`, `tend run retry <id> [--follow]` |
-| Start a workflow by hand | fire a [`manual` trigger binding](#manual): `curl -X POST localhost:8080/triggers/<binding>/fire -H "authorization: Bearer $TEND_API_TOKEN"`; a run in its workspaces, with the binding as origin. For scripts without a binding: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` (no workspace in its origin) |
+| Start a workflow by hand | fire a [`manual` trigger binding](#manual): `tend trigger fire <binding> [--workspace <name>] [--follow]`; a run in each of its workspaces (or only the named one), with the binding as origin. For scripts without a binding: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` (no workspace in its origin) |
 | Ask why a run failed | Analyze on a finished run in the web UI: a chat with the platform assistant on that run, which reads its steps and transcripts (`get_run`, `get_run_transcript`); or `tend chat` and name the run |
 | Retry a run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a finished run (failed or completed) starts again as a new run with the same input and origin, `retryOf` naming it; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |

@@ -48,9 +48,9 @@ export function createInMemoryTriggers(triggers: Trigger[] = []): TriggersPort &
       const trigger = triggers.find((candidate) => candidate.name === name);
       if (!trigger) throw new TriggerFireRefusedError(404, "Trigger binding not found", `no trigger binding '${name}'`);
       if (trigger.suspended) throw new TriggerFireRefusedError(409, "Trigger binding not fireable", `trigger binding '${name}' is suspended`);
-      if (trigger.schedule) throw new TriggerFireRefusedError(409, "Trigger binding not fireable", `trigger binding '${name}' of kind '${trigger.kind}' fires on its own`);
+      if (trigger.schedule) throw new TriggerFireRefusedError(409, "Trigger binding not fireable", `trigger binding '${name}' of kind '${trigger.kind}' fires on its own; only a binding of kind 'manual' can be fired`);
       if (request.workspace !== undefined && !trigger.workspaces.includes(request.workspace)) {
-        throw new TriggerFireRefusedError(400, "Invalid request", `trigger binding '${name}' does not start runs in workspace '${request.workspace}'`);
+        throw new TriggerFireRefusedError(400, "Invalid request", `trigger binding '${name}' does not start runs in workspace '${request.workspace}' (workspaces: ${trigger.workspaces.join(", ") || "none"})`);
       }
       fired.push({ name, request: structuredClone(request) });
       const workspaces = request.workspace !== undefined ? [request.workspace] : trigger.workspaces.length > 0 ? trigger.workspaces : [undefined];
