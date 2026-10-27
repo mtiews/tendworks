@@ -11,13 +11,13 @@ describeNotificationDelivery("fake", {
 });
 
 describe("fake notification delivery", () => {
-  it("writes the notification as one log line, with its first artifact's link", async () => {
+  it("writes the notification as one log line, its detail's lines joined, with its first artifact's link", async () => {
     const lines: string[] = [];
 
-    await createFakeNotificationDelivery({ log: (line) => lines.push(line) }).deliver({ ...SUITE_NOTIFICATION, detail: "all green" });
+    await createFakeNotificationDelivery({ log: (line) => lines.push(line) }).deliver(SUITE_NOTIFICATION);
 
     expect(lines).toEqual([
-      "notification 4f9c0a52-notification [run.completed] Run run-1 of develop-issue completed (all green) <https://git.example/acme/app/pull/7>",
+      "notification 4f9c0a52-notification [run.completed] Completed · app/develop-issue · #7 Fix the login (pull-request: https://git.example/acme/app/pull/7; Run run-1) <https://git.example/acme/app/pull/7>",
     ]);
   });
 });

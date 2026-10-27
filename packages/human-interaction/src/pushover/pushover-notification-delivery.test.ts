@@ -28,8 +28,8 @@ const failed: Notification = {
   id: "9d2e-notification-failed",
   kind: "run.failed",
   runId: "run-2",
-  title: "Run run-2 of develop-issue failed",
-  detail: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED",
+  title: "Failed · develop-issue",
+  detail: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED\nRun run-2",
   createdAt: "2026-10-18T11:00:03.000Z",
   deliveries: [],
 };
@@ -44,14 +44,14 @@ describe("pushover notification delivery", () => {
       {
         token: TOKEN,
         user: USER,
-        title: "Run run-2 of develop-issue failed",
-        message: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED",
+        title: "Failed · develop-issue",
+        message: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED\nRun run-2",
         timestamp: Date.parse("2026-10-18T11:00:03.000Z") / 1000,
       },
     ]);
   });
 
-  it("links the first artifact, so a tap opens it, and lists every artifact in the message", async () => {
+  it("links the first artifact, so a tap opens it, and sends the detail as message as it is", async () => {
     const { api, delivery } = setup();
 
     await delivery.deliver({
@@ -59,39 +59,42 @@ describe("pushover notification delivery", () => {
       artifacts: [
         { name: "pull-request", url: "https://git.example/acme/app/pull/7", description: "Add the login screen" },
         { name: "preview", url: "https://preview.example/app/7" },
+        { name: "#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" },
       ],
+      detail: "#7: https://git.example/acme/app/issues/7\npull-request: https://git.example/acme/app/pull/7\npreview: https://preview.example/app/7\nRun run-1",
     });
 
     expect(api.messages[0]).toMatchObject({
-      title: "Run run-1 of develop-issue completed",
-      message: "pull-request: https://git.example/acme/app/pull/7\npreview: https://preview.example/app/7",
+      title: "Completed · app/develop-issue · #7 Fix the login",
+      message: "#7: https://git.example/acme/app/issues/7\npull-request: https://git.example/acme/app/pull/7\npreview: https://preview.example/app/7\nRun run-1",
       url: "https://git.example/acme/app/pull/7",
       url_title: "Add the login screen",
     });
   });
 
-  it("links a started run's origin, titled by what started it", async () => {
+  it("links a started run's triggering item, titled by its title", async () => {
     const { api, delivery } = setup();
 
     await delivery.deliver({
       ...SUITE_NOTIFICATION,
       kind: "run.started",
-      title: "Run run-1 of develop-issue started",
-      detail: "Workspace: app. Started by: Fix the login (acme/app#7)",
-      artifacts: [{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
+      title: "Started · app/develop-issue · #7 Fix the login",
+      detail: "#7: https://git.example/acme/app/issues/7\nRun run-1",
+      artifacts: [{ name: "#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
     });
 
-    expect(api.messages[0]).toMatchObject({ title: "Run run-1 of develop-issue started", url: "https://git.example/acme/app/issues/7", url_title: "Fix the login" });
+    expect(api.messages[0]).toMatchObject({ title: "Started · app/develop-issue · #7 Fix the login", url: "https://git.example/acme/app/issues/7", url_title: "Fix the login" });
   });
 
-  it("names the artifact as the link's title when it has no description, and sends the title as message without detail or artifacts", async () => {
+  it("names the artifact as the link's title when it has no description, and sends the title as message without detail", async () => {
     const { api, delivery } = setup();
+    const { detail: _, ...withoutDetail } = SUITE_NOTIFICATION;
 
     await delivery.deliver(SUITE_NOTIFICATION);
-    await delivery.deliver({ ...SUITE_NOTIFICATION, artifacts: [] });
+    await delivery.deliver({ ...withoutDetail, kind: "platform.recovered", title: "Platform recovered: worker", artifacts: [] });
 
     expect(api.messages[0]).toMatchObject({ url: "https://git.example/acme/app/pull/7", url_title: "pull-request" });
-    expect(api.messages[1]).toMatchObject({ message: "Run run-1 of develop-issue completed" });
+    expect(api.messages[1]).toMatchObject({ message: "Platform recovered: worker" });
     expect(api.messages[1]).not.toHaveProperty("url");
   });
 
@@ -118,7 +121,7 @@ describe("pushover notification delivery", () => {
     const { api, delivery } = setup();
     const long = `https://git.example/${"x".repeat(600)}`;
 
-    await delivery.deliver({ ...SUITE_NOTIFICATION, artifacts: [{ name: "report", url: long }] });
+    await delivery.deliver({ ...SUITE_NOTIFICATION, artifacts: [{ name: "report", url: long }], detail: `report: ${long}\nRun run-1` });
 
     expect(api.messages[0]).not.toHaveProperty("url");
     expect(api.messages[0]?.message).toContain("report: https://git.example/");

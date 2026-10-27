@@ -115,43 +115,51 @@ function toNotification(event: NotifiedEvent, createdAt: string, run: NotifierRu
       ...(messages ? { detail: messages } : {}),
     };
   }
-  const base = { id: crypto.randomUUID(), runId: event.runid, createdAt, deliveries: [] };
+  const { origin } = run;
+  const item = origin?.kind === "trigger" ? origin.item : undefined;
+  // The triggering item's link, e.g. the issue.
+  const itemLinks: Artifact[] = item?.url ? [{ name: item.key, url: item.url, description: item.title }] : [];
+  const retry = origin?.retryOf === undefined ? "" : ` (retry of ${short(origin.retryOf)})`;
+  const runNotification = (kind: RunNotificationKind, subject: string | undefined, lines: string[]) => ({
+    id: crypto.randomUUID(),
+    kind,
+    runId: event.runid,
+    title: [STATUS[kind], run.workspace ? `${run.workspace}/${event.data.workflow}` : event.data.workflow, subject].filter(Boolean).join(" · "),
+    // One entry per line, the short run id last, so every channel shows the same message.
+    detail: [...lines, `Run ${short(event.runid)}${retry}`].join("\n"),
+    createdAt,
+    deliveries: [],
+  });
+  const linesOf = (links: Artifact[]) => links.map(({ name, url }) => `${name}: ${url}`);
+  const subject = item && `${item.key} ${item.title}`;
   if (event.type === "dev.tendworks.approval.requested") {
     const { id, question, answers, links } = event.data;
     const offered = answers.map(({ label }) => `"${label}"`).join(", ");
+    const requested = links.map(({ title, url }) => ({ name: title, url }));
     return {
-      ...base,
-      kind: "approval.requested",
-      title: `Approval needed: ${question}`,
-      detail: `Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"`,
+      ...runNotification("approval.requested", question, [`Answers: ${offered}. Answer with: tend approval answer ${id} "<answer>"`, ...linesOf(requested)]),
       // The request's links, so a channel that links one opens the first, like a run's first artifact.
-      ...(links.length > 0 ? { artifacts: links.map(({ title, url }) => ({ name: title, url })) } : {}),
+      ...(requested.length > 0 ? { artifacts: requested } : {}),
     };
   }
   if (event.type === "dev.tendworks.run.started") {
-    const { workspace, origin } = run;
-    const item = origin?.kind === "trigger" ? origin.item : undefined;
-    const retry = origin?.retryOf === undefined ? "" : `, retry of ${origin.retryOf}`;
-    const startedBy = `${origin?.kind === "trigger" ? `${origin.item.title} (${origin.item.key})` : "manual"}${retry}`;
-    return {
-      ...base,
-      kind: "run.started",
-      title: `Run ${event.runid} of ${event.data.workflow} started`,
-      detail: `${workspace ? `Workspace: ${workspace}. ` : ""}Started by: ${startedBy}`,
-      // The origin's link, so a channel that links one opens e.g. the issue.
-      ...(item?.url ? { artifacts: [{ name: item.key, url: item.url, description: item.title }] } : {}),
-    };
+    return { ...runNotification("run.started", subject, linesOf(itemLinks)), ...(itemLinks.length > 0 ? { artifacts: itemLinks } : {}) };
   }
-  const { artifacts } = event.data;
-  if (event.type === "dev.tendworks.run.completed") {
-    return { ...base, kind: "run.completed", title: `Run ${event.runid} of ${event.data.workflow} completed`, artifacts };
-  }
+  // The message lists the triggering item before the run's artifacts; a channel that links
+  // one links the first artifact (e.g. the pull request), else the triggering item.
+  const artifacts = [...event.data.artifacts, ...itemLinks];
+  const links = linesOf([...itemLinks, ...event.data.artifacts]);
+  if (event.type === "dev.tendworks.run.completed") return { ...runNotification("run.completed", subject, links), artifacts };
   const { error } = event.data;
-  return {
-    ...base,
-    kind: "run.failed",
-    title: `Run ${event.runid} of ${event.data.workflow} failed`,
-    detail: `${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`,
-    artifacts,
-  };
+  return { ...runNotification("run.failed", subject, [`${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`, ...links]), artifacts };
+}
+
+type Artifact = NonNullable<Notification["artifacts"]>[number];
+type RunNotificationKind = Exclude<NotificationKind, `platform.${string}`>;
+
+const STATUS: Record<RunNotificationKind, string> = { "run.started": "Started", "run.completed": "Completed", "run.failed": "Failed", "approval.requested": "Approval needed" };
+
+/** The first eight characters of a run id: enough to tell runs apart at a glance. */
+function short(runId: string): string {
+  return runId.slice(0, 8);
 }

@@ -37,7 +37,7 @@ export function createFakeNotificationDelivery({ refuse = false, log = console.i
     delivered,
     async deliver(notification) {
       if (refuse) throw new Error("the fake channel refuses every notification");
-      const detail = notification.detail ? ` (${notification.detail})` : "";
+      const detail = notification.detail ? ` (${notification.detail.replaceAll("\n", "; ")})` : "";
       const link = notification.artifacts?.[0] ? ` <${notification.artifacts[0].url}>` : "";
       log(`notification ${notification.id} [${notification.kind}] ${notification.title}${detail}${link}`);
       delivered.push(structuredClone(notification));

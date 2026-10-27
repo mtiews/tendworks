@@ -23,19 +23,28 @@ $defs:
         description: Run the notification is about; absent for a notification about the platform (`platform.degraded`, `platform.recovered`).
       title:
         type: string
-        description: One line for the human, e.g. "Run 1f3c… of hello-agent completed".
+        description: >-
+          One line for the human. For a run or an approval request: its status, the run's
+          workspace and workflow, and the triggering item or the approval's question, e.g.
+          "Completed · app/develop-issue · #42 Fix login", "Approval needed · app/release-app ·
+          Deploy release 1.4?" or "Completed · hello-agent" for a manual run without a
+          workspace. For the platform: e.g. "Platform degraded: worker".
       detail:
         type: string
-        description: More context, e.g. why a run failed.
+        description: >-
+          More context. For a run or an approval request the whole message, one entry per line:
+          why the run failed or how to answer the approval; the triggering item's link and the
+          artifacts (`<name>: <url>`), or the approval's links; last the short run id, e.g.
+          `Run 3f2a9c1e (retry of 9b1c0d2e)`. For the platform: the components' messages.
       artifacts:
         type: array
         description: >-
           For a started run (`run.started`): the trigger origin's link (`key` as `name`,
           `title` as `description`), absent for a manual run or an origin without a link.
           For a finished run (`run.completed`, `run.failed`): the artifacts its steps
-          reported, in step order, e.g. the pull request the agent opened. For
-          `approval.requested`: the request's links (`title` as `name`). Channels that can
-          link one link the first.
+          reported, in step order, e.g. the pull request the agent opened, followed by the
+          trigger origin's link. For `approval.requested`: the request's links (`title` as
+          `name`). Channels that can link one link the first.
         items:
           $ref: './run.schema.yaml#/$defs/stepArtifact'
       createdAt:

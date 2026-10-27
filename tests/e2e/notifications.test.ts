@@ -29,7 +29,9 @@ describe("notifications on the compose stack", () => {
     expect(notification).toMatchObject({
       kind: "run.completed",
       runId: started!.id,
-      title: `Run ${started!.id} of hello-agent completed`,
+      // A manual run without a workspace: no workspace and no item in the title, the short run id last.
+      title: "Completed · hello-agent",
+      detail: `Run ${started!.id.slice(0, 8)}`,
       artifacts: [],
       // The fixture subscriptions (tests/fixtures/config/notifications) send a run without a workspace (platform scope) to two channels: one delivers, one refuses.
       deliveries: [
@@ -57,8 +59,8 @@ describe("notifications on the compose stack", () => {
     const [first, second] = [...both].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     expect(first).toMatchObject({
       kind: "run.started",
-      title: `Run ${started!.id} of hello-agent started`,
-      detail: "Started by: manual",
+      title: "Started · hello-agent",
+      detail: `Run ${started!.id.slice(0, 8)}`,
       deliveries: [{ channel: "fake-log", status: "delivered" }],
     });
     expect(second).toMatchObject({ kind: "run.completed", deliveries: [{ channel: "fake-log", status: "delivered" }, { channel: "fake-refusing", status: "failed" }] });
