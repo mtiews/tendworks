@@ -4,7 +4,8 @@ import { useEffect, useId, useRef, useState, type ReactNode } from "react";
  * Asks the operator to confirm an action before it happens (e.g. deciding an approval request,
  * ending a chat): an inline, non-modal `alertdialog` named by `title`, described by `children`.
  * It takes the focus on its safe choice (Cancel); Cancel and Escape close it and hand the focus
- * back to the element that opened it. While `busy`, both choices are disabled.
+ * back to the element that opened it. While `busy`, both choices are disabled; without
+ * `canConfirm` (e.g. nothing chosen yet), only the confirming one.
  */
 export function Confirmation({
   title,
@@ -13,6 +14,7 @@ export function Confirmation({
   onCancel,
   cancelLabel = "Cancel",
   busy = false,
+  canConfirm = true,
   children,
 }: {
   title: string;
@@ -22,6 +24,7 @@ export function Confirmation({
   onConfirm: () => void;
   onCancel: () => void;
   busy?: boolean;
+  canConfirm?: boolean;
   children?: ReactNode;
 }) {
   const titleId = useId();
@@ -57,7 +60,7 @@ export function Confirmation({
       </p>
       {children !== undefined && <div id={descriptionId}>{children}</div>}
       <div className="confirmation-actions">
-        <button type="button" className="primary" disabled={busy} onClick={onConfirm}>
+        <button type="button" className="primary" disabled={busy || !canConfirm} onClick={onConfirm}>
           {confirmLabel}
         </button>
         <button type="button" ref={cancel} disabled={busy} onClick={close}>

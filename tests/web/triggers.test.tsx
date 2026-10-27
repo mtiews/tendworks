@@ -1,5 +1,5 @@
-import { createInMemoryTriggers, type Trigger } from "@tendworks/control-plane";
-import { cleanup, screen, within } from "@testing-library/react";
+import { createInMemoryTriggers, TriggerFireRefusedError, type FireTriggerRequest, type Trigger } from "@tendworks/control-plane";
+import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { phoneWidth, renderApp, signedIn } from "./support/platform.js";
 import { rows } from "./support/table.js";
@@ -47,14 +47,18 @@ const triggers: Trigger[] = [
     workspaces: ["app"],
     lastEvaluation: { at: "2026-10-18T09:30:00.000Z", status: "succeeded", startedRuns: 1 },
   },
+  { name: "security-review", workflow: "review-workspace", kind: "manual", workspaces: ["app", "web", "docs"] },
+  { name: "release", workflow: "cut-release", kind: "manual", workspaces: [], suspended: true },
 ];
+
+const disabled = (element: HTMLElement) => (element as HTMLButtonElement).disabled;
 
 describe("triggers page", () => {
   it("shows each trigger binding with its source, workspaces, schedule, next check and how its last check went", async () => {
     renderApp({ path: "/ui/triggers", triggers: createInMemoryTriggers(triggers) });
 
     expect(rows(await screen.findByRole("table", { name: "Trigger bindings" }))).toEqual([
-      ["Name", "Source", "Workflow", "Workspaces", "Schedule", "Next check", "Last check"],
+      ["Name", "Source", "Workflow", "Workspaces", "Schedule", "Next check", "Last check", "Start"],
       [
         "github-issues",
         "github-issues",
@@ -63,11 +67,14 @@ describe("triggers page", () => {
         "every 1m",
         "2026-10-18T10:01:00.000Z",
         "failed 2026-10-18T10:00:00.000Z: secret TENDWORKS_PLATFORM_GITHUB_TOKEN is not set",
+        "",
       ],
-      ["nightly", "schedule", "triage", "app", "cron 0 2 * * *", "suspended", "not checked yet"],
-      ["hourly", "fake", "implement-issue", "none", "every 1h", "2026-10-18T11:00:00.000Z", "succeeded 2026-10-18T10:00:00.000Z, 2 runs started"],
-      ["morning", "schedule", "triage", "web", "cron 0 2 * * *", "2026-10-18T20:00:00.000Z", "not checked yet"],
-      ["architecture-review", "manual", "review-workspace", "app", "by hand", "-", "succeeded 2026-10-18T09:30:00.000Z, 1 run started"],
+      ["nightly", "schedule", "triage", "app", "cron 0 2 * * *", "suspended", "not checked yet", ""],
+      ["hourly", "fake", "implement-issue", "none", "every 1h", "2026-10-18T11:00:00.000Z", "succeeded 2026-10-18T10:00:00.000Z, 2 runs started", ""],
+      ["morning", "schedule", "triage", "web", "cron 0 2 * * *", "2026-10-18T20:00:00.000Z", "not checked yet", ""],
+      ["architecture-review", "manual", "review-workspace", "app", "by hand", "-", "succeeded 2026-10-18T09:30:00.000Z, 1 run started", "Start"],
+      ["security-review", "manual", "review-workspace", "app, web, docs", "by hand", "-", "not checked yet", "Start"],
+      ["release", "manual", "cut-release", "none", "by hand", "suspended", "not checked yet", "Start"],
     ]);
   });
 
@@ -89,6 +96,7 @@ describe("triggers page", () => {
     // A cron expression shows its next check only (the browser does not evaluate it).
     expect(says("morning")).toBe("0 checks in the last 12 hours, 1 check in the next 12 hours");
     expect(says("architecture-review")).toBe("fired by hand, no scheduled checks");
+    expect(says("release")).toBe("suspended, no checks");
   });
 
   it("shows cards without a table or timeline on a phone", async () => {
@@ -105,6 +113,150 @@ describe("triggers page", () => {
     const manual = within(within(cards).getByText("architecture-review").closest("li") as HTMLElement);
     expect(manual.getByText("by hand")).toBeTruthy();
     expect(manual.getByText("fired by hand")).toBeTruthy();
+  });
+
+  it("starts a manual binding from its card on a phone", async () => {
+    phoneWidth(true);
+    const fake = createInMemoryTriggers(triggers);
+    const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+    const cards = await screen.findByRole("list", { name: "Trigger bindings" });
+    expect(within(cards).getAllByRole("button").map((button) => [button.getAttribute("aria-label"), disabled(button)])).toEqual([
+      ["Start architecture-review", false],
+      ["Start security-review", false],
+      ["Start release", true],
+    ]);
+    await user.click(within(cards).getByRole("button", { name: "Start security-review" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+    await user.click(within(dialog).getByRole("checkbox", { name: "docs" }));
+    await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/ui/runs"));
+    expect(fake.fired).toEqual([
+      { name: "security-review", request: { workspace: "app" } },
+      { name: "security-review", request: { workspace: "web" } },
+    ]);
+  });
+
+  describe("starting a manual binding", () => {
+    it("offers Start on manual bindings only, disabled on a suspended one", async () => {
+      renderApp({ path: "/ui/triggers", triggers: createInMemoryTriggers(triggers) });
+
+      const table = await screen.findByRole("table", { name: "Trigger bindings" });
+      expect(within(table).getAllByRole("button").map((button) => [button.getAttribute("aria-label"), disabled(button)])).toEqual([
+        ["Start architecture-review", false],
+        ["Start security-review", false],
+        ["Start release", true],
+      ]);
+    });
+
+    it("starts a binding with one workspace on one tap and opens its run", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+      await user.click(await screen.findByRole("button", { name: "Start architecture-review" }));
+
+      await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(fake.fired).toEqual([{ name: "architecture-review", request: {} }]);
+    });
+
+    it("starts a binding without workspaces on one tap", async () => {
+      const fake = createInMemoryTriggers([{ name: "release", workflow: "cut-release", kind: "manual", workspaces: [] }]);
+      const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+      await user.click(await screen.findByRole("button", { name: "Start release" }));
+
+      await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
+      expect(fake.fired).toEqual([{ name: "release", request: {} }]);
+    });
+
+    it("disables Start while the firing is pending, so a double tap starts nothing twice", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      let release: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const fire = async (name: string, request: FireTriggerRequest) => {
+        await held;
+        return fake.fire(name, request);
+      };
+      const { user } = renderApp({ path: "/ui/triggers", triggers: { ...fake, fire } });
+
+      const start = await screen.findByRole("button", { name: "Start architecture-review" });
+      await user.click(start);
+      expect(disabled(start)).toBe(true);
+      await user.click(start);
+      release();
+
+      await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
+      expect(fake.fired).toHaveLength(1);
+    });
+
+    it("asks for the workspaces of a binding with several, all preselected; all of them is one firing, then Runs", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+      await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+      expect(within(dialog).getAllByRole("checkbox").map((box) => [box.closest("label")?.textContent, (box as HTMLInputElement).checked])).toEqual([
+        ["app", true],
+        ["web", true],
+        ["docs", true],
+      ]);
+      expect(fake.fired).toEqual([]);
+      await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+      await waitFor(() => expect(window.location.pathname).toBe("/ui/runs"));
+      expect(fake.fired).toEqual([{ name: "security-review", request: {} }]);
+    });
+
+    it("fires once per chosen workspace when the operator narrows the start; one run opens that run", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+      await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+      await user.click(within(dialog).getByRole("checkbox", { name: "app" }));
+      await user.click(within(dialog).getByRole("checkbox", { name: "docs" }));
+      await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+      await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
+      expect(fake.fired).toEqual([{ name: "security-review", request: { workspace: "web" } }]);
+    });
+
+    it("cannot start with no workspace chosen, and starts nothing on Cancel", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      const { user } = renderApp({ path: "/ui/triggers", triggers: fake });
+
+      await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+      for (const workspace of ["app", "web", "docs"]) await user.click(within(dialog).getByRole("checkbox", { name: workspace }));
+      expect(disabled(within(dialog).getByRole("button", { name: "Start runs" }))).toBe(true);
+      await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(fake.fired).toEqual([]);
+      expect(window.location.pathname).toBe("/ui/triggers");
+    });
+
+    it("shows why a firing failed and starts nothing more", async () => {
+      const fake = createInMemoryTriggers(triggers);
+      const fire = async (name: string, request: FireTriggerRequest) => {
+        if (request.workspace === "web") throw new TriggerFireRefusedError(400, "Invalid request", "trigger binding 'security-review' does not start runs in workspace 'web'");
+        return fake.fire(name, request);
+      };
+      const { user } = renderApp({ path: "/ui/triggers", triggers: { ...fake, fire } });
+
+      await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+      const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+      await user.click(within(dialog).getByRole("checkbox", { name: "docs" }));
+      await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+      expect(await screen.findByText("Invalid request: trigger binding 'security-review' does not start runs in workspace 'web'. Started before it: run-1 in app.")).toBeTruthy();
+      expect(fake.fired).toEqual([{ name: "security-review", request: { workspace: "app" } }]);
+      expect(window.location.pathname).toBe("/ui/triggers");
+      expect(screen.queryByRole("alertdialog")).toBeNull();
+      expect(disabled(screen.getByRole("button", { name: "Start security-review" }))).toBe(false);
+    });
   });
 
   it("says when there are no bindings", async () => {
