@@ -148,10 +148,10 @@ function toNotification(event: NotifiedEvent, createdAt: string, run: NotifierRu
   // The message lists the triggering item before the run's artifacts; a channel that links
   // one links the first artifact (e.g. the pull request), else the triggering item.
   const artifacts = [...event.data.artifacts, ...itemLinks];
-  const links = linesOf([...itemLinks, ...event.data.artifacts]);
-  if (event.type === "dev.tendworks.run.completed") return { ...runNotification("run.completed", subject, links), artifacts };
+  const linkLines = linesOf([...itemLinks, ...event.data.artifacts]);
+  if (event.type === "dev.tendworks.run.completed") return { ...runNotification("run.completed", subject, linkLines), artifacts };
   const { error } = event.data;
-  return { ...runNotification("run.failed", subject, [`${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`, ...links]), artifacts };
+  return { ...runNotification("run.failed", subject, [`${error.instance}: ${error.title}${error.detail ? `: ${error.detail}` : ""}`, ...linkLines]), artifacts };
 }
 
 type Artifact = NonNullable<Notification["artifacts"]>[number];

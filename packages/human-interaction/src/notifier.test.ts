@@ -326,7 +326,19 @@ describe("notifier", () => {
     });
   });
 
-  it("names a completed run's workspace without an item, and keeps no artifacts empty", async () => {
+  it("names the item of a completed run without a workspace, and the run it retries", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { ...ISSUE, retryOf: "9b1c0d2e-0000" } }));
+
+    await notifier.handle({ ...completed, data: { ...completed.data, artifacts: [] } });
+
+    expect((await store.list())[0]).toMatchObject({
+      title: "Completed · develop-issue · #42 Fix login",
+      detail: "#42: https://git.example/acme/app/issues/42\nRun run-1 (retry of 9b1c0d2e)",
+      artifacts: [{ name: "#42", url: "https://git.example/acme/app/issues/42", description: "Fix login" }],
+    });
+  });
+
+  it("names a completed run's workspace without an item, with an empty list of artifacts", async () => {
     const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "app", origin: { kind: "manual" } }));
 
     await notifier.handle({ ...completed, data: { ...completed.data, artifacts: [] } });
