@@ -22,8 +22,8 @@ export interface PushoverNotificationDeliveryOptions {
 
 /**
  * Delivers notifications as Pushover messages (ADR 0025): with the priority the notifier
- * resolved (Pushover's default, 0, without), the title as title, the detail
- * and the artifacts as message, the first artifact as the message's link, the time the
+ * resolved (Pushover's default, 0, without), the title as title, the detail as message
+ * (the title without one), the first artifact as the message's link, the time the
  * notification was recorded as the message's time. A message Pushover refuses (4xx)
  * rejects with its errors; Pushover asks not to repeat such a request unchanged.
  */
@@ -43,12 +43,10 @@ export function createPushoverNotificationDelivery({ credentials, fetch = global
 }
 
 function messageOf(notification: Notification): Record<string, string> {
-  const artifacts = notification.artifacts ?? [];
-  const lines = [...(notification.detail ? [notification.detail] : []), ...artifacts.map(({ name, url }) => `${name}: ${url}`)];
-  const link = artifacts[0];
+  const link = notification.artifacts?.[0];
   return {
     title: shorten(notification.title, TITLE_LIMIT),
-    message: shorten(lines.length > 0 ? lines.join("\n") : notification.title, MESSAGE_LIMIT),
+    message: shorten(notification.detail || notification.title, MESSAGE_LIMIT),
     timestamp: String(Math.floor(Date.parse(notification.createdAt) / 1000)),
     ...(link && link.url.length <= URL_LIMIT ? { url: link.url, url_title: shorten(link.description ?? link.name, URL_TITLE_LIMIT) } : {}),
   };

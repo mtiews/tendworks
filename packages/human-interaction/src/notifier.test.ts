@@ -49,7 +49,7 @@ const request: ApprovalRequest = {
   step: "/do/1/confirm",
   action: "deploy",
   policy: "careful",
-  question: "Deploy release 1.4 for run run-1 of release-app?",
+  question: "Deploy release 1.4?",
   links: [],
   answers: [
     { label: "Deploy", outcome: "continue" },
@@ -59,6 +59,8 @@ const request: ApprovalRequest = {
   createdAt: "2026-10-18T10:00:02.000Z",
 };
 
+const LONG_RUN = "3f2a9c1e-4b7d-4e2a-8c1f-5d6e7f8a9b0c";
+const ISSUE = { kind: "trigger" as const, binding: "ready-issues", workspace: "app", item: { key: "#42", title: "Fix login", url: "https://git.example/acme/app/issues/42" } };
 const EVERYTHING: NotifierSubscription["events"] = ["approval.requested", "run.failed", "run.completed"];
 const quiet = (options: { refuse?: boolean } = {}) => createFakeNotificationDelivery({ ...options, log: () => {} });
 
@@ -172,41 +174,41 @@ describe("notifier", () => {
     const started: RunEvents.RunStartedEvent = { ...envelope, id: "run-1:run.started", type: "dev.tendworks.run.started", data: { workflow: "develop-issue" } };
     const issue = { kind: "trigger" as const, binding: "ready-issues", workspace: "app", item: { key: "acme/app#7", title: "Fix the login", url: "https://git.example/acme/app/issues/7" } };
 
-    it("names the workflow, the workspace and the origin's title, and links the origin", async () => {
+    it("names the status, the workspace and workflow and the triggering item in the title, and links the item", async () => {
       const delivery = quiet();
       const { store, notifier } = setup([{ name: "log", delivery }], [project("app", ["log"], ["run.started"])], async () => ({ workspace: "app", origin: issue }));
 
-      await notifier.handle(started);
+      await notifier.handle({ ...started, runid: LONG_RUN });
 
       const [notification] = await store.list();
       expect(notification).toMatchObject({
         kind: "run.started",
-        runId: "run-1",
-        title: "Run run-1 of develop-issue started",
-        detail: "Workspace: app. Started by: Fix the login (acme/app#7)",
+        runId: LONG_RUN,
+        title: "Started · app/develop-issue · acme/app#7 Fix the login",
+        detail: "acme/app#7: https://git.example/acme/app/issues/7\nRun 3f2a9c1e",
         artifacts: [{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }],
         deliveries: [delivered("log")],
       });
       expect(delivery.delivered).toHaveLength(1);
     });
 
-    it("says that a manual run was started manually, and links nothing", async () => {
+    it("names only the status and the workflow of a manual run without a workspace, and links nothing", async () => {
       const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { kind: "manual" } }));
 
       await notifier.handle(started);
 
       const [notification] = await store.list();
-      expect(notification?.detail).toBe("Started by: manual");
+      expect(notification).toMatchObject({ title: "Started · develop-issue", detail: "Run run-1" });
       expect(notification).not.toHaveProperty("artifacts");
     });
 
-    it("names the run a retry retries", async () => {
-      const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "app", origin: { ...issue, retryOf: "run-0" } }));
+    it("names the run a retry retries, shortened, on the last line", async () => {
+      const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "app", origin: { ...issue, retryOf: "9b1c0d2e-7a4f-4c1e-9d3b-0e5f6a7b8c9d" } }));
 
-      await notifier.handle(started);
+      await notifier.handle({ ...started, runid: LONG_RUN });
 
       const [notification] = await store.list();
-      expect(notification?.detail).toBe("Workspace: app. Started by: Fix the login (acme/app#7), retry of run-0");
+      expect(notification?.detail).toBe("acme/app#7: https://git.example/acme/app/issues/7\nRun 3f2a9c1e (retry of 9b1c0d2e)");
       expect(notification?.artifacts).toEqual([{ name: "acme/app#7", url: "https://git.example/acme/app/issues/7", description: "Fix the login" }]);
     });
 
@@ -215,7 +217,9 @@ describe("notifier", () => {
 
       await notifier.handle(started);
 
-      expect((await store.list())[0]).not.toHaveProperty("artifacts");
+      const [notification] = await store.list();
+      expect(notification).toMatchObject({ title: "Started · develop-issue · acme/app#7 Fix the login", detail: "Run run-1" });
+      expect(notification).not.toHaveProperty("artifacts");
     });
 
     it("only lists a start nobody subscribed to", async () => {
@@ -239,7 +243,8 @@ describe("notifier", () => {
     expect(notification).toMatchObject({
       kind: "run.completed",
       runId: "run-1",
-      title: "Run run-1 of develop-issue completed",
+      title: "Completed · develop-issue",
+      detail: "pull-request: https://git.example/acme/app/pull/7\nRun run-1",
       artifacts: [PULL_REQUEST],
       createdAt: "2026-10-18T10:00:03.000Z",
       deliveries: [delivered("log")],
@@ -255,8 +260,8 @@ describe("notifier", () => {
     expect(await store.list()).toEqual([
       expect.objectContaining({
         kind: "run.failed",
-        title: "Run run-1 of develop-issue failed",
-        detail: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED: not today",
+        title: "Failed · develop-issue",
+        detail: "/do/0/implement: Agent task ended in state TASK_STATE_FAILED: not today\npull-request: https://git.example/acme/app/pull/7\nRun run-1",
         artifacts: [PULL_REQUEST],
         deliveries: [delivered("log")],
       }),
@@ -272,8 +277,8 @@ describe("notifier", () => {
     expect(notification).toMatchObject({
       kind: "approval.requested",
       runId: "run-1",
-      title: "Approval needed: Deploy release 1.4 for run run-1 of release-app?",
-      detail: 'Answers: "Deploy", "Cancel". Answer with: tend approval answer approval-1 "<answer>"',
+      title: "Approval needed · release-app · Deploy release 1.4?",
+      detail: 'Answers: "Deploy", "Cancel". Answer with: tend approval answer approval-1 "<answer>"\nRun run-1',
       deliveries: [delivered("log")],
     });
     expect(notification).not.toHaveProperty("artifacts");
@@ -293,6 +298,65 @@ describe("notifier", () => {
       { name: "Pull request", url: "https://git.example/acme/app/pull/7" },
       { name: "Release notes", url: "https://git.example/acme/app/releases/1.4" },
     ]);
+  });
+
+  it("lists the triggering item before a completed run's artifacts, yet keeps the first artifact first to link", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "tendworks", origin: ISSUE }));
+
+    await notifier.handle({ ...completed, runid: LONG_RUN });
+
+    const [notification] = await store.list();
+    expect(notification).toMatchObject({
+      title: "Completed · tendworks/develop-issue · #42 Fix login",
+      detail: "#42: https://git.example/acme/app/issues/42\npull-request: https://git.example/acme/app/pull/7\nRun 3f2a9c1e",
+      artifacts: [PULL_REQUEST, { name: "#42", url: "https://git.example/acme/app/issues/42", description: "Fix login" }],
+    });
+    expect(`${notification?.title}\n${notification?.detail}`).not.toContain(LONG_RUN);
+  });
+
+  it("links the triggering item of a failed run without artifacts, and names the run it retries", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "tendworks", origin: { ...ISSUE, retryOf: "9b1c0d2e-0000-4000-8000-000000000000" } }));
+
+    await notifier.handle({ ...failed, runid: LONG_RUN, data: { ...failed.data, error: { ...failed.data.error, instance: "develop", title: "Sandbox exited with code 137" }, artifacts: [] } });
+
+    expect((await store.list())[0]).toMatchObject({
+      title: "Failed · tendworks/develop-issue · #42 Fix login",
+      detail: "develop: Sandbox exited with code 137: not today\n#42: https://git.example/acme/app/issues/42\nRun 3f2a9c1e (retry of 9b1c0d2e)",
+      artifacts: [{ name: "#42", url: "https://git.example/acme/app/issues/42", description: "Fix login" }],
+    });
+  });
+
+  it("names the item of a completed run without a workspace, and the run it retries", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ origin: { ...ISSUE, retryOf: "9b1c0d2e-0000" } }));
+
+    await notifier.handle({ ...completed, data: { ...completed.data, artifacts: [] } });
+
+    expect((await store.list())[0]).toMatchObject({
+      title: "Completed · develop-issue · #42 Fix login",
+      detail: "#42: https://git.example/acme/app/issues/42\nRun run-1 (retry of 9b1c0d2e)",
+      artifacts: [{ name: "#42", url: "https://git.example/acme/app/issues/42", description: "Fix login" }],
+    });
+  });
+
+  it("names a completed run's workspace without an item, with an empty list of artifacts", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "app", origin: { kind: "manual" } }));
+
+    await notifier.handle({ ...completed, data: { ...completed.data, artifacts: [] } });
+
+    expect((await store.list())[0]).toMatchObject({ title: "Completed · app/develop-issue", detail: "Run run-1", artifacts: [] });
+  });
+
+  it("names an approval's workspace and workflow and its question, with its links and the run it retries", async () => {
+    const { store, notifier } = setup(undefined, undefined, async () => ({ workspace: "tendworks", origin: { ...ISSUE, retryOf: "9b1c0d2e-0000" } }));
+    const links = [{ title: "Release notes", url: "https://git.example/acme/app/releases/1.4" }];
+
+    await notifier.handle(approvalRequested({ ...request, runId: LONG_RUN, links }, request.createdAt));
+
+    expect((await store.list())[0]).toMatchObject({
+      title: "Approval needed · tendworks/release-app · Deploy release 1.4?",
+      detail: 'Answers: "Deploy", "Cancel". Answer with: tend approval answer approval-1 "<answer>"\nRelease notes: https://git.example/acme/app/releases/1.4\nRun 3f2a9c1e (retry of 9b1c0d2e)',
+      artifacts: [{ name: "Release notes", url: "https://git.example/acme/app/releases/1.4" }],
+    });
   });
 
   it("delivers to every channel a matching subscription names, and only to those", async () => {

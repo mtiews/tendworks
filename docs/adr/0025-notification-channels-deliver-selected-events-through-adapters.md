@@ -8,7 +8,7 @@ Delivery is configured with the kind `NotificationChannel`:
 - `pushover`: `token` and `user` as secret references to platform secrets;
 - `priority`: optional default priority.
 
-(ADR 0026 moved event selection from the channel to subscriptions and the priority to the channel and the subscription.) Each notification goes to every channel a matching subscription names, and its delivery status is recorded per channel. A failed delivery is visible in the notification list. Notifications of finished runs carry the run's reported artifacts; notifications of approval requests carry the request's links the same way. Pushover uses the first link as the message URL, so a tap opens it.
+(ADR 0026 moved event selection from the channel to subscriptions and the priority to the channel and the subscription.) Each notification goes to every channel a matching subscription names, and its delivery status is recorded per channel. A failed delivery is visible in the notification list. Notifications of finished runs carry the run's reported artifacts, followed by the link of the item that triggered the run; notifications of started runs carry that item's link, notifications of approval requests the request's links. Pushover uses the first link as the message URL, so a tap opens it: the pull request of a completed run, else e.g. the issue. A run notification's title names status, workspace and workflow and the item (`Completed · app/develop-issue · #42 Fix login`); its detail is the whole message, one entry per line, ending with the short run id, so every channel and client shows the same text.
 
 ## Considered Options
 
