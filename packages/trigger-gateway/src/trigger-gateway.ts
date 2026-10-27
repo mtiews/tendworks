@@ -99,6 +99,8 @@ export function createTriggerGateway({
   const byName = new Map(bindings.map((binding) => [binding.metadata.name, bind(binding, sources, secrets, workspacesByName)]));
   const timers = new Map<string, NodeJS.Timeout>();
   const running = new Map<string, Promise<unknown>>();
+  /** The time of each binding's last firing, in ms; firings of a binding never share a time, so each is a new item. */
+  const lastFiring = new Map<string, number>();
   let started = false;
 
   async function check(name: string, execution?: Date): Promise<CheckResult> {
@@ -121,7 +123,9 @@ export function createTriggerGateway({
     if (workspace !== undefined && !names.includes(workspace)) {
       throw new FireRefusedError("unknown-workspace", `trigger binding '${name}' does not start runs in workspace '${workspace}' (workspaces: ${names.join(", ") || "none"})`);
     }
-    return evaluateAndRecord(name, bound, now(), workspace === undefined ? undefined : [workspace]);
+    const at = Math.max(now().getTime(), (lastFiring.get(name) ?? Number.NEGATIVE_INFINITY) + 1);
+    lastFiring.set(name, at);
+    return evaluateAndRecord(name, bound, new Date(at), workspace === undefined ? undefined : [workspace]);
   }
 
   /** Evaluates the binding for `execution` over `only` its given workspaces (default: all), and records how it went. */

@@ -63,9 +63,9 @@ describe("trigger gateway API", () => {
       ],
     });
     expect(one.status).toBe(201);
-    // Fired at the same instant, the firing is the same item in web: no second run there.
-    expect(await one.json()).toEqual({ items: [] });
-    expect(runs.started).toHaveLength(2);
+    // Fired at the same instant, it is still a new firing.
+    expect(await one.json()).toEqual({ items: [{ workspace: "web", runId: "run-3" }] });
+    expect(runs.started).toHaveLength(3);
   });
 
   it("refuses an unknown binding with 404, a suspended or scheduled one with 409 and a foreign workspace or a malformed body with 400", async () => {

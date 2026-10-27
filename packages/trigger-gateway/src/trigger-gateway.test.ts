@@ -471,6 +471,14 @@ describe("firing a manual trigger binding", () => {
     expect(runs.started.map((run) => (run.input.item as TriggerItem).key)).toEqual([NOW, "2026-10-18T10:02:31.000Z"]);
   });
 
+  it("starts new runs also for two firings at the same instant", async () => {
+    const { runs, gateway } = manualSetup([manual({ workspaces: ["app"] })]);
+
+    await Promise.all([gateway.fire("architecture-review"), gateway.fire("architecture-review")]);
+
+    expect(runs.started.map((run) => (run.input.item as TriggerItem).key).sort()).toEqual([NOW, "2026-10-18T10:02:30.001Z"]);
+  });
+
   it("records each started run as trigger.fired and the firing as the binding's last check", async () => {
     const { runs, store, gateway, tick } = manualSetup([manual({ workspaces: ["app"] })]);
 
