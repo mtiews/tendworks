@@ -101,13 +101,18 @@ export function OverviewPage({ phone }: { phone: boolean }) {
 }
 
 function nextCheck(triggers: readonly Trigger[] | undefined): string {
-  const next = triggers && sortedByNext(triggers).find((trigger) => !trigger.suspended);
-  return next ? ` The next trigger check is ${new Date(next.nextExecutionAt).toLocaleString()}.` : "";
+  const next = triggers && sortedByNext(triggers).find((trigger) => !trigger.suspended)?.nextExecutionAt;
+  return next ? ` The next trigger check is ${new Date(next).toLocaleString()}.` : "";
 }
 
-/** Bindings by their next check, suspended ones last. */
+/** Bindings by their next check, those fired by hand (without a next check) after them, suspended ones last. */
 const sortedByNext = (triggers: readonly Trigger[]) =>
-  [...triggers].sort((a, b) => Number(a.suspended ?? false) - Number(b.suspended ?? false) || a.nextExecutionAt.localeCompare(b.nextExecutionAt));
+  [...triggers].sort(
+    (a, b) =>
+      Number(a.suspended ?? false) - Number(b.suspended ?? false) ||
+      Number(a.nextExecutionAt === undefined) - Number(b.nextExecutionAt === undefined) ||
+      (a.nextExecutionAt ?? "").localeCompare(b.nextExecutionAt ?? ""),
+  );
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -332,8 +337,8 @@ function NextChecks({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] 
             <li key={trigger.name} className="row">
               <span className={`dot ${trigger.suspended ? "" : "dot-next"}`} aria-hidden="true" />
               <span className="check-name">{trigger.name}</span>
-              <span className="muted">{[trigger.workspaces.join(", "), formatSchedule(trigger.schedule)].filter(Boolean).join(" · ")}</span>
-              <span className="row-end">{trigger.suspended ? "suspended" : <In value={trigger.nextExecutionAt} now={readAt} />}</span>
+              <span className="muted">{[trigger.workspaces.join(", "), trigger.schedule ? formatSchedule(trigger.schedule) : "by hand"].filter(Boolean).join(" · ")}</span>
+              <span className="row-end">{trigger.suspended ? "suspended" : trigger.nextExecutionAt === undefined ? "" : <In value={trigger.nextExecutionAt} now={readAt} />}</span>
             </li>
           ))}
         </ul>

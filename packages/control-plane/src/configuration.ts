@@ -53,6 +53,9 @@ export interface Configuration {
 export const WORKSPACE_EVENTS: readonly Subscription.SubscribableEvent[] = ["run.started", "run.completed", "run.failed", "approval.requested"];
 export const PLATFORM_EVENTS: readonly Subscription.SubscribableEvent[] = [...WORKSPACE_EVENTS, "platform.degraded", "platform.recovered"];
 
+/** Keys of a run's input the trigger gateway sets itself; a binding's `spec.input` may not set them. */
+const RESERVED_INPUT = ["workspace", "item"] as const;
+
 /** A configuration with nothing configured, for tests; `overrides` sets what a test needs. */
 export function emptyConfiguration(overrides: Partial<Configuration> = {}): Configuration {
   return { workflowNames: [], workflow: () => undefined, agentProfiles: [], triggerBindings: [], workspaces: [], policies: [], notificationChannels: [], subscriptions: [], ...overrides };
@@ -217,6 +220,11 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
       if (!workspaces.has(workspace)) {
         issues.push(`${file}: trigger binding '${binding.metadata.name}' starts runs in workspace '${workspace}', but no workspace '${workspace}' is configured`);
       }
+    }
+    // A binding's fixed input never overrides what the trigger gateway passes to each run.
+    const reserved = RESERVED_INPUT.filter((key) => Object.hasOwn(binding.spec.input ?? {}, key));
+    if (reserved.length > 0) {
+      issues.push(`${file}: trigger binding '${binding.metadata.name}' sets ${reserved.map((key) => `'${key}'`).join(", ")} in spec.input, which the platform sets for each run itself; remove ${reserved.length > 1 ? "them" : "it"}`);
     }
   }
 

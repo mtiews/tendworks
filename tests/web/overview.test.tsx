@@ -192,10 +192,11 @@ const trigger = (name: string, nextExecutionAt: string, extra: Partial<Trigger> 
 });
 
 describe("overview: next trigger checks", () => {
-  it("lists the bindings by their next check, suspended ones last", async () => {
+  it("lists the bindings by their next check, those fired by hand after them, suspended ones last", async () => {
     openOverview({
       triggers: createInMemoryTriggers([
         trigger("nightly", "2026-10-19T02:00:00.000Z", { suspended: true }),
+        { name: "architecture-review", workflow: "review-workspace", kind: "manual", workspaces: ["app"] },
         trigger("later", "2026-10-18T10:05:30.000Z", { workspaces: [], schedule: { every: { minutes: 5, seconds: 30 } } }),
         trigger("soon", "2026-10-18T10:01:00.000Z", { workspaces: ["app", "web"] }),
       ]),
@@ -206,13 +207,14 @@ describe("overview: next trigger checks", () => {
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining("soonapp, web · every 5m"),
       expect.stringContaining("later"),
+      expect.stringContaining("architecture-reviewapp · by hand"),
       expect.stringContaining("nightlyapp · every 5msuspended"),
     ]);
     expect(items[0]!.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-18T10:01:00.000Z");
   });
 
   it("says when the trigger gateway cannot be reached", async () => {
-    openOverview({ triggers: { list: () => Promise.reject(new Error("connection refused")) } });
+    openOverview({ triggers: { ...createInMemoryTriggers(), list: () => Promise.reject(new Error("connection refused")) } });
 
     const section = await screen.findByRole("region", { name: "Next trigger checks" });
     expect((await within(section).findByRole("alert")).textContent).toBe("Cannot read the trigger bindings. Is the platform running?");

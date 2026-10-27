@@ -4,8 +4,8 @@ title: TriggerBinding
 description: >-
   Binds a trigger to a workflow and a list of workspaces (ADR 0023). When the trigger
   fires, the trigger gateway starts one run of `spec.workflow` per workspace and per item
-  its trigger source reports, with the input `{ workspace, item }`. An item starts at most
-  one run per binding and workspace.
+  its trigger source reports, with the input `{ ...spec.input, workspace, item }`. An item
+  starts at most one run per binding and workspace.
 type: object
 required: [apiVersion, kind, metadata, spec]
 additionalProperties: false
@@ -42,11 +42,20 @@ properties:
           Names of configured workspaces (kind Workspace). The binding starts one run per
           workspace and item, with the workspace's name as `workspace` in the input.
           Without workspaces it starts one run per item, without a workspace.
+      input:
+        type: object
+        title: TriggerBindingInput
+        additionalProperties: true
+        description: >-
+          Fixed input merged into every run the binding starts, so one workflow serves
+          several bindings with different settings (e.g. `focus: security`). The run's
+          input is `{ ...input, workspace, item }`; the keys `workspace` and `item` are the
+          platform's and are refused when the configuration loads.
       suspend:
         type: boolean
         description: >-
-          When true, the binding is never checked and starts nothing, e.g. because it
-          needs a secret that is not set yet. Defaults to false.
+          When true, the binding is never checked, cannot be fired and starts nothing,
+          e.g. because it needs a secret that is not set yet. Defaults to false.
       trigger:
         $ref: '#/$defs/trigger'
 $defs:
@@ -56,7 +65,8 @@ $defs:
       The trigger source that fires the binding, as exactly one kind with its settings.
       Each kind is a trigger source deployed with the platform. `schedule` fires at every
       execution of its schedule, and the tick is the item, keyed by the time of the
-      execution.
+      execution. `manual` never fires on its own: the operator fires it through the API
+      (ADR 0028).
     type: object
     minProperties: 1
     maxProperties: 1
@@ -66,6 +76,8 @@ $defs:
         $ref: '#/$defs/schedule'
       github-issues:
         $ref: '#/$defs/githubIssuesTrigger'
+      manual:
+        $ref: '#/$defs/manualTrigger'
   schedule:
     title: TriggerSchedule
     description: >-
@@ -143,6 +155,14 @@ $defs:
         $ref: '#/$defs/duration'
       token:
         $ref: '#/$defs/secretRef'
+  manualTrigger:
+    title: ManualTrigger
+    description: >-
+      Never checked on its own: each firing through `POST /triggers/{name}/fire` is one
+      new item, keyed by the time of the firing and titled `started by hand`, so firing
+      again starts new runs (ADR 0028). Has no settings.
+    type: object
+    additionalProperties: false
   item:
     title: TriggerItem
     description: >-

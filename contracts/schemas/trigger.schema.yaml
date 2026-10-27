@@ -9,7 +9,7 @@ $defs:
     title: Trigger
     type: object
     additionalProperties: false
-    required: [name, workflow, kind, workspaces, schedule, nextExecutionAt]
+    required: [name, workflow, kind, workspaces]
     properties:
       name:
         type: string
@@ -19,7 +19,7 @@ $defs:
         description: Workflow each firing starts.
       kind:
         type: string
-        description: Kind of the binding's trigger source, e.g. `schedule`.
+        description: Kind of the binding's trigger source, e.g. `schedule` or `manual`.
       workspaces:
         type: array
         items:
@@ -27,11 +27,15 @@ $defs:
         description: Workspaces the binding starts runs in; empty when it starts runs without one.
       schedule:
         $ref: './trigger-binding.schema.yaml#/$defs/schedule'
-        description: When the trigger gateway checks the source.
+        description: >-
+          When the trigger gateway checks the source. Absent for a binding that never
+          fires on its own (kind `manual`).
       nextExecutionAt:
         type: string
         format: date-time
-        description: When the trigger next checks its source.
+        description: >-
+          When the trigger next checks its source. Absent for a binding that never fires
+          on its own (kind `manual`).
       suspended:
         type: boolean
         description: Present and true when the binding is suspended and never checked on its schedule.
@@ -40,7 +44,8 @@ $defs:
   evaluation:
     title: TriggerEvaluation
     description: >-
-      How the binding's last check went. `failed` when its source could not be asked
+      How the binding's last check went; for a binding of kind `manual`, how its last
+      firing went. `failed` when its source could not be asked
       for a workspace (e.g. rate limit, API error, a secret that is not set) or an item's
       run could not be started; the message says why, naming secrets but never values.
       Absent until the binding was checked once.
@@ -60,6 +65,38 @@ $defs:
         description: Runs the check started.
       message:
         type: string
+  fireRequest:
+    title: FireTriggerRequest
+    description: Fires a binding that never fires on its own (kind `manual`).
+    type: object
+    additionalProperties: false
+    properties:
+      workspace:
+        type: string
+        description: >-
+          Starts a run only in this workspace, one of the binding's. Without it the firing
+          starts one run per workspace of the binding, or one run for a binding without
+          workspaces.
+  fireResult:
+    title: FireTriggerResult
+    description: The runs the firing started, in the order of the binding's workspaces.
+    type: object
+    additionalProperties: false
+    required: [items]
+    properties:
+      items:
+        type: array
+        items:
+          title: FiredRun
+          type: object
+          additionalProperties: false
+          required: [runId]
+          properties:
+            workspace:
+              type: string
+              description: Absent for a binding without workspaces.
+            runId:
+              type: string
   triggerList:
     title: TriggerList
     type: object

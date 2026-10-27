@@ -1,0 +1,18 @@
+{
+  "name": "@tendworks/trigger-source-manual",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Trigger source of kind manual (not a domain): never checked on its own; each firing through the API is one item. Imports only the trigger source port and platform libraries.",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@tendworks/shared": "workspace:*",
+    "@tendworks/trigger-gateway": "workspace:*"
+  }
+}

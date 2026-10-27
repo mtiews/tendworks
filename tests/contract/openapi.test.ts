@@ -20,7 +20,7 @@ import {
 import { createInMemoryRunStore, createInProcessRunEngine, createOrchestrationApi, createRunActivities, InMemoryHttpExecutor, type RunEngine } from "@tendworks/orchestration";
 import { createSecretResolver, readServerSentEvents } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
-import { createControlPlaneRunStarter, createInMemoryFiringStore, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
+import { createControlPlaneRunStarter, createInMemoryFiringStore, createInMemoryRunStarter, createTriggerGateway, createTriggerGatewayApi } from "@tendworks/trigger-gateway";
 import createClient from "openapi-fetch";
 import { afterAll, describe, expect, it } from "vitest";
 import { readContract } from "./support/contracts.js";
@@ -716,7 +716,7 @@ describe("control plane: triggers, through the trigger gateway", () => {
 
     const { data } = await client.GET("/triggers");
 
-    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "playground-nightly-check", "playground-ready-for-agent", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
+    expect(data?.items.map((trigger) => trigger.name)).toEqual(["fake-issue-to-pull-request", "issue-ready-for-agent", "manual-over-two-workspaces", "playground-architecture-review", "playground-nightly-check", "playground-ready-for-agent", "playground-security-review", "schedule-over-two-workspaces", "schedule-to-pull-request"]);
     expect(data?.items.find((trigger) => trigger.name === "playground-ready-for-agent")?.suspended).toBe(true);
   });
 
@@ -724,6 +724,41 @@ describe("control plane: triggers, through the trigger gateway", () => {
     const client = controlPlane({ triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: unreachable }) });
 
     expect((await client.GET("/triggers")).response.status).toBe(503);
+  });
+
+  it("fires a manual binding, and refuses what cannot be fired", async () => {
+    // Runs start in memory here; tests/contract/triggers.test.ts starts them through the public API.
+    const gateway = createTriggerGateway({
+      bindings: withFakeBindings(configuration.triggerBindings),
+      workspaces: configuration.workspaces,
+      sources: TRIGGER_SOURCES,
+      store: createInMemoryFiringStore(),
+      runs: createInMemoryRunStarter(),
+      now: () => new Date("2026-10-19T10:00:00.000Z"),
+      log: () => {},
+    });
+    const api = createTriggerGatewayApi(gateway);
+    const triggers = createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: contracts.triggerGateway.guard((request) => api.fetch(request)) });
+    const fire = (client: ReturnType<typeof controlPlane>, name: string, body?: { workspace: string }) =>
+      client.POST("/triggers/{name}/fire", { params: { path: { name } }, ...(body ? { body } : {}) }).then(({ response }) => response.status);
+    const operator = controlPlane({ triggers });
+
+    expect(await fire(operator, "manual-over-two-workspaces")).toBe(201);
+    expect(await fire(operator, "manual-over-two-workspaces", { workspace: "playground" })).toBe(400);
+    expect(await fire(operator, "no-such-binding")).toBe(404);
+    expect(await fire(operator, "schedule-over-two-workspaces")).toBe(409);
+    expect(await fire(controlPlane({ triggers }, { token: null }), "manual-over-two-workspaces")).toBe(401);
+    expect(await fire(controlPlane({ triggers }, { token: READ_TOKEN }), "manual-over-two-workspaces")).toBe(403);
+    expect(await fire(controlPlane({ triggers: createTriggerGatewayClient({ baseUrl: "http://trigger-gateway.test", fetch: unreachable }) }), "manual-over-two-workspaces")).toBe(503);
+  });
+
+  it("the trigger gateway refuses a malformed firing with 400", async () => {
+    const gateway = createTriggerGateway({ bindings: [], sources: TRIGGER_SOURCES, store: createInMemoryFiringStore(), runs: createInMemoryRunStarter() });
+    const fetch = contracts.triggerGateway.guard((request) => createTriggerGatewayApi(gateway).fetch(request));
+
+    const response = await fetch(new Request("http://trigger-gateway.test/triggers/any/fire", { method: "POST", headers: { "content-type": "application/json" }, body: "[]" }));
+
+    expect(response.status).toBe(400);
   });
 });
 

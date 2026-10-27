@@ -1,21 +1,26 @@
 import { formatSchedule } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
-import { useCallback } from "react";
-import { answer } from "./answers.js";
+import { useCallback, useState, type ReactNode } from "react";
+import { answer, reasonOf } from "./answers.js";
 import { useApi } from "./api.js";
+import { Confirmation } from "./confirm.js";
 import { Pending } from "./pending.js";
 import { Panel } from "./panel.js";
 import { Chip, Pill } from "./pill.js";
+import { useLocation } from "./router.js";
 import { Age, In } from "./time.js";
 import { checksAround, type Checks } from "./trigger-checks.js";
 import { usePolling } from "./use-polling.js";
 
 type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number];
+type Started = ControlPlane.components["schemas"]["fireResult"]["items"][number];
 
 /**
  * The trigger bindings (`GET /triggers`, ADR 0023): source, workflow, workspaces, schedule,
- * next and last check. A table on a desktop, with a timeline of the checks of the last and
- * next 12 hours; cards on a phone. Read-only: the API offers no suspend or resume.
+ * next and last check. A binding fired by hand (kind `manual`, ADR 0028) has no schedule
+ * and no next check; its last check is its last firing. A table on a desktop, with a timeline of the checks of the last and
+ * next 12 hours; cards on a phone. A manual binding can be started here (`tend trigger fire`);
+ * the API offers no suspend or resume.
  */
 export function TriggersPage({ phone }: { phone: boolean }) {
   const { client } = useApi();
@@ -36,28 +41,7 @@ export function TriggersPage({ phone }: { phone: boolean }) {
         <Panel title="Bindings" aside={counts}>
         <ul className="rows" aria-label="Trigger bindings">
           {triggers.data.items.map((trigger) => (
-            <li key={trigger.name} className="binding">
-              <div className="card-head">
-                <span className="card-kind">{trigger.name}</span>
-                {trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <span>next <In value={trigger.nextExecutionAt} now={readAt} /></span>}
-              </div>
-              <dl className="facts">
-                <dt>Source</dt>
-                <dd>
-                  <Chip>{trigger.kind}</Chip>
-                </dd>
-                <dt>Workflow</dt>
-                <dd>{trigger.workflow}</dd>
-                <dt>Workspaces</dt>
-                <dd>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</dd>
-                <dt>Schedule</dt>
-                <dd>{formatSchedule(trigger.schedule)}</dd>
-                <dt>Last check</dt>
-                <dd>
-                  <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
-                </dd>
-              </dl>
-            </li>
+            <BindingCard key={trigger.name} trigger={trigger} readAt={readAt} />
           ))}
         </ul>
         </Panel>
@@ -74,23 +58,14 @@ export function TriggersPage({ phone }: { phone: boolean }) {
                 <th>Schedule</th>
                 <th>Next check</th>
                 <th>Last check</th>
+                <th>
+                  <span className="visually-hidden">Start</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {triggers.data.items.map((trigger) => (
-                <tr key={trigger.name}>
-                  <td className="binding-name">{trigger.name}</td>
-                  <td>
-                    <Chip>{trigger.kind}</Chip>
-                  </td>
-                  <td>{trigger.workflow}</td>
-                  <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
-                  <td>{formatSchedule(trigger.schedule)}</td>
-                  <td>{trigger.suspended ? <Pill tone="neutral">suspended</Pill> : <In value={trigger.nextExecutionAt} now={readAt} />}</td>
-                  <td>
-                    <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
-                  </td>
-                </tr>
+                <BindingRow key={trigger.name} trigger={trigger} readAt={readAt} />
               ))}
             </tbody>
           </table>
@@ -101,6 +76,167 @@ export function TriggersPage({ phone }: { phone: boolean }) {
     </>
   );
 }
+
+/** A binding as a card on a phone, with its Start button and what starting it asks or says below its facts. */
+function BindingCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+  const start = useStart(trigger);
+  return (
+    <li className="binding">
+      <div className="card-head">
+        <span className="card-kind">{trigger.name}</span>
+        {trigger.suspended ? (
+          <Pill tone="neutral">suspended</Pill>
+        ) : trigger.nextExecutionAt === undefined ? (
+          <span className="muted">fired by hand</span>
+        ) : (
+          <span>
+            next <In value={trigger.nextExecutionAt} now={readAt} />
+          </span>
+        )}
+      </div>
+      <dl className="facts">
+        <dt>Source</dt>
+        <dd>
+          <Chip>{trigger.kind}</Chip>
+        </dd>
+        <dt>Workflow</dt>
+        <dd>{trigger.workflow}</dd>
+        <dt>Workspaces</dt>
+        <dd>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</dd>
+        <dt>Schedule</dt>
+        <dd>{scheduleOf(trigger)}</dd>
+        <dt>Last check</dt>
+        <dd>
+          <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
+        </dd>
+      </dl>
+      {start.button}
+      {start.below}
+    </li>
+  );
+}
+
+/** A binding as a table row; what starting it asks or says spans a row of its own below it. */
+function BindingRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+  const start = useStart(trigger);
+  return (
+    <>
+      <tr>
+        <td className="binding-name">{trigger.name}</td>
+        <td>
+          <Chip>{trigger.kind}</Chip>
+        </td>
+        <td>{trigger.workflow}</td>
+        <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
+        <td>{scheduleOf(trigger)}</td>
+        <td>
+          {trigger.suspended ? (
+            <Pill tone="neutral">suspended</Pill>
+          ) : trigger.nextExecutionAt === undefined ? (
+            <span className="muted">-</span>
+          ) : (
+            <In value={trigger.nextExecutionAt} now={readAt} />
+          )}
+        </td>
+        <td>
+          <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
+        </td>
+        <td>{start.button}</td>
+      </tr>
+      {start.below && (
+        <tr>
+          {/* As wide as the table's eight columns. */}
+          <td colSpan={8}>{start.below}</td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/**
+ * Starting a manual binding (`POST /triggers/{name}/fire`, ADR 0028): its Start button, and
+ * below it the choice of workspaces or why the start failed. A binding over one workspace or
+ * none starts on one tap; one over several first asks which of them, all preselected. All of
+ * them is one firing without a workspace, a subset one firing per chosen workspace, one after
+ * another, stopping at the first that fails. One started run opens it; several open Runs.
+ * Other bindings fire on their own and get no button, nor does any binding for read-only access.
+ */
+function useStart(trigger: Trigger): { button?: ReactNode; below?: ReactNode } {
+  const { client, canChange } = useApi();
+  const { navigate } = useLocation();
+  const [chosen, setChosen] = useState<ReadonlySet<string>>();
+  const [busy, setBusy] = useState(false);
+  const [refused, setRefused] = useState<string>();
+  if (trigger.kind !== "manual" || !canChange) return {};
+  const { name, workspaces } = trigger;
+
+  const fire = async (only: readonly (string | undefined)[]) => {
+    setBusy(true);
+    setRefused(undefined);
+    const started: Started[] = [];
+    try {
+      for (const workspace of only) {
+        const body = workspace === undefined ? {} : { body: { workspace } };
+        started.push(...(await answer(client.POST("/triggers/{name}/fire", { params: { path: { name } }, ...body }))).items);
+      }
+    } catch (failure: unknown) {
+      const before = started.map((run) => (run.workspace === undefined ? run.runId : `${run.runId} in ${run.workspace}`)).join(", ");
+      setBusy(false);
+      setChosen(undefined);
+      setRefused(before ? `${reasonOf(failure)}. Started before it: ${before}.` : reasonOf(failure));
+      return;
+    }
+    const [first] = started;
+    navigate(started.length === 1 && first ? `/runs/${encodeURIComponent(first.runId)}` : "/runs");
+  };
+
+  const start = () => {
+    if (workspaces.length > 1) {
+      setRefused(undefined);
+      setChosen(new Set(workspaces));
+    } else void fire([undefined]);
+  };
+
+  const confirm = () => {
+    const subset = workspaces.filter((workspace) => chosen?.has(workspace));
+    void fire(subset.length === workspaces.length ? [undefined] : subset);
+  };
+
+  const toggle = (workspace: string, on: boolean) =>
+    setChosen((current) => {
+      const next = new Set(current);
+      if (on) next.add(workspace);
+      else next.delete(workspace);
+      return next;
+    });
+
+  return {
+    button: (
+      <button type="button" aria-label={`Start ${name}`} aria-expanded={workspaces.length > 1 ? chosen !== undefined : undefined} disabled={trigger.suspended === true || busy} onClick={start}>
+        Start
+      </button>
+    ),
+    below:
+      chosen !== undefined ? (
+        <Confirmation title={`Start ${name}?`} confirmLabel="Start runs" busy={busy} canConfirm={chosen.size > 0} onConfirm={confirm} onCancel={() => setChosen(undefined)}>
+          <fieldset className="binding-workspaces">
+            <legend>Starts one run of {trigger.workflow} in each chosen workspace.</legend>
+            {workspaces.map((workspace) => (
+              <label key={workspace} className="checkbox">
+                <input type="checkbox" checked={chosen.has(workspace)} disabled={busy} onChange={(event) => toggle(workspace, event.target.checked)} />
+                {workspace}
+              </label>
+            ))}
+          </fieldset>
+        </Confirmation>
+      ) : refused ? (
+        <p className="message message-error">{refused}</p>
+      ) : undefined,
+  };
+}
+
+/** The schedule, or `by hand` for a binding that never fires on its own. */
+const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : "by hand");
 
 /** `failed <at>: <why>` or `succeeded <at>, <n> runs started`, as `tend trigger list` says it. */
 function Evaluation({ evaluation, now }: { evaluation: Trigger["lastEvaluation"]; now: number }) {
@@ -151,7 +287,13 @@ function Timeline({ triggers, now }: { triggers: readonly Trigger[]; now: number
 }
 
 const describe = (trigger: Trigger, { past, future, dense }: Checks) =>
-  trigger.suspended ? "suspended, no checks" : dense ? `checks continuously (${formatSchedule(trigger.schedule)})` : `${count(past.length, "check")} in the last 12 hours, ${count(future.length, "check")} in the next 12 hours`;
+  trigger.suspended
+    ? "suspended, no checks"
+    : !trigger.schedule
+      ? "fired by hand, no scheduled checks"
+      : dense
+        ? `checks continuously (${formatSchedule(trigger.schedule)})`
+        : `${count(past.length, "check")} in the last 12 hours, ${count(future.length, "check")} in the next 12 hours`;
 
 function Track({ checks }: { checks: Checks }) {
   // Drawn as SVG so the positions are attributes: the CSP allows no inline styles (ADR 0018).

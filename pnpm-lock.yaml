@@ -251,6 +251,9 @@ importers:
       '@tendworks/trigger-source-github-issues':
         specifier: workspace:*
         version: link:../../packages/trigger-source-github-issues
+      '@tendworks/trigger-source-manual':
+        specifier: workspace:*
+        version: link:../../packages/trigger-source-manual
       '@tendworks/trigger-source-schedule':
         specifier: workspace:*
         version: link:../../packages/trigger-source-schedule
@@ -568,6 +571,15 @@ importers:
         specifier: workspace:*
         version: link:../trigger-gateway
 
+  packages/trigger-source-manual:
+    dependencies:
+      '@tendworks/shared':
+        specifier: workspace:*
+        version: link:../shared
+      '@tendworks/trigger-gateway':
+        specifier: workspace:*
+        version: link:../trigger-gateway
+
   packages/trigger-source-schedule:
     dependencies:
       '@tendworks/shared':
@@ -609,6 +621,9 @@ importers:
       '@tendworks/trigger-source-github-issues':
         specifier: workspace:*
         version: link:../../packages/trigger-source-github-issues
+      '@tendworks/trigger-source-manual':
+        specifier: workspace:*
+        version: link:../../packages/trigger-source-manual
       '@tendworks/trigger-source-schedule':
         specifier: workspace:*
         version: link:../../packages/trigger-source-schedule
@@ -654,6 +669,9 @@ importers:
       '@tendworks/trigger-source-github-issues':
         specifier: workspace:*
         version: link:../../packages/trigger-source-github-issues
+      '@tendworks/trigger-source-manual':
+        specifier: workspace:*
+        version: link:../../packages/trigger-source-manual
       '@tendworks/trigger-source-schedule':
         specifier: workspace:*
         version: link:../../packages/trigger-source-schedule

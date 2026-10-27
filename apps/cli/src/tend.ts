@@ -21,6 +21,7 @@ type RunList = ControlPlane.components["schemas"]["RunList"];
 type Run = ControlPlane.components["schemas"]["run"];
 type WorkflowError = ControlPlane.components["schemas"]["workflowError"];
 type TriggerList = ControlPlane.components["schemas"]["triggerList"];
+type FireResult = ControlPlane.components["schemas"]["fireResult"];
 type WorkspaceList = ControlPlane.components["schemas"]["WorkspaceList"];
 type SubscriptionList = ControlPlane.components["schemas"]["SubscriptionList"];
 type NotificationList = ControlPlane.components["schemas"]["NotificationList"];
@@ -199,9 +200,9 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       io.stdout(render(data, options.output, formatAgentList));
     });
 
-  program
-    .command("trigger")
-    .description("inspect triggers")
+  const trigger = program.command("trigger").description("inspect trigger bindings and fire manual ones");
+
+  trigger
     .command("list")
     .description("list trigger bindings with their next scheduled execution")
     .addOption(outputOption())
@@ -212,6 +213,41 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
       });
       if (!data) throw new AnswerError(response, error);
       io.stdout(render(data, options.output, formatTriggerList));
+    });
+
+  trigger
+    .command("fire")
+    .description("fire a manual trigger binding: one run per workspace of the binding, or only in --workspace")
+    .argument("<binding>", "name of the trigger binding")
+    .option("--workspace <name>", "start the run only in this workspace of the binding")
+    .option("-f, --follow", "then stream the started run's agent steps as they come, like run logs --follow; needs exactly one run")
+    .addOption(outputOption())
+    .action(async (binding: string, options: { workspace?: string; follow?: boolean; output: OutputFormat }, command: Command) => {
+      const { baseUrl, client } = controlPlane(command);
+      const unreachable = (cause: unknown): never => {
+        throw new UnreachableError(baseUrl, cause);
+      };
+      if (options.follow && options.workspace === undefined) {
+        // Refused before firing: once runs are started, they cost.
+        const { data, error, response } = await client.GET("/triggers").catch(unreachable);
+        if (!data) throw new AnswerError(response, error);
+        const found = data.items.find((candidate) => candidate.name === binding);
+        // A suspended binding goes on to be refused as such.
+        const workspaces = found?.suspended ? [] : (found?.workspaces ?? []);
+        if (workspaces.length > 1) {
+          throw new Error(`--follow follows one run, but trigger binding ${binding} would start ${workspaces.length} (${workspaces.join(", ")}); name one with --workspace`);
+        }
+      }
+      const { data, error, response } = await client
+        .POST("/triggers/{name}/fire", { params: { path: { name: binding } }, body: options.workspace === undefined ? {} : { workspace: options.workspace } })
+        .catch(unreachable);
+      if (response.status === 404) throw new Error(`trigger binding ${binding} not found`);
+      if (response.status === 400 || response.status === 409) throw new Error(`trigger binding ${binding} cannot be fired: ${error?.detail ?? error?.title ?? "refused"}`);
+      if (response.status === 503) throw new Error(`the control plane cannot reach the trigger gateway (${error?.detail ?? error?.title ?? "HTTP 503"})`);
+      if (!data) throw new AnswerError(response, error);
+      io.stdout(render(data, options.output, (result) => formatFireResult(binding, result)));
+      if (data.items.length === 0) throw new Error(`trigger binding ${binding} started no run; tend trigger list shows why in its last check`);
+      if (options.follow) await followRun({ runId: data.items[0]!.runId, client, baseUrl, output: options.output, io });
     });
 
   program
@@ -507,6 +543,10 @@ function formatChat(chat: Chat): string {
   return `${table(fields.map(([label, value]) => [label!.padEnd(width - 2), value!]))}${message}`;
 }
 
+function formatFireResult(binding: string, result: FireResult): string {
+  return result.items.map(({ workspace, runId }) => `run ${runId} started by trigger ${binding}${workspace === undefined ? "" : ` in workspace ${workspace}`}\n`).join("");
+}
+
 function formatTriggerList(list: TriggerList): string {
   const rows = [
     ["NAME", "WORKFLOW", "TRIGGER", "WORKSPACES", "SCHEDULE", "NEXT EXECUTION", "LAST CHECK"],
@@ -515,8 +555,9 @@ function formatTriggerList(list: TriggerList): string {
       trigger.workflow,
       trigger.kind,
       trigger.workspaces.join(",") || "-",
-      formatSchedule(trigger.schedule),
-      trigger.suspended ? "suspended" : trigger.nextExecutionAt,
+      // A manual binding has neither: it is only fired.
+      trigger.schedule ? formatSchedule(trigger.schedule) : "-",
+      trigger.suspended ? "suspended" : (trigger.nextExecutionAt ?? "-"),
       formatEvaluation(trigger.lastEvaluation),
     ]),
   ];

@@ -898,6 +898,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Problem"
+  /triggers/{name}/fire:
+    post:
+      operationId: fireTrigger
+      security:
+        - apiToken: []
+      summary: Fire a trigger binding by hand
+      description: >-
+        Fires a binding of kind `manual`, which never fires on its own (ADR 0028). Each
+        call is a new item: it starts one run per workspace of the binding, or only in
+        `workspace`, with the input `{ ...spec.input, workspace, item }` and the binding as the run's
+        origin, records `trigger.fired` per started run and the firing as the binding's
+        last check. Each call starts more runs, also while earlier ones still work.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "../schemas/trigger.schema.yaml#/$defs/fireRequest"
+      responses:
+        "201":
+          description: >-
+            The runs the firing started. A workspace whose run could not be started is
+            missing here and named in the binding's last check.
+          content:
+            application/json:
+              schema:
+                $ref: "../schemas/trigger.schema.yaml#/$defs/fireResult"
+        "400":
+          description: The request is malformed, or `workspace` is not one of the binding's.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          description: The request carries no valid API token.
+          headers:
+            WWW-Authenticate:
+              description: "`Bearer`"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "403":
+          description: The request carries the read-only token, which cannot change state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "404":
+          description: No trigger binding with this name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: The binding is suspended, or it fires on its own (e.g. `schedule`, `github-issues`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "503":
+          description: The trigger gateway, which owns the trigger bindings, cannot be reached.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /notifications:
     get:
       operationId: listNotifications

@@ -102,7 +102,7 @@ From the start, the model is built as "steps that consume and produce artifacts,
 | Object | Owning domain | Content |
 | --- | --- | --- |
 | `WorkflowDefinition` | Orchestration | Serverless Workflow YAML; steps call agents via A2A, wait for events or approvals |
-| `TriggerBinding` | Trigger | workflow, workspaces and one trigger kind (`schedule`, `github-issues`); one run per workspace and item, input `{ workspace, item }` (ADR 0023) |
+| `TriggerBinding` | Trigger | workflow, workspaces and one trigger kind (`schedule`, `github-issues`, `manual`); one run per workspace and item, input `{ ...spec.input, workspace, item }` (ADR 0023, 0028); a `manual` binding is fired through the API (ADR 0028) |
 | `AgentProfile` | Agent Runtime | role, harness, model, skills, MCP servers, sandbox template, budget; published as an A2A Agent Card |
 | `SandboxTemplate` | Sandbox | OCI image, isolation class (container, gvisor, microvm), CPU/RAM, egress allowlist |
 | `Policy` | Human Interaction | when a gate applies: risk class, budget, paths, target environment |
@@ -488,7 +488,7 @@ The former roadmap steps 2–6 move back by one.
 The platform serves many repositories and use cases with three generic building blocks:
 
 - **Workspaces** are declared once, by name: `git` on any host with the workspace's own credential, or a `directory` under roots the operator allows (ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). A workspace may enable a workspace assistant, read-only by default; the platform assistant answers questions about the platform.
-- **Trigger bindings** start a workflow per workspace when their trigger fires (`schedule`, `github-issues`), with trigger sources as pluggable implementations behind a port (ADR 0023 (trigger-bindings-start-a-workflow-per-workspace-from-pluggable-sources)).
+- **Trigger bindings** start a workflow per workspace when their trigger fires (`schedule`, `github-issues`, or `manual`, fired by hand through the API), with trigger sources as pluggable implementations behind a port (ADR 0023 (trigger-bindings-start-a-workflow-per-workspace-from-pluggable-sources), ADR 0028 (manual-trigger-bindings-start-a-workflow-by-hand)).
 - **Notifications** reach the operator through notification channels, Pushover first, carrying the run's artifacts (ADR 0025 (notification-channels-deliver-selected-events-through-adapters)).
 
 The platform has no pull request integration. Agents open pull requests themselves and report them as artifacts; a generic human step waits for decisions where a workflow continues after a human action (ADR 0024 (the-platform-has-no-pull-request-integration)).

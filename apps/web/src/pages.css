@@ -259,6 +259,22 @@ a.chip:hover {
   margin-top: var(--space-2);
 }
 
+/* Starting a manual binding: the workspaces to start it in, each a touch target. */
+.binding-workspaces {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.binding-workspaces legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+}
+
+.binding-workspaces .checkbox {
+  min-height: var(--touch-target);
+}
+
 .timeline-body {
   padding: var(--space-3) var(--space-4);
 }

@@ -8,7 +8,7 @@ import type { Configuration } from "./configuration.js";
 import type { NotificationsPort } from "./notifications.js";
 import { RunRejectedError, type RunsPort } from "./runs.js";
 import { checkPlatform, type HealthProbe, type RuntimeBundle } from "./status.js";
-import { createInMemoryTriggers, type TriggersPort } from "./triggers.js";
+import { createInMemoryTriggers, TriggerFireRefusedError, type TriggersPort } from "./triggers.js";
 import { serveWebUi, WEB_UI_HEADERS, WEB_UI_PATH, type WebUiOptions } from "./web-ui.js";
 
 type StatusResponse = ControlPlane.paths["/status"]["get"]["responses"];
@@ -27,7 +27,7 @@ export interface ControlPlaneApiOptions {
   runs: RunsPort;
   /** The agent runtime, which owns transcripts of agent sessions; their endpoints answer 503 without it. */
   agentRuntime?: AgentRuntimePort;
-  /** The trigger gateway, which owns the schedule; without it no triggers are listed. */
+  /** The trigger gateway, which owns the schedule; without it no triggers are listed or fired. */
   triggers?: TriggersPort;
   /** Human interaction, which owns notifications; `GET /notifications` answers 503 without it. */
   notifications?: NotificationsPort;
@@ -400,6 +400,28 @@ export function createControlPlaneApi({
       return problem(503, "Trigger gateway unavailable", error instanceof Error ? error.message : String(error));
     }
     return c.json({ items } satisfies Schemas["triggerList"], 200);
+  });
+
+  app.post("/triggers/:name/fire", authenticated, async (c) => {
+    // The body is optional; without one the firing covers all of the binding's workspaces.
+    const text = await c.req.text();
+    let body: unknown = {};
+    try {
+      if (text.trim() !== "") body = JSON.parse(text);
+    } catch {
+      return problem(400, "Invalid request", "the body must be a JSON object");
+    }
+    if (body === null || typeof body !== "object" || Array.isArray(body)) return problem(400, "Invalid request", "the body must be a JSON object");
+    const { workspace } = body as { workspace?: unknown };
+    if (workspace !== undefined && typeof workspace !== "string") return problem(400, "Invalid request", "`workspace` must be the name of one of the binding's workspaces");
+    let result;
+    try {
+      result = await triggers.fire(c.req.param("name"), workspace === undefined ? {} : { workspace });
+    } catch (error) {
+      if (error instanceof TriggerFireRefusedError) return problem(error.status, error.title, error.detail);
+      return problem(503, "Trigger gateway unavailable", error instanceof Error ? error.message : String(error));
+    }
+    return c.json(result satisfies Schemas["fireResult"], 201);
   });
 
   app.get("/notifications", async (c) => {

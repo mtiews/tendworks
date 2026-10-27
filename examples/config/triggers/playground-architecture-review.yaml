@@ -1,0 +1,18 @@
+# A review started by hand: never fires on its own; each firing starts one review-workspace
+# run per listed workspace with the fixed input `focus: architecture` (spec.input), next to the
+# workspace and the firing the platform passes. Fire it with
+# `tend trigger fire playground-architecture-review` (or `POST /triggers/playground-architecture-review/fire`).
+# Every firing is a paid agent session; it needs the agent token of the playground workspace
+# (TENDWORKS_AGENT_PLAYGROUND_TOKEN, workspaces/playground.yaml) and the agent's harness
+# credential. The review is read-only: the workflow asks for the workspace with write: false.
+apiVersion: tendworks.dev/v1
+kind: TriggerBinding
+metadata:
+  name: playground-architecture-review
+spec:
+  workflow: review-workspace
+  workspaces: [playground]
+  input:
+    focus: architecture
+  trigger:
+    manual: {}

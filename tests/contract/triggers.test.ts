@@ -51,8 +51,10 @@ function platform() {
     apiToken: API_TOKEN,
     readToken: READ_TOKEN,
   });
-  // Reads like the platform MCP server would: with the read-only token.
-  return { gateway, client: createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${READ_TOKEN}` }, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) }) };
+  const as = (token: string) =>
+    createClient<ControlPlane.paths>({ baseUrl: "http://tend.test", headers: { authorization: `Bearer ${token}` }, fetch: contracts["control-plane"].guard((request) => controlPlane.fetch(request)) });
+  // Reads like the platform MCP server would: with the read-only token. Fires like an operator: with the API token.
+  return { gateway, client: as(READ_TOKEN), operator: as(API_TOKEN) };
 }
 
 describe("triggers through the control plane and the trigger gateway", () => {
@@ -107,6 +109,63 @@ describe("triggers through the control plane and the trigger gateway", () => {
       ["scheduled-noop", { workspace: "fake-playground", item: tick }, { kind: "trigger", binding: "schedule-over-two-workspaces", workspace: "fake-playground", item: { key: tick.key, title: tick.title } }],
       ["scheduled-noop", { workspace: "scripted-playground", item: tick }, { kind: "trigger", binding: "schedule-over-two-workspaces", workspace: "scripted-playground", item: { key: tick.key, title: tick.title } }],
     ]);
+  });
+});
+
+describe("firing a manual trigger binding through the control plane and the trigger gateway", () => {
+  const MANUAL = "manual-over-two-workspaces"; // tests/fixtures/config/triggers
+
+  it("lists the manual binding without schedule and next execution", async () => {
+    const { client } = platform();
+
+    const { data } = await client.GET("/triggers");
+
+    expect(data?.items.find((trigger) => trigger.name === MANUAL)).toEqual({
+      name: MANUAL,
+      workflow: "scheduled-noop",
+      kind: "manual",
+      workspaces: ["fake-playground", "scripted-playground"],
+    });
+  });
+
+  it("starts one run per workspace with the trigger origin, and records the firing as the last check", async () => {
+    const { client, operator } = platform();
+
+    const { data, response } = await operator.POST("/triggers/{name}/fire", { params: { path: { name: MANUAL } } });
+
+    expect(response.status).toBe(201);
+    expect(data?.items.map((item) => item.workspace)).toEqual(["fake-playground", "scripted-playground"]);
+    const runs = (await client.GET("/runs")).data?.items ?? [];
+    const item = { key: "2026-10-18T10:00:05.000Z", title: "started by hand" };
+    expect(data?.items.map(({ runId }) => runs.find((run) => run.id === runId)).map((run) => [run?.workflow, run?.input, run?.startedBy])).toEqual([
+      ["scheduled-noop", { focus: "architecture", workspace: "fake-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "fake-playground", item }],
+      ["scheduled-noop", { focus: "architecture", workspace: "scripted-playground", item }, { kind: "trigger", binding: MANUAL, workspace: "scripted-playground", item }],
+    ]);
+    const listed = (await client.GET("/triggers")).data?.items.find((trigger) => trigger.name === MANUAL);
+    expect(listed?.lastEvaluation).toEqual({ at: "2026-10-18T10:00:05.000Z", status: "succeeded", startedRuns: 2 });
+  });
+
+  it("narrows the firing to one workspace of the binding", async () => {
+    const { operator } = platform();
+
+    const { data, response } = await operator.POST("/triggers/{name}/fire", { params: { path: { name: MANUAL } }, body: { workspace: "scripted-playground" } });
+
+    expect(response.status).toBe(201);
+    expect(data?.items.map((item) => item.workspace)).toEqual(["scripted-playground"]);
+  });
+
+  it("refuses a foreign workspace, a binding that fires on its own, an unknown binding and the read-only token", async () => {
+    const { client, operator } = platform();
+
+    const statuses = await Promise.all([
+      operator.POST("/triggers/{name}/fire", { params: { path: { name: MANUAL } }, body: { workspace: "playground" } }),
+      operator.POST("/triggers/{name}/fire", { params: { path: { name: "schedule-over-two-workspaces" } } }),
+      operator.POST("/triggers/{name}/fire", { params: { path: { name: "no-such-binding" } } }),
+      client.POST("/triggers/{name}/fire", { params: { path: { name: MANUAL } } }),
+    ]).then((answers) => answers.map(({ response }) => response.status));
+
+    expect(statuses).toEqual([400, 409, 404, 403]);
+    expect((await client.GET("/runs")).data?.items).toEqual([]);
   });
 });
 

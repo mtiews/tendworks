@@ -23,4 +23,4 @@ export type {
   TriggerSettings,
   TriggerSources,
 } from "./sources/trigger-source.js";
-export { createTriggerGateway, type CheckResult, type Trigger, type TriggerGateway, type TriggerGatewayOptions } from "./trigger-gateway.js";
+export { createTriggerGateway, FireRefusedError, type CheckResult, type FireRefusal, type Trigger, type TriggerGateway, type TriggerGatewayOptions } from "./trigger-gateway.js";
