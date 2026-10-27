@@ -2,7 +2,7 @@ import { API_TOKEN, expect, expectNoHorizontalScroll, signIn, test } from "./sup
 
 const MANUAL = "manual-over-two-workspaces"; // tests/fixtures/config/triggers, fired by hand over two workspaces
 
-// Narrowed to the fake workspace, so the run needs no harness credential.
+// Narrowed to one of the binding's two workspaces, so exactly one run starts and opens (its workflow has no agent).
 test("a manual binding is started from the Triggers page in one of its workspaces, and its run opens", async ({ page, request }) => {
   await page.goto("/ui/triggers");
   await signIn(page, API_TOKEN);
@@ -19,6 +19,7 @@ test("a manual binding is started from the Triggers page in one of its workspace
 
   await expect(page).toHaveURL(/\/ui\/runs\/[^/]+$/);
   const runId = decodeURIComponent(new URL(page.url()).pathname.split("/").pop()!);
+  await expect(page.getByText(`trigger ${MANUAL} in fake-playground`).first()).toBeVisible();
   const run = await request.get(`/runs/${encodeURIComponent(runId)}`, { headers: { authorization: `Bearer ${API_TOKEN}` } });
   expect(await run.json()).toMatchObject({ startedBy: { kind: "trigger", binding: MANUAL, workspace: "fake-playground", item: { title: "started by hand" } } });
 });

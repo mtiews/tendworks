@@ -1,7 +1,7 @@
 import { formatSchedule } from "@tendworks/platform";
 import type { ControlPlane } from "@tendworks/shared";
 import { useCallback, useState, type ReactNode } from "react";
-import { AnswerError, answer } from "./answers.js";
+import { answer, reasonOf } from "./answers.js";
 import { useApi } from "./api.js";
 import { Confirmation } from "./confirm.js";
 import { Pending } from "./pending.js";
@@ -144,7 +144,8 @@ function BindingRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
         <td>{start.button}</td>
       </tr>
       {start.below && (
-        <tr className="binding-start">
+        <tr>
+          {/* As wide as the table's eight columns. */}
           <td colSpan={8}>{start.below}</td>
         </tr>
       )}
@@ -152,23 +153,21 @@ function BindingRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
   );
 }
 
-const messageOf = (error: unknown) => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
-
 /**
  * Starting a manual binding (`POST /triggers/{name}/fire`, ADR 0028): its Start button, and
  * below it the choice of workspaces or why the start failed. A binding over one workspace or
  * none starts on one tap; one over several first asks which of them, all preselected. All of
  * them is one firing without a workspace, a subset one firing per chosen workspace, one after
  * another, stopping at the first that fails. One started run opens it; several open Runs.
- * Other bindings fire on their own and get no button.
+ * Other bindings fire on their own and get no button, nor does any binding for read-only access.
  */
 function useStart(trigger: Trigger): { button?: ReactNode; below?: ReactNode } {
-  const { client } = useApi();
+  const { client, canChange } = useApi();
   const { navigate } = useLocation();
   const [chosen, setChosen] = useState<ReadonlySet<string>>();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string>();
-  if (trigger.kind !== "manual") return {};
+  if (trigger.kind !== "manual" || !canChange) return {};
   const { name, workspaces } = trigger;
 
   const fire = async (only: readonly (string | undefined)[]) => {
@@ -184,7 +183,7 @@ function useStart(trigger: Trigger): { button?: ReactNode; below?: ReactNode } {
       const before = started.map((run) => (run.workspace === undefined ? run.runId : `${run.runId} in ${run.workspace}`)).join(", ");
       setBusy(false);
       setChosen(undefined);
-      setRefused(before ? `${messageOf(failure)}. Started before it: ${before}.` : messageOf(failure));
+      setRefused(before ? `${reasonOf(failure)}. Started before it: ${before}.` : reasonOf(failure));
       return;
     }
     const [first] = started;

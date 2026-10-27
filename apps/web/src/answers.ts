@@ -23,6 +23,9 @@ export class AnswerError extends Error {
   }
 }
 
+/** What went wrong, for the operator: the platform's reason when it refused, else the error's message. */
+export const reasonOf = (error: unknown): string => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
+
 interface Result<T> {
   data?: T;
   error?: unknown;

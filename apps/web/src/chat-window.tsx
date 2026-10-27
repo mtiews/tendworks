@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { useApi } from "./api.js";
-import { AnswerError, answer } from "./answers.js";
+import { AnswerError, answer, reasonOf } from "./answers.js";
 import { chatTitle, isOpen, type Chat } from "./chat-summary.js";
 import { Confirmation } from "./confirm.js";
 import { useEnterToSend } from "./enter-to-send.js";
@@ -11,8 +11,6 @@ import type { TranscriptEntry } from "./transcript.js";
 import { useFollowEnd } from "./use-follow-end.js";
 import { usePolling } from "./use-polling.js";
 import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
-
-const messageOf = (error: unknown) => (error instanceof AnswerError ? error.reason : error instanceof Error ? error.message : String(error));
 
 /**
  * Where a chat's turn stands by its transcript, which arrives live while the polled chat
@@ -51,7 +49,7 @@ export function ChatWindow({ chatId, phone }: { chatId: string; phone: boolean }
           <p className="muted">There is no chat {chatId}.</p>
         ) : error !== undefined ? (
           <p className="message message-error" role="alert">
-            {messageOf(error)}
+            {reasonOf(error)}
           </p>
         ) : (
           <p className="muted">Loading…</p>
@@ -76,7 +74,7 @@ export function ChatWindow({ chatId, phone }: { chatId: string; phone: boolean }
         <h1>{chatTitle(chat)}</h1>
         <span className={`status status-${chat.status}`}>{chat.status}</span>
       </header>
-      {error !== undefined && <p className="message message-error">{messageOf(error)}</p>}
+      {error !== undefined && <p className="message message-error">{reasonOf(error)}</p>}
       <dl className="fields">
         {fields.map(([label, value]) => (
           <div key={label}>
@@ -152,7 +150,7 @@ function ChatActions({ chatId, turn, following, changed, sent }: { chatId: strin
       setText("");
     } catch (error: unknown) {
       setSentAfter(undefined);
-      setFailure(messageOf(error));
+      setFailure(reasonOf(error));
     } finally {
       setSending(false);
       changed();
@@ -168,7 +166,7 @@ function ChatActions({ chatId, turn, following, changed, sent }: { chatId: strin
     try {
       await answer(client.POST("/chats/{chatId}/cancel", { params: { path: { chatId } } }));
     } catch (error: unknown) {
-      setFailure(messageOf(error));
+      setFailure(reasonOf(error));
     } finally {
       setCancelling(false);
       changed();
@@ -181,7 +179,7 @@ function ChatActions({ chatId, turn, following, changed, sent }: { chatId: strin
     try {
       await answer(client.POST("/chats/{chatId}/end", { params: { path: { chatId } } }));
     } catch (error: unknown) {
-      setFailure(messageOf(error));
+      setFailure(reasonOf(error));
     } finally {
       setEnding(false);
       setConfirming(false);

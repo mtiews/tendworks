@@ -1,7 +1,7 @@
 import { createInMemoryTriggers, TriggerFireRefusedError, type FireTriggerRequest, type Trigger } from "@tendworks/control-plane";
 import { cleanup, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { phoneWidth, renderApp, signedIn } from "./support/platform.js";
+import { phoneWidth, READ_TOKEN, renderApp, signedIn } from "./support/platform.js";
 import { rows } from "./support/table.js";
 
 beforeEach(() => {
@@ -148,6 +148,14 @@ describe("triggers page", () => {
         ["Start security-review", false],
         ["Start release", true],
       ]);
+    });
+
+    it("offers no Start for read-only access, which the API would refuse", async () => {
+      signedIn(READ_TOKEN);
+      renderApp({ path: "/ui/triggers", triggers: createInMemoryTriggers(triggers) });
+
+      const table = await screen.findByRole("table", { name: "Trigger bindings" });
+      expect(within(table).queryAllByRole("button")).toEqual([]);
     });
 
     it("starts a binding with one workspace on one tap and opens its run", async () => {
