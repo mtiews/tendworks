@@ -489,8 +489,8 @@ do:
     });
 
     expect(issuesOf(dir)).toEqual([
-      "triggers/both.yaml: trigger binding 'both' sets 'workspace', 'item' in spec.input, but the platform passes them to each run; remove them",
-      "triggers/elsewhere.yaml: trigger binding 'elsewhere' sets 'workspace' in spec.input, but the platform passes them to each run; remove them",
+      "triggers/both.yaml: trigger binding 'both' sets 'workspace', 'item' in spec.input, which the platform sets for each run itself; remove them",
+      "triggers/elsewhere.yaml: trigger binding 'elsewhere' sets 'workspace' in spec.input, which the platform sets for each run itself; remove it",
     ]);
   });
 

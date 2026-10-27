@@ -224,7 +224,7 @@ export function loadConfiguration(dir: string, { workspaceRoots = [] }: LoadConf
     // A binding's fixed input never overrides what the trigger gateway passes to each run.
     const reserved = RESERVED_INPUT.filter((key) => Object.hasOwn(binding.spec.input ?? {}, key));
     if (reserved.length > 0) {
-      issues.push(`${file}: trigger binding '${binding.metadata.name}' sets ${reserved.map((key) => `'${key}'`).join(", ")} in spec.input, but the platform passes them to each run; remove them`);
+      issues.push(`${file}: trigger binding '${binding.metadata.name}' sets ${reserved.map((key) => `'${key}'`).join(", ")} in spec.input, which the platform sets for each run itself; remove ${reserved.length > 1 ? "them" : "it"}`);
     }
   }
 

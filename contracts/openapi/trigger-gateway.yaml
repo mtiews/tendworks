@@ -24,7 +24,8 @@ paths:
       summary: Fire a trigger binding that never fires on its own
       description: >-
         Fires a binding of kind `manual` (ADR 0028) as a check of it would: one new item,
-        one run per workspace of the binding (or only in `workspace`), `trigger.fired`
+        one run per workspace of the binding (or only in `workspace`) with the input
+        `{ ...spec.input, workspace, item }`, `trigger.fired`
         per started run, and the firing recorded as the binding's last check.
       parameters:
         - name: name
