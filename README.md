@@ -73,6 +73,84 @@ tend trigger fire playground-security-review --follow   # start a workflow by ha
 tend chat --workspace playground         # ask a read-only assistant about a workspace
 ```
 
+### What runs on your host
+
+One Linux host, one Docker Compose stack. The server is the only way in, the worker runs workflows and agents, and every agent session gets a sandbox of its own on its own workspace.
+
+```mermaid
+flowchart TB
+  subgraph CLIENTS["Your devices"]
+    UI["Web UI"]
+    CLI["tend CLI · scripts"]
+    PHONE["Phone"]
+  end
+
+  subgraph HOST["Linux host · Docker Compose stack"]
+    TLS["TLS layer<br/>e.g. Tailscale"]
+    SERVER["server<br/>control plane API · web UI<br/>trigger gateway · human interaction<br/>platform MCP server"]
+    WORKER["worker<br/>workflow interpreter · agent runtime<br/>sandbox clean-up"]
+    ENGINE["durable execution engine<br/>workflow history"]
+    DB[("Postgres<br/>state of every domain<br/>event bus")]
+    PROXY["Docker socket proxy<br/>restricted by path"]
+    MCPGW["MCP-only gateway"]
+    CONFIG[/"your configuration<br/>Git repository, read-only"/]
+    TRANSCRIPTS[("transcripts")]
+
+    subgraph FARM["Sandbox farm · own network, no route to the stack"]
+      direction LR
+      subgraph SB1["sandbox: run #42 · developer"]
+        A1["agent harness"]
+        V1[("workspace volume<br/>checkout of repo A")]
+        S1[("session volume")]
+      end
+      subgraph SB2["sandbox: run #43 · developer"]
+        A2["agent harness"]
+        V2[("workspace volume<br/>checkout of repo B")]
+        S2[("session volume")]
+      end
+      subgraph SB3["sandbox: chat · workspace assistant"]
+        A3["agent harness"]
+        V3[/"host directory<br/>read-only"/]
+        S3[("session volume")]
+      end
+    end
+  end
+
+  subgraph EXT["Outside"]
+    GIT["Git hosts<br/>repos A, B …"]
+    ISSUES["Issue tracker"]
+    MODEL["Model API"]
+    NOTIFY["Notification service"]
+    MON["External monitor"]
+  end
+
+  UI & CLI --> TLS --> SERVER
+  SERVER <--> WORKER
+  SERVER --- DB
+  WORKER --- DB
+  WORKER <--> ENGINE
+  CONFIG -.-> SERVER & WORKER
+  WORKER --> TRANSCRIPTS
+  WORKER -- "create · resume · destroy" --> PROXY
+  PROXY -.-> FARM
+  WORKER <-- "ACP" --> A1 & A2 & A3
+  A3 -- "read-only MCP" --> MCPGW --> SERVER
+  A1 & A2 -- "clone · push · pull request<br/>workspace credential" --> GIT
+  A1 & A2 & A3 --> MODEL
+  SERVER -- "poll labelled issues" --> ISSUES
+  SERVER --> NOTIFY --> PHONE
+  SERVER -- heartbeat --> MON
+```
+
+| Part | Keeps what | Why it matters |
+| --- | --- | --- |
+| **server** | the public API, also for the web UI, `tend` and the platform MCP server | the only way in; it starts runs from triggers and asks you when a policy says so |
+| **worker** | workflow interpreter and agent runtime | turns workflow steps into agent tasks, creates sandboxes, records transcripts and cost; removes orphaned sandboxes |
+| **durable execution engine** | the history of every workflow | a run continues after a restart where it stopped |
+| **Postgres** | the state of every domain in its own schema, and the event bus | runs, tasks, approvals and notifications survive restarts; backup and restore are one script each |
+| **sandboxes** | one container per agent session, on its own network | agents never reach the server, the store or Docker; the platform MCP server only through the MCP-only gateway, read-only |
+| **workspace and session volumes** | the agent's checkout and its harness session | outlive the sandbox: if a sandbox dies, a new one resumes the session on the same volumes |
+
 ## Use case: the AI-driven software factory
 
 The first and driving application of Tendworks is a **software factory**: a repeatable, largely autonomous value stream that turns an idea into working, delivered software, where humans are involved only for real decisions. It is pure configuration on the platform: workflows, agent profiles, policies and skills; no factory code in the platform.
