@@ -52,10 +52,12 @@ Your attention is the scarcest resource, so the platform spends it only where it
 
 ## How it works
 
+<a href="docs/diagrams/how-it-works.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/how-it-works-dark.svg">
   <img alt="A trigger starts a durable workflow; it hands an A2A task to the agent runtime, which drives an agent in a sandbox over ACP; the agent reports an artifact such as a pull request, and you get a notification. When a policy says ask, the workflow waits for your decision." src="docs/diagrams/how-it-works.svg">
 </picture>
+</a>
 
 A workflow such as `develop-issue` hands an issue to the `developer` agent: the agent works on a checkout of the workspace in a sandbox, pushes a branch, opens a pull request and reports it. The run ends with the pull request as its artifact, and you get a notification with a tap to it.
 
@@ -70,15 +72,17 @@ tend chat --workspace playground         # ask a read-only assistant about a wor
 
 One Linux host, one Docker Compose stack. The server is the only way in, the worker runs workflows and agents, and every agent session gets a sandbox of its own on its own workspace.
 
+<a href="docs/diagrams/architecture.svg">
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
   <img alt="One Linux host runs the platform (TLS layer, server, worker, configuration, persistence in Docker volumes), a Docker socket proxy and an MCP-only gateway, and a sandbox farm on its own network: one sandbox per run or chat, each with its agent harness, its workspace volume or host directory and its session volume. Agents reach Git hosts and the model API; the server polls the issue tracker, sends notifications and a heartbeat." src="docs/diagrams/architecture.svg">
 </picture>
+</a>
 
 | Part | Keeps what | Why it matters |
 | --- | --- | --- |
 | **server** | the public API, also for the web UI, `tend` and the platform MCP server | the only way in; it starts runs from triggers and asks you when a policy says so |
-| **worker** | workflow interpreter and agent runtime | turns workflow steps into agent tasks, creates sandboxes, records transcripts and cost; removes orphaned sandboxes |
+| **worker** | workflow interpreter and agent runtime | turns workflow steps into agent tasks, creates sandboxes and talks to their agents over ACP through the Docker socket proxy, records transcripts and cost; removes orphaned sandboxes |
 | **durable execution engine** | the history of every workflow | a run continues after a restart where it stopped |
 | **Postgres** | the state of every domain in its own schema, and the event bus | runs, tasks, approvals and notifications survive restarts; backup and restore are one script each |
 | **sandboxes** | one container per agent session, on its own network | agents never reach the server, the store or Docker; the platform MCP server only through the MCP-only gateway, read-only |

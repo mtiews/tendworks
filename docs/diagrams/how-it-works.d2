@@ -2,12 +2,6 @@
 # palette-dark.d2, which scripts/render-diagrams.sh puts in front of this file; it renders
 # both SVGs next to it. Never edit the SVGs by hand.
 
-vars: {
-  d2-config: {
-    layout-engine: dagre
-  }
-}
-
 classes: {
   step: {
     style: {
@@ -66,19 +60,22 @@ classes: {
   }
 }
 
-direction: right
+# A 3 × 2 grid, filled column by column: the run goes down from the workflow and comes
+# back up to you on the right; you and the workflow talk across the top row.
+grid-columns: 3
+vertical-gap: 96
+horizontal-gap: 150
 
-trigger: "Trigger\nschedule · issue label · by hand" {class: thing}
-workflow: "Workflow\ndurable, declarative" {class: step}
+trigger: "Trigger\nschedule · issue label\nby hand" {class: thing}
 runtime: "Agent runtime" {class: step}
+workflow: "Workflow\ndurable, declarative" {class: step}
 agent: "Agent in a sandbox\non its workspace" {class: sandbox}
-artifact: "Artifact\ne.g. a pull request" {class: thing}
 you: "You\nphone · web UI · tend" {class: human}
+artifact: "Artifact\ne.g. a pull request" {class: thing}
 
 trigger -> workflow: starts {class: flow}
 workflow -> runtime: A2A task {class: flow}
 runtime -> agent: ACP {class: flow}
 agent -> artifact: reports {class: flow}
 artifact -> you: notification {class: flow}
-workflow -> you: "policy says ask" {class: ask}
-you -> workflow: decision {class: ask}
+workflow <-> you: "policy: ask\nyour decision" {class: ask}
