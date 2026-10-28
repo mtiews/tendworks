@@ -1,0 +1,81 @@
+# How a run flows through Tendworks. Colors come from palette-light.d2 or
+# palette-dark.d2, which scripts/render-diagrams.sh puts in front of this file; it renders
+# both SVGs next to it. Never edit the SVGs by hand.
+
+classes: {
+  step: {
+    style: {
+      fill: ${core-fill}
+      stroke: ${leaf}
+      stroke-width: 2
+      font-color: ${text}
+      font-size: 22
+      border-radius: 8
+    }
+  }
+  sandbox: {
+    style: {
+      fill: ${harness-fill}
+      stroke: ${stem}
+      stroke-width: 2
+      stroke-dash: 4
+      font-color: ${text}
+      font-size: 22
+      border-radius: 8
+    }
+  }
+  thing: {
+    style: {
+      fill: ${node-fill}
+      stroke: ${line}
+      font-color: ${text}
+      font-size: 22
+      border-radius: 8
+    }
+  }
+  human: {
+    style: {
+      border-radius: 8
+      stroke-width: 2
+      fill: ${guard-fill}
+      stroke: ${guard-stroke}
+      font-color: ${text}
+      font-size: 22
+    }
+  }
+  flow: {
+    style: {
+      stroke: ${line}
+      font-color: ${muted}
+      font-size: 20
+    }
+  }
+  ask: {
+    style: {
+      stroke: ${guard-stroke}
+      font-color: ${muted}
+      font-size: 20
+      stroke-dash: 4
+    }
+  }
+}
+
+# A 3 × 2 grid, filled column by column: the run goes down from the workflow and comes
+# back up to you on the right; you and the workflow talk across the top row.
+grid-columns: 3
+vertical-gap: 96
+horizontal-gap: 150
+
+trigger: "Trigger\nschedule · issue label\nby hand" {class: thing}
+runtime: "Agent runtime" {class: step}
+workflow: "Workflow\ndurable, declarative" {class: step}
+agent: "Agent in a sandbox\non its workspace" {class: sandbox}
+you: "You\nphone · web UI · tend" {class: human}
+artifact: "Artifact\ne.g. a pull request" {class: thing}
+
+trigger -> workflow: starts {class: flow}
+workflow -> runtime: A2A task {class: flow}
+runtime -> agent: ACP {class: flow}
+agent -> artifact: reports {class: flow}
+artifact -> you: notification {class: flow}
+workflow <-> you: "policy: ask\nyour decision" {class: ask}
