@@ -1,0 +1,210 @@
+# Static architecture of one Tendworks installation: one Linux host, one Docker Compose
+# stack. Colors come from palette-light.d2 or palette-dark.d2, which
+# scripts/render-diagrams.sh puts in front of this file; it renders both SVGs next to it.
+# Never edit the SVGs by hand.
+
+classes: {
+  zone: {
+    style: {
+      font-size: 26
+      fill: ${zone-fill}
+      stroke: ${zone-stroke}
+      font-color: ${muted}
+      border-radius: 12
+      bold: true
+    }
+  }
+  core: {
+    style: {
+      font-size: 22
+      fill: ${core-fill}
+      stroke: ${leaf}
+      stroke-width: 2
+      font-color: ${text}
+      border-radius: 8
+    }
+  }
+  store: {
+    shape: cylinder
+    style: {
+      font-size: 22
+      fill: ${store-fill}
+      stroke: ${store-stroke}
+      font-color: ${text}
+    }
+  }
+  guard: {
+    style: {
+      font-size: 22
+      fill: ${guard-fill}
+      stroke: ${guard-stroke}
+      font-color: ${text}
+      border-radius: 8
+    }
+  }
+  sandbox: {
+    style: {
+      font-size: 22
+      fill: ${sandbox-fill}
+      stroke: ${leaf}
+      stroke-dash: 4
+      font-color: ${stem}
+      border-radius: 10
+      bold: true
+    }
+  }
+  harness: {
+    style: {
+      font-size: 22
+      fill: ${harness-fill}
+      stroke: ${stem}
+      font-color: ${text}
+      border-radius: 6
+    }
+  }
+  external: {
+    style: {
+      font-size: 22
+      fill: ${node-fill}
+      stroke: ${line}
+      font-color: ${text}
+      border-radius: 8
+    }
+  }
+  flow: {
+    style: {
+      font-size: 20
+      stroke: ${line}
+      font-color: ${muted}
+    }
+  }
+  quiet: {
+    style: {
+      font-size: 20
+      stroke: ${line}
+      font-color: ${muted}
+      stroke-dash: 3
+    }
+  }
+}
+
+grid-columns: 3
+grid-gap: 80
+
+# Left: who talks to the platform and whom it calls; middle: the host; right: what
+# agents reach from their sandboxes.
+clients: "" {
+  grid-columns: 1
+  grid-gap: 80
+  style: {fill: transparent; stroke: transparent}
+
+  you: Your devices {
+    class: zone
+    grid-columns: 1
+    ui: Web UI {class: external}
+    cli: "tend CLI\nscripts" {class: external}
+  }
+  services: Called by the platform {
+    class: zone
+    grid-columns: 1
+    issues: Issue tracker {class: external}
+    notify: "Notification service\nto your phone" {class: external}
+    monitor: External monitor {class: external}
+  }
+}
+
+host: "Linux host · Docker Compose stack" {
+  class: zone
+  grid-columns: 3
+  grid-gap: 64
+
+  platform: Platform {
+    class: zone
+    grid-columns: 1
+    grid-gap: 48
+
+    core: "" {
+      grid-columns: 2
+      grid-gap: 48
+      style: {fill: transparent; stroke: transparent}
+      tls: "TLS layer\ne.g. Tailscale" {class: guard}
+      server: "server\n\ncontrol plane API · web UI\ntrigger gateway · human interaction\nplatform MCP server" {class: core}
+      config: "your configuration\nGit, read-only" {
+        shape: page
+        style: {fill: ${node-fill}; stroke: ${line}; font-color: ${text}; font-size: 22}
+      }
+      worker: "worker\n\nworkflow interpreter\nagent runtime · sandbox clean-up" {class: core}
+    }
+
+    state: "Persistence · Docker volumes" {
+      class: zone
+      grid-columns: 3
+      grid-gap: 32
+      engine: "durable execution\nworkflow history" {class: store}
+      db: "Postgres\nstate per domain · event bus" {class: store}
+      transcripts: "transcripts" {class: store}
+    }
+  }
+
+  # The only ways from the platform into the sandboxes and back.
+  gates: "" {
+    grid-columns: 1
+    grid-gap: 160
+    style: {fill: transparent; stroke: transparent}
+    proxy: "Docker socket proxy\nrestricted by path" {class: guard}
+    mcpgw: "MCP-only gateway\nread-only, to the server" {class: guard}
+  }
+
+  farm: "Sandbox farm · own network, no route to the platform" {
+    class: zone
+    grid-columns: 1
+    grid-gap: 24
+
+    run1: "sandbox · run #42 · developer" {
+      class: sandbox
+      grid-columns: 3
+      agent: agent harness {class: harness}
+      ws: "workspace volume\ncheckout of repo A" {class: store}
+      session: session volume {class: store}
+    }
+    run2: "sandbox · run #43 · developer" {
+      class: sandbox
+      grid-columns: 3
+      agent: agent harness {class: harness}
+      ws: "workspace volume\ncheckout of repo B" {class: store}
+      session: session volume {class: store}
+    }
+    chat: "sandbox · chat · workspace assistant" {
+      class: sandbox
+      grid-columns: 3
+      agent: agent harness {class: harness}
+      ws: "host directory\nread-only" {class: store}
+      session: session volume {class: store}
+    }
+  }
+}
+
+outside: Reached by agents {
+  class: zone
+  grid-columns: 1
+  git: "Git hosts\nrepos A, B …" {class: external}
+  model: Model API {class: external}
+}
+
+clients.you -> host.platform.core.tls {class: flow}
+host.platform.core.tls -> host.platform.core.server: HTTPS {class: flow}
+host.platform.core.config -> host.platform.core.worker {class: quiet}
+host.platform.core.server <-> host.platform.core.worker {class: flow}
+host.platform.core.server -> host.platform.state {class: flow}
+host.platform.core.worker -> host.platform.state {class: flow}
+host.platform.core.worker -> host.gates.proxy {class: flow}
+
+host.gates.proxy -> host.farm: "create · resume\ndestroy" {class: quiet}
+host.platform.core.worker -> host.farm: ACP {class: flow}
+host.farm.chat.agent -> host.gates.mcpgw: MCP {class: flow}
+
+host.farm -> outside.git: "clone · push\npull request" {class: flow}
+host.farm -> outside.model {class: flow}
+host.platform.core.server -> clients.services.issues: poll {class: flow}
+host.platform.core.server -> clients.services.notify {class: flow}
+host.platform.core.server -> clients.services.monitor: heartbeat {class: flow}

@@ -52,17 +52,10 @@ Your attention is the scarcest resource, so the platform spends it only where it
 
 ## How it works
 
-```mermaid
-flowchart LR
-  T["Trigger<br/>schedule · issue label · by hand"] --> W["Workflow<br/>durable, declarative"]
-  W -- A2A --> A["Agent runtime"]
-  A -- ACP --> S["Agent in a sandbox<br/>on a workspace"]
-  S -- reports --> R["Artifacts<br/>e.g. a pull request"]
-  W -- "policy: ask" --> H["You<br/>phone · web UI · tend"]
-  H -- decision --> W
-  R --> N["Notification"]
-  N --> H
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/how-it-works-dark.svg">
+  <img alt="A trigger starts a durable workflow; it hands an A2A task to the agent runtime, which drives an agent in a sandbox over ACP; the agent reports an artifact such as a pull request, and you get a notification. When a policy says ask, the workflow waits for your decision." src="docs/diagrams/how-it-works.svg">
+</picture>
 
 A workflow such as `develop-issue` hands an issue to the `developer` agent: the agent works on a checkout of the workspace in a sandbox, pushes a branch, opens a pull request and reports it. The run ends with the pull request as its artifact, and you get a notification with a tap to it.
 
@@ -77,70 +70,10 @@ tend chat --workspace playground         # ask a read-only assistant about a wor
 
 One Linux host, one Docker Compose stack. The server is the only way in, the worker runs workflows and agents, and every agent session gets a sandbox of its own on its own workspace.
 
-```mermaid
-flowchart TB
-  subgraph CLIENTS["Your devices"]
-    UI["Web UI"]
-    CLI["tend CLI · scripts"]
-    PHONE["Phone"]
-  end
-
-  subgraph HOST["Linux host · Docker Compose stack"]
-    TLS["TLS layer<br/>e.g. Tailscale"]
-    SERVER["server<br/>control plane API · web UI<br/>trigger gateway · human interaction<br/>platform MCP server"]
-    WORKER["worker<br/>workflow interpreter · agent runtime<br/>sandbox clean-up"]
-    ENGINE["durable execution engine<br/>workflow history"]
-    DB[("Postgres<br/>state of every domain<br/>event bus")]
-    PROXY["Docker socket proxy<br/>restricted by path"]
-    MCPGW["MCP-only gateway"]
-    CONFIG[/"your configuration<br/>Git repository, read-only"/]
-    TRANSCRIPTS[("transcripts")]
-
-    subgraph FARM["Sandbox farm · own network, no route to the stack"]
-      direction LR
-      subgraph SB1["sandbox: run #42 · developer"]
-        A1["agent harness"]
-        V1[("workspace volume<br/>checkout of repo A")]
-        S1[("session volume")]
-      end
-      subgraph SB2["sandbox: run #43 · developer"]
-        A2["agent harness"]
-        V2[("workspace volume<br/>checkout of repo B")]
-        S2[("session volume")]
-      end
-      subgraph SB3["sandbox: chat · workspace assistant"]
-        A3["agent harness"]
-        V3[/"host directory<br/>read-only"/]
-        S3[("session volume")]
-      end
-    end
-  end
-
-  subgraph EXT["Outside"]
-    GIT["Git hosts<br/>repos A, B …"]
-    ISSUES["Issue tracker"]
-    MODEL["Model API"]
-    NOTIFY["Notification service"]
-    MON["External monitor"]
-  end
-
-  UI & CLI --> TLS --> SERVER
-  SERVER <--> WORKER
-  SERVER --- DB
-  WORKER --- DB
-  WORKER <--> ENGINE
-  CONFIG -.-> SERVER & WORKER
-  WORKER --> TRANSCRIPTS
-  WORKER -- "create · resume · destroy" --> PROXY
-  PROXY -.-> FARM
-  WORKER <-- "ACP" --> A1 & A2 & A3
-  A3 -- "read-only MCP" --> MCPGW --> SERVER
-  A1 & A2 -- "clone · push · pull request<br/>workspace credential" --> GIT
-  A1 & A2 & A3 --> MODEL
-  SERVER -- "poll labelled issues" --> ISSUES
-  SERVER --> NOTIFY --> PHONE
-  SERVER -- heartbeat --> MON
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
+  <img alt="One Linux host runs the platform (TLS layer, server, worker, configuration, persistence in Docker volumes), a Docker socket proxy and an MCP-only gateway, and a sandbox farm on its own network: one sandbox per run or chat, each with its agent harness, its workspace volume or host directory and its session volume. Agents reach Git hosts and the model API; the server polls the issue tracker, sends notifications and a heartbeat." src="docs/diagrams/architecture.svg">
+</picture>
 
 | Part | Keeps what | Why it matters |
 | --- | --- | --- |
@@ -226,6 +159,7 @@ Needs Node.js 24 and pnpm (`corepack enable pnpm`).
 | `pnpm install` | installs dependencies and points git at the pre-commit hook (needs `betterleaks` on `PATH`) |
 | `pnpm check` | generates types from `contracts/`, typechecks, lints, checks architecture rules, runs unit and view tests |
 | `pnpm coverage` | unit and integration tests with coverage thresholds |
+| `scripts/render-diagrams.sh` | renders the README diagrams from `docs/diagrams/*.d2` to SVG (needs [D2](https://d2lang.com) `v0.9.0`) |
 | `pnpm build` | builds all packages, the `tend` CLI and the web UI |
 | `pnpm e2e` | builds and starts the compose stack, then runs the end-to-end tests (API and browser) against it; needs `deploy/.env` from `scripts/setup-env.sh` |
 | `node apps/cli/dist/main.js status` | the `tend` CLI against `http://localhost:8080` (after `pnpm build`) |
