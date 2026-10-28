@@ -62,8 +62,14 @@ describe("the automated chain on the compose stack, with fakes", () => {
       ],
     });
 
-    const { data: triggers } = await client.GET("/triggers");
-    expect(triggers?.items.find((trigger) => trigger.name === BINDING)?.lastEvaluation).toMatchObject({ status: "succeeded" });
+    // Other test files restart the platform; a tick during a restart fails to start its run,
+    // and the next tick succeeds again. So wait for a succeeded evaluation, not the latest one.
+    const evaluation = await waitFor("a succeeded evaluation of the binding", async () => {
+      const { data } = await client.GET("/triggers");
+      const lastEvaluation = data?.items.find((trigger) => trigger.name === BINDING)?.lastEvaluation;
+      return lastEvaluation?.status === "succeeded" ? lastEvaluation : undefined;
+    });
+    expect(evaluation).toMatchObject({ status: "succeeded" });
     // One firing per tick, binding and workspace: no second run for the same tick.
     const { data: runs } = await client.GET("/runs");
     expect(runs?.items.filter((item) => item.startedBy?.kind === "trigger" && item.startedBy.binding === BINDING && item.startedBy.item.key === tick)).toHaveLength(1);

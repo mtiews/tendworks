@@ -80,8 +80,8 @@ test("signs in with the read-only token and shows that the UI only reads", async
 
   await signIn(page, READ_TOKEN);
 
-  await expect(page.getByText("Read-only")).toBeVisible();
-  await expect(page.getByText("Read-only")).toBeInViewport({ ratio: 1 });
+  await expect(page.getByText("Read-only", { exact: true })).toBeVisible();
+  await expect(page.getByText("Read-only", { exact: true })).toBeInViewport({ ratio: 1 });
   await expect(page.getByRole("heading", { name: "Chats" })).toBeVisible();
   await expectNoHorizontalScroll(page);
 });
