@@ -6,7 +6,7 @@ import { useApi } from "./api.js";
 import { Pending } from "./pending.js";
 import { Panel } from "./panel.js";
 import { Chip, Pill } from "./pill.js";
-import { useStart } from "./start-binding.js";
+import { isManual, useStart } from "./start-binding.js";
 import { In } from "./time.js";
 import { Evaluation } from "./trigger-evaluation.js";
 import { checksAround, type Checks } from "./trigger-checks.js";
@@ -42,7 +42,7 @@ export function TriggersPage({ phone }: { phone: boolean }) {
         <>
           {scheduled.length > 0 && (
             <>
-              <Panel title="Scheduled" aside={counts(scheduled)}>
+              <Panel title="Scheduled" aside={activeAndSuspended(scheduled)}>
                 {phone ? (
                   <ul className="rows" aria-label="Scheduled bindings">
                     {scheduled.map((trigger) => (
@@ -74,7 +74,7 @@ export function TriggersPage({ phone }: { phone: boolean }) {
             </>
           )}
           {manual.length > 0 && (
-            <Panel title="By hand" aside={counts(manual)}>
+            <Panel title="By hand" aside={activeAndSuspended(manual)}>
               {phone ? (
                 <ul className="rows" aria-label="Bindings by hand">
                   {manual.map((trigger) => (
@@ -92,10 +92,8 @@ export function TriggersPage({ phone }: { phone: boolean }) {
   );
 }
 
-/** Bindings started by hand (kind `manual`, ADR 0028); all others check on their own, with a schedule. */
-const isManual = (trigger: Trigger) => trigger.kind === "manual";
-
-const counts = (triggers: readonly Trigger[]) => {
+/** A panel's aside: how many of its bindings are active and how many suspended. */
+const activeAndSuspended = (triggers: readonly Trigger[]) => {
   const suspended = triggers.filter((trigger) => trigger.suspended).length;
   return `${triggers.length - suspended} active · ${suspended} suspended`;
 };
@@ -193,7 +191,7 @@ function ManualCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
 /** The manual bindings as a table; the Start column only for those who may start them. */
 function ManualTable({ triggers, readAt }: { triggers: readonly Trigger[]; readAt: number }) {
   const { canChange } = useApi();
-  const columns = canChange ? 5 : 4;
+
   return (
     <table aria-label="Bindings by hand">
       <thead>
@@ -211,7 +209,7 @@ function ManualTable({ triggers, readAt }: { triggers: readonly Trigger[]; readA
       </thead>
       <tbody>
         {triggers.map((trigger) => (
-          <ManualRow key={trigger.name} trigger={trigger} readAt={readAt} columns={columns} />
+          <ManualRow key={trigger.name} trigger={trigger} readAt={readAt} startColumn={canChange} />
         ))}
       </tbody>
     </table>
@@ -219,7 +217,7 @@ function ManualTable({ triggers, readAt }: { triggers: readonly Trigger[]; readA
 }
 
 /** A manual binding as a table row; what starting it asks or says spans a row of its own below it. */
-function ManualRow({ trigger, readAt, columns }: { trigger: Trigger; readAt: number; columns: number }) {
+function ManualRow({ trigger, readAt, startColumn }: { trigger: Trigger; readAt: number; startColumn: boolean }) {
   const start = useStart(trigger);
   return (
     <>
@@ -238,17 +236,18 @@ function ManualRow({ trigger, readAt, columns }: { trigger: Trigger; readAt: num
         <td>
           <Evaluation evaluation={trigger.lastEvaluation} now={readAt} never="never started" />
         </td>
-        {start.button !== undefined && <td>{start.button}</td>}
+        {startColumn && <td>{start.button}</td>}
       </tr>
       {start.below && (
         <tr>
-          <td colSpan={columns}>{start.below}</td>
+          <td colSpan={startColumn ? 5 : 4}>{start.below}</td>
         </tr>
       )}
     </>
   );
 }
 
+/** The schedule; the contract makes it optional, as a manual binding has none. */
 const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : <span className="muted">-</span>);
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;

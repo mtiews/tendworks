@@ -10,7 +10,7 @@ import { Pill } from "./pill.js";
 import { unhealthyComponents, usePlatformStatus } from "./platform-status.js";
 import { Link } from "./router.js";
 import { runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
-import { useStart } from "./start-binding.js";
+import { isManual, useStart } from "./start-binding.js";
 import { Age, In } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
 import { Evaluation } from "./trigger-evaluation.js";
@@ -111,8 +111,6 @@ function nextCheck(triggers: readonly Trigger[] | undefined): string {
   return next ? ` The next trigger check is ${new Date(next).toLocaleString()}.` : "";
 }
 
-/** Bindings started by hand (kind `manual`, ADR 0028), and those that check on their own, with a schedule. */
-const isManual = (trigger: Trigger) => trigger.kind === "manual";
 const scheduled = (triggers: readonly Trigger[]) => triggers.filter((trigger) => !isManual(trigger));
 
 /** Bindings by their next check, those without one after them, suspended ones last. */

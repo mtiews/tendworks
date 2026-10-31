@@ -8,6 +8,9 @@ import { useLocation } from "./router.js";
 type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number];
 type Started = ControlPlane.components["schemas"]["fireResult"]["items"][number];
 
+/** A binding started by hand (kind `manual`, ADR 0028); all others check on their own, with a schedule. */
+export const isManual = (trigger: Trigger) => trigger.kind === "manual";
+
 export interface StartOptions {
   /**
    * Ask `Start <binding>?` before every start, also for a binding over one workspace or none
@@ -31,7 +34,7 @@ export function useStart(trigger: Trigger, { alwaysConfirm = false }: StartOptio
   const [chosen, setChosen] = useState<ReadonlySet<string>>();
   const [busy, setBusy] = useState(false);
   const [refused, setRefused] = useState<string>();
-  if (trigger.kind !== "manual" || !canChange) return {};
+  if (!isManual(trigger) || !canChange) return {};
   const { name, workflow, workspaces } = trigger;
   const picksWorkspaces = workspaces.length > 1;
   const asks = picksWorkspaces || alwaysConfirm;
