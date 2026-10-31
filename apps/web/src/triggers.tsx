@@ -15,82 +15,107 @@ import { usePolling } from "./use-polling.js";
 type Trigger = ControlPlane.components["schemas"]["triggerList"]["items"][number];
 
 /**
- * The trigger bindings (`GET /triggers`, ADR 0023): source, workflow, workspaces, schedule,
- * next and last check. A binding fired by hand (kind `manual`, ADR 0028) has no schedule
- * and no next check; its last check is its last firing. A table on a desktop, with a timeline of the checks of the last and
- * next 12 hours; cards on a phone. A manual binding can be started here (`tend trigger fire`);
- * the API offers no suspend or resume.
+ * The trigger bindings (`GET /triggers`, ADR 0023) in two panels, each with only the columns
+ * that mean something for its bindings. "Scheduled" holds the bindings that check on their own
+ * (source, workflow, workspaces, schedule, next and last check), followed on a desktop by a
+ * timeline of their checks of the last and next 12 hours. "By hand" holds the bindings fired by
+ * hand (kind `manual`, ADR 0028: workflow, workspaces, last start, whose last check is its last
+ * firing) with their Start (`tend trigger fire`). Tables on a desktop, cards on a phone; a panel
+ * that would be empty is left out. The API offers no suspend or resume.
  */
 export function TriggersPage({ phone }: { phone: boolean }) {
   const { client } = useApi();
   const triggers = usePolling(useCallback(async () => ({ items: (await answer(client.GET("/triggers"))).items, readAt: Date.now() }), [client]));
   const items = triggers.data?.items ?? [];
-  const suspended = items.filter((trigger) => trigger.suspended).length;
   const readAt = triggers.data?.readAt ?? 0;
-  const counts = `${items.length - suspended} active · ${suspended} suspended`;
+  const scheduled = items.filter((trigger) => !isManual(trigger));
+  const manual = items.filter(isManual);
 
   return (
     <>
       <h1>Triggers</h1>
       {triggers.data === undefined ? (
         <Pending error={triggers.error} what="trigger bindings" />
-      ) : triggers.data.items.length === 0 ? (
+      ) : items.length === 0 ? (
         <p className="muted">No trigger bindings are configured.</p>
-      ) : phone ? (
-        <Panel title="Bindings" aside={counts}>
-        <ul className="rows" aria-label="Trigger bindings">
-          {triggers.data.items.map((trigger) => (
-            <BindingCard key={trigger.name} trigger={trigger} readAt={readAt} />
-          ))}
-        </ul>
-        </Panel>
       ) : (
         <>
-          <Panel title="Bindings" aside={counts}>
-          <table aria-label="Trigger bindings">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Source</th>
-                <th>Workflow</th>
-                <th>Workspaces</th>
-                <th>Schedule</th>
-                <th>Next check</th>
-                <th>Last check</th>
-                <th>
-                  <span className="visually-hidden">Start</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {triggers.data.items.map((trigger) => (
-                <BindingRow key={trigger.name} trigger={trigger} readAt={readAt} />
-              ))}
-            </tbody>
-          </table>
-          </Panel>
-          <Timeline triggers={triggers.data.items} now={triggers.data.readAt} />
+          {scheduled.length > 0 && (
+            <>
+              <Panel title="Scheduled" aside={counts(scheduled)}>
+                {phone ? (
+                  <ul className="rows" aria-label="Scheduled bindings">
+                    {scheduled.map((trigger) => (
+                      <ScheduledCard key={trigger.name} trigger={trigger} readAt={readAt} />
+                    ))}
+                  </ul>
+                ) : (
+                  <table aria-label="Scheduled bindings">
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Source</th>
+                        <th>Workflow</th>
+                        <th>Workspaces</th>
+                        <th>Schedule</th>
+                        <th>Next check</th>
+                        <th>Last check</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduled.map((trigger) => (
+                        <ScheduledRow key={trigger.name} trigger={trigger} readAt={readAt} />
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </Panel>
+              {!phone && <Timeline triggers={scheduled} now={readAt} />}
+            </>
+          )}
+          {manual.length > 0 && (
+            <Panel title="By hand" aside={counts(manual)}>
+              {phone ? (
+                <ul className="rows" aria-label="Bindings by hand">
+                  {manual.map((trigger) => (
+                    <ManualCard key={trigger.name} trigger={trigger} readAt={readAt} />
+                  ))}
+                </ul>
+              ) : (
+                <ManualTable triggers={manual} readAt={readAt} />
+              )}
+            </Panel>
+          )}
         </>
       )}
     </>
   );
 }
 
-/** A binding as a card on a phone, with its Start button and what starting it asks or says below its facts. */
-function BindingCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
-  const start = useStart(trigger);
+/** Bindings started by hand (kind `manual`, ADR 0028); all others check on their own, with a schedule. */
+const isManual = (trigger: Trigger) => trigger.kind === "manual";
+
+const counts = (triggers: readonly Trigger[]) => {
+  const suspended = triggers.filter((trigger) => trigger.suspended).length;
+  return `${triggers.length - suspended} active · ${suspended} suspended`;
+};
+
+const workspacesOf = (trigger: Trigger) => trigger.workspaces.join(", ") || <span className="muted">none</span>;
+
+/** A scheduled binding as a card on a phone. */
+function ScheduledCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
   return (
     <li className="binding">
       <div className="card-head">
         <span className="card-kind">{trigger.name}</span>
         {trigger.suspended ? (
           <Pill tone="neutral">suspended</Pill>
-        ) : trigger.nextExecutionAt === undefined ? (
-          <span className="muted">fired by hand</span>
         ) : (
-          <span>
-            next <In value={trigger.nextExecutionAt} now={readAt} />
-          </span>
+          trigger.nextExecutionAt !== undefined && (
+            <span>
+              next <In value={trigger.nextExecutionAt} now={readAt} />
+            </span>
+          )
         )}
       </div>
       <dl className="facts">
@@ -101,12 +126,62 @@ function BindingCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) 
         <dt>Workflow</dt>
         <dd>{trigger.workflow}</dd>
         <dt>Workspaces</dt>
-        <dd>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</dd>
+        <dd>{workspacesOf(trigger)}</dd>
         <dt>Schedule</dt>
         <dd>{scheduleOf(trigger)}</dd>
         <dt>Last check</dt>
         <dd>
           <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
+        </dd>
+      </dl>
+    </li>
+  );
+}
+
+/** A scheduled binding as a table row. */
+function ScheduledRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+  return (
+    <tr>
+      <td className="binding-name">{trigger.name}</td>
+      <td>
+        <Chip>{trigger.kind}</Chip>
+      </td>
+      <td>{trigger.workflow}</td>
+      <td>{workspacesOf(trigger)}</td>
+      <td>{scheduleOf(trigger)}</td>
+      <td>
+        {trigger.suspended ? (
+          <Pill tone="neutral">suspended</Pill>
+        ) : trigger.nextExecutionAt === undefined ? (
+          <span className="muted">-</span>
+        ) : (
+          <In value={trigger.nextExecutionAt} now={readAt} />
+        )}
+      </td>
+      <td>
+        <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
+      </td>
+    </tr>
+  );
+}
+
+/** A manual binding as a card on a phone, with its Start button and what starting it asks or says below its facts. */
+function ManualCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+  const start = useStart(trigger);
+  return (
+    <li className="binding">
+      <div className="card-head">
+        <span className="card-kind">{trigger.name}</span>
+        {trigger.suspended && <Pill tone="neutral">suspended</Pill>}
+      </div>
+      <dl className="facts">
+        <dt>Workflow</dt>
+        <dd>{trigger.workflow}</dd>
+        <dt>Workspaces</dt>
+        <dd>{workspacesOf(trigger)}</dd>
+        <dt>Last start</dt>
+        <dd>
+          <Evaluation evaluation={trigger.lastEvaluation} now={readAt} never="never started" />
         </dd>
       </dl>
       {start.button}
@@ -115,49 +190,70 @@ function BindingCard({ trigger, readAt }: { trigger: Trigger; readAt: number }) 
   );
 }
 
-/** A binding as a table row; what starting it asks or says spans a row of its own below it. */
-function BindingRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+/** The manual bindings as a table; the Start column only for those who may start them. */
+function ManualTable({ triggers, readAt }: { triggers: readonly Trigger[]; readAt: number }) {
+  const { canChange } = useApi();
+  const columns = canChange ? 5 : 4;
+  return (
+    <table aria-label="Bindings by hand">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Workflow</th>
+          <th>Workspaces</th>
+          <th>Last start</th>
+          {canChange && (
+            <th>
+              <span className="visually-hidden">Start</span>
+            </th>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {triggers.map((trigger) => (
+          <ManualRow key={trigger.name} trigger={trigger} readAt={readAt} columns={columns} />
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** A manual binding as a table row; what starting it asks or says spans a row of its own below it. */
+function ManualRow({ trigger, readAt, columns }: { trigger: Trigger; readAt: number; columns: number }) {
   const start = useStart(trigger);
   return (
     <>
       <tr>
-        <td className="binding-name">{trigger.name}</td>
-        <td>
-          <Chip>{trigger.kind}</Chip>
-        </td>
-        <td>{trigger.workflow}</td>
-        <td>{trigger.workspaces.join(", ") || <span className="muted">none</span>}</td>
-        <td>{scheduleOf(trigger)}</td>
-        <td>
-          {trigger.suspended ? (
-            <Pill tone="neutral">suspended</Pill>
-          ) : trigger.nextExecutionAt === undefined ? (
-            <span className="muted">-</span>
-          ) : (
-            <In value={trigger.nextExecutionAt} now={readAt} />
+        <td className="binding-name">
+          {trigger.name}
+          {trigger.suspended && (
+            <>
+              {" "}
+              <Pill tone="neutral">suspended</Pill>
+            </>
           )}
         </td>
+        <td>{trigger.workflow}</td>
+        <td>{workspacesOf(trigger)}</td>
         <td>
-          <Evaluation evaluation={trigger.lastEvaluation} now={readAt} />
+          <Evaluation evaluation={trigger.lastEvaluation} now={readAt} never="never started" />
         </td>
-        <td>{start.button}</td>
+        {start.button !== undefined && <td>{start.button}</td>}
       </tr>
       {start.below && (
         <tr>
-          {/* As wide as the table's eight columns. */}
-          <td colSpan={8}>{start.below}</td>
+          <td colSpan={columns}>{start.below}</td>
         </tr>
       )}
     </>
   );
 }
 
-/** The schedule, or `by hand` for a binding that never fires on its own. */
-const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : "by hand");
+const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : <span className="muted">-</span>);
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
-/** The checks of the last and next 12 hours, one track per binding; the marks are decoration, the text says the numbers. */
+/** The checks of the last and next 12 hours, one track per scheduled binding; the marks are decoration, the text says the numbers. */
 function Timeline({ triggers, now }: { triggers: readonly Trigger[]; now: number }) {
   return (
     <Panel title="Checks in the last and next 12 hours">
@@ -189,7 +285,7 @@ const describe = (trigger: Trigger, { past, future, dense }: Checks) =>
   trigger.suspended
     ? "suspended, no checks"
     : !trigger.schedule
-      ? "fired by hand, no scheduled checks"
+      ? "no scheduled checks"
       : dense
         ? `checks continuously (${formatSchedule(trigger.schedule)})`
         : `${count(past.length, "check")} in the last 12 hours, ${count(future.length, "check")} in the next 12 hours`;

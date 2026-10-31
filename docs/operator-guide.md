@@ -356,7 +356,7 @@ spec:
 
 - **The review examples:** `review-workspace` has the developer review a workspace's default branch, read-only (`write: false`), with the `focus` its binding passes in `spec.input`, and report its findings by severity (`tend run get <id>` shows the report under OUTPUT, with `focus`). `playground-architecture-review` (`focus: architecture`) and `playground-security-review` (`focus: security`) both start it; another focus is a third binding with its own `input`, and another repository a workspace added to `workspaces`.
 
-- It never fires on its own. You fire it with `tend`, or with Start on the binding in the web UI, on the overview's Start panel (which always asks first) or on the Triggers page, and the API token (the read-only token is refused):
+- It never fires on its own. You fire it with `tend`, or with Start on the binding in the web UI, on the overview's Start panel (which always asks first) or in the Triggers page's By hand panel, and the API token (the read-only token is refused):
 
   ```bash
   tend trigger fire playground-architecture-review
@@ -730,7 +730,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Services | `docker compose -f deploy/compose.yaml ps` (`-a` shows `agent-secrets` as `Exited (0)`) |
 | Logs | `docker compose -f deploy/compose.yaml logs -f server worker` (add `--tail 100`); the server log lists the loaded configuration at startup and every notification |
 | Runs | `tend run list`, `tend run get <id> [-o yaml]`, `tend run logs <id> [--follow]`, `tend run retry <id> [--follow]` |
-| Start a workflow by hand | fire a [`manual` trigger binding](#manual): `tend trigger fire <binding> [--workspace <name>] [--follow]`, or Start on the binding in the web UI, on the overview's Start panel (it asks first) or on the Triggers page; a run in each of its workspaces (or only the named one), with the binding as origin. For scripts without a binding: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` (no workspace in its origin) |
+| Start a workflow by hand | fire a [`manual` trigger binding](#manual): `tend trigger fire <binding> [--workspace <name>] [--follow]`, or Start on the binding in the web UI, on the overview's Start panel (it asks first) or in the Triggers page's By hand panel; a run in each of its workspaces (or only the named one), with the binding as origin. For scripts without a binding: `curl -X POST localhost:8080/runs -H "authorization: Bearer $TEND_API_TOKEN" -H 'content-type: application/json' -d '{"workflow":"hello-developer"}'` (no workspace in its origin) |
 | Ask why a run failed | Analyze on a finished run in the web UI: a chat with the platform assistant on that run, which reads its steps and transcripts (`get_run`, `get_run_transcript`); or `tend chat` and name the run |
 | Retry a run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a finished run (failed or completed) starts again as a new run with the same input and origin, `retryOf` naming it; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
@@ -935,5 +935,5 @@ Workflows started by hand (spec #130, `v0.5.0`) are accepted on the same host wi
 | # | Check | How | Passes when |
 | --- | --- | --- | --- |
 | M5-1 | A manual review | [First test workloads](#first-test-workloads), 9, with `playground-architecture-review` naming your workspace | one `review-workspace` run per workspace, started by the binding with `focus: architecture` in its input, completes with a report; `tend trigger list` shows the firing as its last check; no branch or commit appears in the repository |
-| M5-2 | Start in the web UI | on a phone, Start on `playground-security-review` on the Triggers page | the run opens live, `STARTED BY` `trigger playground-security-review in playground: <time>` |
+| M5-2 | Start in the web UI | on a phone, Start on `playground-security-review` in the Triggers page's By hand panel | the run opens live, `STARTED BY` `trigger playground-security-review in playground: <time>` |
 | M5-3 | Release | tag `v0.5.0` on the accepted commit | the tag's [release notes](releases/v0.5.0.md) match what was accepted |
