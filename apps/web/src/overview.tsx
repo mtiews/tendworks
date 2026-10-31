@@ -42,8 +42,8 @@ const failedRecently = (runs: readonly Run[], now: number) => runs.filter((run) 
  * The platform at a glance (spec #101, ADR 0027): how many agents work, what waits for the
  * operator and what failed, each leading to where the operator acts; live tiles of the agent
  * steps at work and of the approval requests with their answers; what needs attention; what
- * the operator can start by hand; when the scheduled trigger bindings check next. Each part polls on its own, so one unreachable part does
- * not blank the rest.
+ * the operator can start by hand; when the scheduled trigger bindings check next. Each part
+ * polls on its own, so one unreachable part does not blank the rest.
  */
 export function OverviewPage({ phone }: { phone: boolean }) {
   const { client } = useApi();
@@ -111,8 +111,9 @@ function nextCheck(triggers: readonly Trigger[] | undefined): string {
   return next ? ` The next trigger check is ${new Date(next).toLocaleString()}.` : "";
 }
 
-/** Bindings that check on their own: those with a schedule, unlike the ones started by hand (kind `manual`, ADR 0028). */
-const scheduled = (triggers: readonly Trigger[]) => triggers.filter((trigger) => trigger.kind !== "manual");
+/** Bindings started by hand (kind `manual`, ADR 0028), and those that check on their own, with a schedule. */
+const isManual = (trigger: Trigger) => trigger.kind === "manual";
+const scheduled = (triggers: readonly Trigger[]) => triggers.filter((trigger) => !isManual(trigger));
 
 /** Bindings by their next check, those without one after them, suspended ones last. */
 const sortedByNext = (triggers: readonly Trigger[]) =>
@@ -332,7 +333,7 @@ function Attention({
 function StartPanel({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] }>; readAt: number }) {
   const { canChange } = useApi();
   const manual = triggers.data?.items
-    .filter((trigger) => trigger.kind === "manual")
+    .filter(isManual)
     .sort((a, b) => Number(a.suspended ?? false) - Number(b.suspended ?? false) || a.name.localeCompare(b.name));
   if (!canChange || (manual === undefined && triggers.error === undefined) || manual?.length === 0) return null;
   return (
@@ -361,7 +362,7 @@ function StartPanel({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] 
 function StartEntry({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
   const start = useStart(trigger, { alwaysConfirm: true });
   return (
-    <li className="start-entry">
+    <li>
       <div className="row">
         <span className="check-name">{trigger.name}</span>
         <span className="muted">{[trigger.workflow, trigger.workspaces.join(", ")].filter(Boolean).join(" · ")}</span>

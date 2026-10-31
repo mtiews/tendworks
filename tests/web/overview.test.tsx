@@ -220,6 +220,13 @@ describe("overview: next trigger checks", () => {
     expect(within(section).queryByRole("list")).toBeNull();
   });
 
+  it("names the next scheduled check on an idle platform, also with manual bindings", async () => {
+    openOverview({ runs: runsOf(), approvals: createInMemoryApprovals(), triggers: createInMemoryTriggers([review, trigger("nightly", "2026-10-19T02:00:00.000Z")]) });
+
+    const idle = await screen.findByText(/Nothing is running and nothing waits for you\./);
+    await waitFor(() => expect(idle.textContent).toContain(` The next trigger check is ${new Date("2026-10-19T02:00:00.000Z").toLocaleString()}.`));
+  });
+
   it("says when the trigger gateway cannot be reached", async () => {
     openOverview({ triggers: { ...createInMemoryTriggers(), list: () => Promise.reject(new Error("connection refused")) } });
 
