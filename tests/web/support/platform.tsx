@@ -1,12 +1,14 @@
 import { createControlPlaneApi, createInMemoryRuns, emptyConfiguration, type ControlPlaneApiOptions } from "@tendworks/control-plane";
 import { render } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { App } from "@tendworks/web";
+import { ApiProvider, App, createControlPlaneClient, Router } from "@tendworks/web";
+import type { ReactNode } from "react";
 
 /*
  * The view-test seam (spec #38): the whole web app rendered in jsdom, its `fetch` the real
  * control plane handler over in-memory fakes, in process. The app cannot send what the
- * control plane would not answer, and the tests see only what the operator sees.
+ * control plane would not answer, and the tests see only what the operator sees. `renderPage`
+ * renders a page built from the app's modules on the same control plane.
  */
 
 // Dummy tokens of the in-process control plane, long enough for its token rules.
@@ -73,4 +75,22 @@ export function renderApp({ path = "/ui/", unreachable = false, ...options }: Pl
   /** Opens the app once more at the same address and on the same platform, as a second tab would. */
   const openTab = () => render(<App fetch={fetch} />);
   return { user, platform, view, openTab };
+}
+
+/**
+ * Renders `page` signed in with `token` against a fresh control plane, inside the app's router
+ * and API access but without its shell: a page made of modules the app does not compose that
+ * way yet (e.g. a start control that always confirms). It sees only what the operator sees.
+ */
+export function renderPage(page: ReactNode, { path = "/ui/", token = API_TOKEN, ...options }: PlatformOptions & { path?: string; token?: string } = {}) {
+  window.history.replaceState(null, "", path);
+  const api = controlPlane(options);
+  const client = createControlPlaneClient({ token, fetch: (request) => api.fetch(request) });
+  const user = userEvent.setup();
+  const view = render(
+    <Router>
+      <ApiProvider value={{ client, canChange: token !== READ_TOKEN }}>{page}</ApiProvider>
+    </Router>,
+  );
+  return { user, view };
 }

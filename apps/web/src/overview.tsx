@@ -6,11 +6,14 @@ import { useApi } from "./api.js";
 import { DecisionActions, DecisionFailure, Question, THEN, outcomeOf, type ApprovalRequest, type Outcome } from "./approvals.js";
 import { LiveMark, Panel } from "./panel.js";
 import { Pending } from "./pending.js";
+import { Pill } from "./pill.js";
 import { unhealthyComponents, usePlatformStatus } from "./platform-status.js";
 import { Link } from "./router.js";
 import { runTitle, runWorkspace, type Run, type Step } from "./run-summary.js";
+import { isManual, useStart } from "./start-binding.js";
 import { Age, In } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
+import { Evaluation } from "./trigger-evaluation.js";
 import { TranscriptOf } from "./live-transcript.js";
 import { usePolling, type Polled } from "./use-polling.js";
 import { useTranscript, type OpenTranscriptStream } from "./use-transcript.js";
@@ -38,9 +41,9 @@ const failedRecently = (runs: readonly Run[], now: number) => runs.filter((run) 
 /**
  * The platform at a glance (spec #101, ADR 0027): how many agents work, what waits for the
  * operator and what failed, each leading to where the operator acts; live tiles of the agent
- * steps at work and of the approval requests with their answers; what needs attention; when
- * the trigger bindings check next. Each part polls on its own, so one unreachable part does
- * not blank the rest.
+ * steps at work and of the approval requests with their answers; what needs attention; what
+ * the operator can start by hand; when the scheduled trigger bindings check next. Each part
+ * polls on its own, so one unreachable part does not blank the rest.
  */
 export function OverviewPage({ phone }: { phone: boolean }) {
   const { client } = useApi();
@@ -94,18 +97,23 @@ export function OverviewPage({ phone }: { phone: boolean }) {
       </Panel>
       <div className="overview-columns">
         <Attention failed={failed} runs={runs} readAt={runs.data?.readAt ?? 0} notifications={notifications} status={status} />
-        <NextChecks triggers={triggers} readAt={triggers.data?.readAt ?? 0} />
+        <div className="overview-stack">
+          <StartPanel triggers={triggers} readAt={triggers.data?.readAt ?? 0} />
+          <NextChecks triggers={triggers} readAt={triggers.data?.readAt ?? 0} />
+        </div>
       </div>
     </>
   );
 }
 
 function nextCheck(triggers: readonly Trigger[] | undefined): string {
-  const next = triggers && sortedByNext(triggers).find((trigger) => !trigger.suspended)?.nextExecutionAt;
+  const next = triggers && sortedByNext(scheduled(triggers)).find((trigger) => !trigger.suspended)?.nextExecutionAt;
   return next ? ` The next trigger check is ${new Date(next).toLocaleString()}.` : "";
 }
 
-/** Bindings by their next check, those fired by hand (without a next check) after them, suspended ones last. */
+const scheduled = (triggers: readonly Trigger[]) => triggers.filter((trigger) => !isManual(trigger));
+
+/** Bindings by their next check, those without one after them, suspended ones last. */
 const sortedByNext = (triggers: readonly Trigger[]) =>
   [...triggers].sort(
     (a, b) =>
@@ -314,10 +322,64 @@ function Attention({
   );
 }
 
-/** Each trigger binding with when it checks its source next. */
+/**
+ * The manual bindings (ADR 0028), each with its workflow, workspaces, last start and Start, by
+ * name with suspended ones last. Every start asks first: the overview is often used on a phone,
+ * where a mistaken tap would start a paid agent run. Left out without manual bindings and for
+ * read-only access, as there is nothing to start then.
+ */
+function StartPanel({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] }>; readAt: number }) {
+  const { canChange } = useApi();
+  const manual = triggers.data?.items
+    .filter(isManual)
+    .sort((a, b) => Number(a.suspended ?? false) - Number(b.suspended ?? false) || a.name.localeCompare(b.name));
+  if (!canChange || (manual === undefined && triggers.error === undefined) || manual?.length === 0) return null;
+  return (
+    <Panel
+      title="Start"
+      aside={
+        <Link to="/triggers" label="All trigger bindings">
+          all →
+        </Link>
+      }
+    >
+      {manual === undefined ? (
+        <Pending error={triggers.error} what="trigger bindings" />
+      ) : (
+        <ul className="rows" aria-label="Start">
+          {manual.map((trigger) => (
+            <StartEntry key={trigger.name} trigger={trigger} readAt={readAt} />
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
+}
+
+/** A manual binding as a compact row, its last start and what starting it asks or says below. */
+function StartEntry({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
+  const start = useStart(trigger, { alwaysConfirm: true });
+  return (
+    <li>
+      <div className="row">
+        <span className="check-name">{trigger.name}</span>
+        <span className="muted">{[trigger.workflow, trigger.workspaces.join(", ")].filter(Boolean).join(" · ")}</span>
+        <span className="row-end">{trigger.suspended && <Pill tone="neutral">suspended</Pill>}</span>
+        {start.button}
+      </div>
+      <div className="start-below">
+        <Evaluation evaluation={trigger.lastEvaluation} now={readAt} never="never started" />
+        {start.below}
+      </div>
+    </li>
+  );
+}
+
+/** Each scheduled trigger binding with when it checks its source next. */
 function NextChecks({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] }>; readAt: number }) {
   const { error } = triggers;
-  const data = triggers.data?.items;
+  const all = triggers.data?.items;
+  const data = all && scheduled(all);
   return (
     <Panel
       title="Next trigger checks"
@@ -330,14 +392,14 @@ function NextChecks({ triggers, readAt }: { triggers: Polled<{ items: Trigger[] 
       {data === undefined ? (
         <Pending error={error} what="trigger bindings" />
       ) : data.length === 0 ? (
-        <p className="muted">No trigger bindings are configured.</p>
+        <p className="muted">{all?.length ? "No scheduled trigger bindings are configured." : "No trigger bindings are configured."}</p>
       ) : (
         <ul className="rows" aria-label="Next trigger checks">
           {sortedByNext(data).map((trigger) => (
             <li key={trigger.name} className="row">
               <span className={`dot ${trigger.suspended ? "" : "dot-next"}`} aria-hidden="true" />
               <span className="check-name">{trigger.name}</span>
-              <span className="muted">{[trigger.workspaces.join(", "), trigger.schedule ? formatSchedule(trigger.schedule) : "by hand"].filter(Boolean).join(" · ")}</span>
+              <span className="muted">{[trigger.workspaces.join(", "), trigger.schedule && formatSchedule(trigger.schedule)].filter(Boolean).join(" · ")}</span>
               <span className="row-end">{trigger.suspended ? "suspended" : trigger.nextExecutionAt === undefined ? "" : <In value={trigger.nextExecutionAt} now={readAt} />}</span>
             </li>
           ))}
