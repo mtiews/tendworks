@@ -1,4 +1,4 @@
-import { createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, type ApprovalRequest, type HealthProbe, type Run, type Trigger } from "@tendworks/control-plane";
+import { createInMemoryAgentRuntime, createInMemoryApprovals, createInMemoryRuns, createInMemoryTriggers, TriggerFireRefusedError, type ApprovalRequest, type FireTriggerRequest, type HealthProbe, type Run, type Trigger } from "@tendworks/control-plane";
 import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { phoneWidth, READ_TOKEN, renderApp, signedIn, type PlatformOptions } from "./support/platform.js";
@@ -192,11 +192,11 @@ const trigger = (name: string, nextExecutionAt: string, extra: Partial<Trigger> 
 });
 
 describe("overview: next trigger checks", () => {
-  it("lists the bindings by their next check, those fired by hand after them, suspended ones last", async () => {
+  it("lists the scheduled bindings by their next check, suspended ones last, and leaves manual bindings out", async () => {
     openOverview({
       triggers: createInMemoryTriggers([
         trigger("nightly", "2026-10-19T02:00:00.000Z", { suspended: true }),
-        { name: "architecture-review", workflow: "review-workspace", kind: "manual", workspaces: ["app"] },
+        review,
         trigger("later", "2026-10-18T10:05:30.000Z", { workspaces: [], schedule: { every: { minutes: 5, seconds: 30 } } }),
         trigger("soon", "2026-10-18T10:01:00.000Z", { workspaces: ["app", "web"] }),
       ]),
@@ -207,10 +207,17 @@ describe("overview: next trigger checks", () => {
     expect(items.map((item) => item.textContent)).toEqual([
       expect.stringContaining("soonapp, web · every 5m"),
       expect.stringContaining("later"),
-      expect.stringContaining("architecture-reviewapp · by hand"),
       expect.stringContaining("nightlyapp · every 5msuspended"),
     ]);
     expect(items[0]!.querySelector("time")?.getAttribute("datetime")).toBe("2026-10-18T10:01:00.000Z");
+  });
+
+  it("says there are no scheduled bindings when only manual ones are configured", async () => {
+    openOverview({ triggers: createInMemoryTriggers([review]) });
+
+    const section = await screen.findByRole("region", { name: "Next trigger checks" });
+    expect(await within(section).findByText("No scheduled trigger bindings are configured.")).toBeTruthy();
+    expect(within(section).queryByRole("list")).toBeNull();
   });
 
   it("says when the trigger gateway cannot be reached", async () => {
@@ -218,6 +225,146 @@ describe("overview: next trigger checks", () => {
 
     const section = await screen.findByRole("region", { name: "Next trigger checks" });
     expect((await within(section).findByRole("alert")).textContent).toBe("Cannot read the trigger bindings. Is the platform running?");
+  });
+});
+
+const review: Trigger = {
+  name: "review",
+  workflow: "review-workspace",
+  kind: "manual",
+  workspaces: ["caltrack"],
+  lastEvaluation: { at: ago(2), status: "succeeded", startedRuns: 1 },
+};
+const release: Trigger = { name: "release", workflow: "cut-release", kind: "manual", workspaces: [] };
+const security: Trigger = { name: "security-review", workflow: "review-workspace", kind: "manual", workspaces: ["app", "web", "docs"] };
+
+const disabled = (element: HTMLElement) => (element as HTMLButtonElement).disabled;
+const regionNames = () => screen.getAllByRole("region").map((region) => document.getElementById(region.getAttribute("aria-labelledby") ?? "")?.textContent);
+
+describe("overview: start", () => {
+  it("lists every manual binding by name, suspended ones last with a disabled Start, and links to the Triggers page", async () => {
+    openOverview({
+      triggers: createInMemoryTriggers([
+        security,
+        { ...release, suspended: true },
+        trigger("nightly", "2026-10-19T02:00:00.000Z"),
+        { ...review, name: "audit", lastEvaluation: { at: ago(3), status: "failed", startedRuns: 0, message: "workspace 'caltrack' is not declared" } },
+        review,
+      ]),
+    });
+
+    const section = await screen.findByRole("region", { name: "Start" });
+    const items = within(await within(section).findByRole("list", { name: "Start" })).getAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "auditreview-workspace · caltrackStartfailed 3 h ago: workspace 'caltrack' is not declared",
+      "reviewreview-workspace · caltrackStartsucceeded 2 h ago, 1 run started",
+      "security-reviewreview-workspace · app, web, docsStartnever started",
+      "releasecut-releasesuspendedStartnever started",
+    ]);
+    expect(disabled(within(items[3]!).getByRole("button", { name: "Start release" }))).toBe(true);
+    expect(disabled(within(items[0]!).getByRole("button", { name: "Start audit" }))).toBe(false);
+    expect(within(section).getByRole("link", { name: "All trigger bindings" }).getAttribute("href")).toBe("/ui/triggers");
+  });
+
+  it("asks before every start; confirming fires once and opens the run", async () => {
+    const triggers = createInMemoryTriggers([review]);
+    const { user } = openOverview({ triggers });
+
+    await user.click(await screen.findByRole("button", { name: "Start review" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Start review?" });
+    expect(within(dialog).getByText("Starts one run of review-workspace in caltrack.")).toBeTruthy();
+    expect(triggers.fired).toEqual([]);
+    const confirm = within(dialog).getByRole("button", { name: "Start run" });
+    await user.click(confirm);
+    await user.click(confirm);
+
+    await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
+    expect(triggers.fired).toEqual([{ name: "review", request: {} }]);
+  });
+
+  it("starts nothing on Cancel or Escape and gives the focus back to Start", async () => {
+    const triggers = createInMemoryTriggers([release]);
+    const { user } = openOverview({ triggers });
+
+    const start = await screen.findByRole("button", { name: "Start release" });
+    await user.click(start);
+    expect(within(screen.getByRole("alertdialog", { name: "Start release?" })).getByText("Starts one run of cut-release.")).toBeTruthy();
+    await user.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(start);
+
+    await user.click(start);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(start);
+    expect(triggers.fired).toEqual([]);
+    expect(window.location.pathname).toBe("/ui/overview");
+  });
+
+  it("offers the choice of several workspaces inside the confirmation; several started runs open Runs", async () => {
+    const triggers = createInMemoryTriggers([security]);
+    const { user } = openOverview({ triggers });
+
+    await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Start security-review?" });
+    await user.click(within(dialog).getByRole("checkbox", { name: "docs" }));
+    await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+    await waitFor(() => expect(window.location.pathname).toBe("/ui/runs"));
+    expect(triggers.fired).toEqual([
+      { name: "security-review", request: { workspace: "app" } },
+      { name: "security-review", request: { workspace: "web" } },
+    ]);
+  });
+
+  it("shows why a start was refused in the entry, with the runs started before it", async () => {
+    const fake = createInMemoryTriggers([security]);
+    let calls = 0;
+    const fire = (name: string, request: FireTriggerRequest) =>
+      ++calls === 1 ? fake.fire(name, request) : Promise.reject(new TriggerFireRefusedError(409, "Conflict", "trigger binding 'security-review' is suspended"));
+    const { user } = openOverview({ triggers: { ...fake, fire } });
+
+    await user.click(await screen.findByRole("button", { name: "Start security-review" }));
+    const dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("checkbox", { name: "docs" }));
+    await user.click(within(dialog).getByRole("button", { name: "Start runs" }));
+
+    const entry = within(screen.getByRole("list", { name: "Start" })).getByRole("listitem");
+    expect(await within(entry).findByText("Conflict: trigger binding 'security-review' is suspended. Started before it: run-1 in app.")).toBeTruthy();
+    expect(window.location.pathname).toBe("/ui/overview");
+  });
+
+  it("is left out without manual bindings", async () => {
+    openOverview({ triggers: createInMemoryTriggers([trigger("nightly", "2026-10-19T02:00:00.000Z")]) });
+
+    expect(await screen.findByRole("list", { name: "Next trigger checks" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Start" })).toBeNull();
+  });
+
+  it("is left out for the read-only token", async () => {
+    signedIn(READ_TOKEN);
+    renderApp({ path: "/ui/overview", triggers: createInMemoryTriggers([review, trigger("nightly", "2026-10-19T02:00:00.000Z")]) });
+
+    expect(await screen.findByRole("list", { name: "Next trigger checks" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Start" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Start review" })).toBeNull();
+  });
+
+  it("says when the trigger gateway cannot be reached, and the rest of the overview still shows", async () => {
+    openOverview({ triggers: { ...createInMemoryTriggers(), list: () => Promise.reject(new Error("connection refused")) } });
+
+    const section = await screen.findByRole("region", { name: "Start" });
+    expect((await within(section).findByRole("alert")).textContent).toBe("Cannot read the trigger bindings. Is the platform running?");
+    expect(await screen.findByRole("link", { name: "0 agents working" })).toBeTruthy();
+  });
+
+  it("comes after Attention and before Next trigger checks on a phone", async () => {
+    phoneWidth(true);
+    openOverview({ triggers: createInMemoryTriggers([review, trigger("nightly", "2026-10-19T02:00:00.000Z")]) });
+
+    await screen.findByRole("region", { name: "Start" });
+    expect(regionNames()).toEqual(["Live", "Attention", "Start", "Next trigger checks"]);
+    expect(within(screen.getByRole("region", { name: "Start" })).getByRole("button", { name: "Start review" })).toBeTruthy();
   });
 });
 

@@ -1,6 +1,6 @@
 /*
  * The overview (spec #101), mission control: figures, the live panel with terminal tiles and
- * approval tiles, attention and next checks as panels side by side. Tokens only.
+ * approval tiles, attention beside start and next checks. Tokens only.
  */
 
 .figures {
@@ -211,6 +211,24 @@
 
 .overview-columns .panel {
   margin: 0;
+}
+
+/* The second column: Start above Next trigger checks, so a phone shows them in that order. */
+.overview-stack {
+  display: grid;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* A manual binding: its last start, and the confirmation or refusal of a start below its row. */
+.start-below {
+  padding: 0 var(--space-4) var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.start-below .confirmation,
+.start-below .message {
+  margin: var(--space-2) 0 0;
 }
 
 .row-more {

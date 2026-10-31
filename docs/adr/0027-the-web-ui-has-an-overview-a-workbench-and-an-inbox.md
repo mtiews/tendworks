@@ -2,7 +2,7 @@
 
 The web UI (ADR 0018) is organized around what the operator does, not around the platform's tables. It has two places to be and a few pages around them:
 
-- **Overview**, the platform view: what works right now, what waits for the operator, what needs attention, when trigger bindings check next.
+- **Overview**, the platform view: what works right now, what waits for the operator, what needs attention, what the operator can start by hand, when scheduled trigger bindings check next.
 - **Workbench**, the working area: a list of runs or chats next to the selected one's detail. Runs are named by the item that started them and grouped by what they need from the operator.
 - **Inbox**: notifications, subscriptions and decided approval requests.
 - **Pages** for triggers, agents and workspaces.

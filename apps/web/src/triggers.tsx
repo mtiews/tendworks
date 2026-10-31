@@ -7,7 +7,8 @@ import { Pending } from "./pending.js";
 import { Panel } from "./panel.js";
 import { Chip, Pill } from "./pill.js";
 import { useStart } from "./start-binding.js";
-import { Age, In } from "./time.js";
+import { In } from "./time.js";
+import { Evaluation } from "./trigger-evaluation.js";
 import { checksAround, type Checks } from "./trigger-checks.js";
 import { usePolling } from "./use-polling.js";
 
@@ -153,24 +154,6 @@ function BindingRow({ trigger, readAt }: { trigger: Trigger; readAt: number }) {
 
 /** The schedule, or `by hand` for a binding that never fires on its own. */
 const scheduleOf = (trigger: Trigger) => (trigger.schedule ? formatSchedule(trigger.schedule) : "by hand");
-
-/** `failed <at>: <why>` or `succeeded <at>, <n> runs started`, as `tend trigger list` says it. */
-function Evaluation({ evaluation, now }: { evaluation: Trigger["lastEvaluation"]; now: number }) {
-  if (!evaluation) return <span className="muted">not checked yet</span>;
-  if (evaluation.status === "failed") {
-    return (
-      <span className="state-unhealthy">
-        failed <Age value={evaluation.at} now={now} />
-        {evaluation.message ? `: ${evaluation.message}` : ""}
-      </span>
-    );
-  }
-  return (
-    <span className="muted">
-      succeeded <Age value={evaluation.at} now={now} />, {evaluation.startedRuns} {evaluation.startedRuns === 1 ? "run" : "runs"} started
-    </span>
-  );
-}
 
 const count = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 
