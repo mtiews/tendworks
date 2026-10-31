@@ -33,8 +33,8 @@ export function useStart(trigger: Trigger, { alwaysConfirm = false }: StartOptio
   const [refused, setRefused] = useState<string>();
   if (trigger.kind !== "manual" || !canChange) return {};
   const { name, workflow, workspaces } = trigger;
-  const choice = workspaces.length > 1;
-  const asks = choice || alwaysConfirm;
+  const picksWorkspaces = workspaces.length > 1;
+  const asks = picksWorkspaces || alwaysConfirm;
 
   const fire = async (only: readonly (string | undefined)[]) => {
     setBusy(true);
@@ -86,13 +86,13 @@ export function useStart(trigger: Trigger, { alwaysConfirm = false }: StartOptio
       chosen !== undefined ? (
         <Confirmation
           title={`Start ${name}?`}
-          confirmLabel={choice ? "Start runs" : "Start run"}
+          confirmLabel={picksWorkspaces ? "Start runs" : "Start run"}
           busy={busy}
-          canConfirm={!choice || chosen.size > 0}
+          canConfirm={!picksWorkspaces || chosen.size > 0}
           onConfirm={confirm}
           onCancel={() => setChosen(undefined)}
         >
-          {choice ? (
+          {picksWorkspaces ? (
             <fieldset className="binding-workspaces">
               <legend>Starts one run of {workflow} in each chosen workspace.</legend>
               {workspaces.map((workspace) => (

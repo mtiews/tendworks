@@ -7,7 +7,8 @@ import type { ReactNode } from "react";
 /*
  * The view-test seam (spec #38): the whole web app rendered in jsdom, its `fetch` the real
  * control plane handler over in-memory fakes, in process. The app cannot send what the
- * control plane would not answer, and the tests see only what the operator sees.
+ * control plane would not answer, and the tests see only what the operator sees. `renderPage`
+ * renders a page built from the app's modules on the same control plane.
  */
 
 // Dummy tokens of the in-process control plane, long enough for its token rules.
@@ -88,7 +89,7 @@ export function renderPage(page: ReactNode, { path = "/ui/", token = API_TOKEN, 
   const user = userEvent.setup();
   const view = render(
     <Router>
-      <ApiProvider value={{ client, canChange: token === API_TOKEN }}>{page}</ApiProvider>
+      <ApiProvider value={{ client, canChange: token !== READ_TOKEN }}>{page}</ApiProvider>
     </Router>,
   );
   return { user, view };

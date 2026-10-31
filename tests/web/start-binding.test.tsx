@@ -77,8 +77,8 @@ describe("starting a manual binding with always confirm", () => {
 
   it("fires once on a double confirm, with Start and the confirmation disabled while pending", async () => {
     const fake = createInMemoryTriggers([review]);
-    let release: () => void = () => undefined;
-    const held = new Promise<void>((resolve) => (release = resolve));
+    let resolveFire: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => (resolveFire = resolve));
     const fire = async (name: string, request: FireTriggerRequest) => {
       await held;
       return fake.fire(name, request);
@@ -92,7 +92,7 @@ describe("starting a manual binding with always confirm", () => {
     expect(disabled(confirm)).toBe(true);
     expect(disabled(start)).toBe(true);
     await user.click(confirm);
-    release();
+    resolveFire();
 
     await waitFor(() => expect(window.location.pathname).toBe("/ui/runs/run-1"));
     expect(fake.fired).toHaveLength(1);
