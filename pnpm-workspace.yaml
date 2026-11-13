@@ -2,6 +2,7 @@ packages:
   - packages/*
   - apps/*
   - tests/*
+  - site
 
 # Pin exact versions; updates go through pull requests.
 saveExact: true

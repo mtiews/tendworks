@@ -1,0 +1,152 @@
+/* The site follows the web UI's dark palette (apps/web/src/styles.css) and the brand colors
+   (docs/brand/README.md); headings use Nunito, the wordmark's typeface. */
+@import "@fontsource-variable/nunito";
+
+:root {
+  color-scheme: dark;
+  --color-bg: #0b0e12;
+  --color-surface: #12171e;
+  --color-surface-raised: #171d26;
+  --color-border: #232b36;
+  --color-text: #d7dee8;
+  --color-muted: #7d8896;
+  --color-stem: #2f6f4f;
+  --color-accent: #5fb38a;
+  --color-leaf: #a8dcbf;
+  --color-accent-text: #0b0e12;
+  --color-focus: #8cc4ff;
+  --font-heading: "Nunito Variable", system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --width: 72rem;
+  --radius: 12px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.75rem;
+}
+
+h1 {
+  font-size: clamp(2.4rem, 5.5vw, 4rem);
+  font-weight: 800;
+}
+
+h2 {
+  font-size: clamp(1.8rem, 3.5vw, 2.5rem);
+  font-weight: 750;
+}
+
+h3 {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+p {
+  margin: 0 0 1rem;
+}
+
+a {
+  color: var(--color-leaf);
+}
+
+a:focus-visible,
+.button:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 3px;
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-leaf);
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.container {
+  width: min(100% - 2.5rem, var(--width));
+  margin-inline: auto;
+}
+
+.eyebrow {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.85rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent);
+  margin-bottom: 0.75rem;
+}
+
+.lead {
+  font-size: 1.2rem;
+  color: var(--color-muted);
+  max-width: 44rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.4rem;
+  border-radius: 999px;
+  font-family: var(--font-heading);
+  font-weight: 700;
+  text-decoration: none;
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  transition:
+    background 0.15s,
+    border-color 0.15s;
+}
+
+.button:hover {
+  border-color: var(--color-accent);
+}
+
+.button.primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+.button.primary:hover {
+  background: var(--color-leaf);
+  border-color: var(--color-leaf);
+}
+
+section {
+  padding-block: clamp(4rem, 9vw, 7rem);
+}
+
+section + section {
+  border-top: 1px solid var(--color-border);
+}

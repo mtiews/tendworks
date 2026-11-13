@@ -23,3 +23,6 @@ tests/fixtures/workspace-root/
 
 # Archives of scripts/backup.sh
 backups/
+
+# Types and caches Astro generates for the website
+site/.astro/

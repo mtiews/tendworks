@@ -68,6 +68,7 @@ tendworks/
     e2e/
     fixtures/config/         # fakes and scripted profiles, layered on the starter configuration
   scripts/                   # operator tools: setup-env.sh, backup.sh, restore.sh, check-github-agent-access.sh; smoke/
+  site/                      # project website tendworks.dev (static Astro build, Cloudflare Pages), not part of the platform
   docs/adr/
   docs/releases/             # release notes per tag (migrations, configuration changes)
 ```

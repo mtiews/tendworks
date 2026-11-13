@@ -61,6 +61,7 @@ apps/        server, worker, web, cli   (bundles only, no domain logic)
 images/      sandbox-claude-code
 deploy/      compose.yaml, profiles/
 tests/       contract/, e2e/
+site/        project website tendworks.dev (static, Cloudflare Pages; not platform code)
 docs/adr/
 ```
 

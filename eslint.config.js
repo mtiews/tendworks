@@ -13,6 +13,8 @@ export default tseslint.config(
       "packages/shared/src/generated/**",
       "tests/architecture/fixtures/**",
       "images/**",
+      // The website is a static Astro build with its own toolchain, outside the platform.
+      "site/**",
       // Agent worktrees are full checkouts of other branches.
       ".claude/**",
     ],

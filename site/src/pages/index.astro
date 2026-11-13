@@ -1,0 +1,478 @@
+---
+// The landing page. Its text follows the repository README; logo and diagram come straight
+// from docs/brand and docs/diagrams, so the site never carries copies of them.
+import "../styles/global.css";
+import Logo from "../../../docs/brand/logo-horizontal-dark.svg";
+import Mark from "../../../docs/brand/mark-dark.svg";
+import howItWorks from "../../../docs/diagrams/how-it-works-dark.svg";
+
+const repo = "https://github.com/mtiews/tendworks";
+const operatorGuide = `${repo}/blob/main/docs/operator-guide.md`;
+const status = `${repo}/blob/main/docs/status.md`;
+
+const title = "Tendworks: agents that keep working while you are away";
+const description =
+  "A self-hosted platform for AI agents. Triggers start them, sandboxes isolate them, durable workflows recover them, and they only call on you when a policy says so.";
+const socialImage = new URL("/social-1200x630.png", Astro.site).href;
+
+const features = [
+  {
+    title: "Durable agents",
+    text: "A run is a durable workflow, not a terminal session. When the platform restarts, the host reboots or a sandbox dies, the run resumes where it stopped. Transcripts and cost are recorded outside the sandbox.",
+  },
+  {
+    title: "Sandboxed agents",
+    text: "Agents are treated as untrusted. Each runs in its own container, non-root and without privileges, with gVisor as an opt-in, and holds only the narrowly scoped credential of its workspace.",
+  },
+  {
+    title: "Triggered, not babysat",
+    text: "Trigger bindings start workflows by themselves: on a schedule, for every GitHub issue with a label, or by hand. One binding serves any number of workspaces.",
+  },
+  {
+    title: "Out of the loop, but in charge",
+    text: "Policies decide when to ask you. Notifications reach you on your phone with the priority you choose. The platform merges nothing: agents open pull requests, you decide.",
+  },
+  {
+    title: "Open standards at every seam",
+    text: "A2A, ACP, MCP, CloudEvents, OpenAPI and CNCF Serverless Workflow. Harness, model, sandbox backend and notification channel each sit behind a port.",
+  },
+  {
+    title: "Declarative, in Git",
+    text: "Workflows in YAML, agent profiles in Markdown, skills as SKILL.md, policies and trigger bindings as readable files. The web UI and the tend CLI use the same public API as your scripts.",
+  },
+];
+
+const steps = [
+  ["Trigger", "A schedule, a labeled issue or your hand starts a workflow for a workspace."],
+  ["Run", "A durable workflow hands the task to an agent in its own sandbox."],
+  ["Ask", "Where a policy says ask, the workflow waits for your decision, and you get a notification."],
+  ["Deliver", "The agent reports its result, such as a pull request, as an artifact. You review and merge."],
+];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={Astro.site} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#0b0e12" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={Astro.site} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={socialImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <header class="nav container">
+      <a href="/" class="brand" aria-label="Tendworks home"><Logo role="img" aria-label="Tendworks" /></a>
+      <nav aria-label="Main">
+        <a href="#features">Features</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="#factory">Software factory</a>
+        <a href={repo} class="button">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero container">
+        <div class="hero-text">
+          <p class="eyebrow">Self-hosted agent platform · open source</p>
+          <h1>Agents that keep working <span class="accent">while you are away.</span></h1>
+          <p class="lead">
+            You keep the decisions that matter. Tendworks starts AI agents from triggers, runs them isolated and
+            recoverable in sandboxes, and only calls on you when a policy says so.
+          </p>
+          <div class="actions">
+            <a class="button primary" href={operatorGuide}>Get started</a>
+            <a class="button" href={repo}>View on GitHub</a>
+          </div>
+        </div>
+        <div class="terminal" aria-label="Example tend CLI session">
+          <div class="terminal-bar"><span></span><span></span><span></span></div>
+          <pre><code><span class="prompt">$</span> tend status
+<span class="comment"># what runs, what waits for you</span>
+<span class="prompt">$</span> tend trigger fire security-review --follow
+<span class="comment"># start a workflow by hand, follow it live</span>
+<span class="prompt">$</span> tend chat --workspace playground
+<span class="comment"># ask an assistant about a workspace</span></code></pre>
+        </div>
+      </section>
+
+      <section class="quote">
+        <div class="container quote-inner">
+          <Mark class="quote-mark" aria-hidden="true" />
+          <p>
+            <em>Tend:</em> to care for something that grows. You plant the work, the platform tends it, and you come back to
+            results and to the few decisions only you can make.
+          </p>
+        </div>
+      </section>
+
+      <section id="features" class="container">
+        <p class="eyebrow">Why Tendworks</p>
+        <h2>Unattended, accountable workers</h2>
+        <p class="lead">
+          Coding agents are good enough to do real work, but most setups still need a human at the keyboard: start the
+          agent, watch it, restart it after a crash, copy the result somewhere. Tendworks takes that off your hands.
+        </p>
+        <div class="grid">
+          {
+            features.map((feature) => (
+              <article class="card">
+                <h3>{feature.title}</h3>
+                <p>{feature.text}</p>
+              </article>
+            ))
+          }
+        </div>
+      </section>
+
+      <section id="how-it-works" class="container">
+        <p class="eyebrow">How it works</p>
+        <h2>From trigger to pull request, without you at the keyboard</h2>
+        <ol class="steps">
+          {
+            steps.map(([name, text]) => (
+              <li>
+                <h3>{name}</h3>
+                <p>{text}</p>
+              </li>
+            ))
+          }
+        </ol>
+        <figure class="diagram">
+          <img
+            src={howItWorks.src}
+            width={howItWorks.width}
+            height={howItWorks.height}
+            loading="lazy"
+            alt="A trigger starts a durable workflow; it hands a task to the agent runtime, which drives an agent in a sandbox; the agent reports an artifact such as a pull request, and you get a notification. When a policy says ask, the workflow waits for your decision."
+          />
+        </figure>
+      </section>
+
+      <section id="factory" class="container factory">
+        <div>
+          <p class="eyebrow">Use case</p>
+          <h2>Tendworks builds Tendworks</h2>
+          <p>
+            The first application is an AI-driven software factory: a value stream that turns an idea into delivered
+            software, with humans involved only for real decisions. It is pure configuration on the platform: workflows,
+            agent profiles, policies and skills.
+          </p>
+          <p>
+            And it is not a slide. A human shapes a spec and splits it into tickets; a trigger starts one sandboxed agent
+            run per ticket, which implements it test-first, runs the checks and a code review, pushes and hands over the
+            next ticket. The human reviews and merges.
+          </p>
+          <p class="muted">
+            The platform is use-case neutral: the same building blocks can run home automation or personal research
+            routines.
+          </p>
+        </div>
+        <ul class="principles">
+          <li><strong>Attention at the start of the chain:</strong> what to build, not reading code.</li>
+          <li><strong>Evidence over trust:</strong> only what the evidence supports moves on.</li>
+          <li><strong>Author and reviewer are separate,</strong> ideally with a different model.</li>
+          <li><strong>Autonomy is earned,</strong> by the measured hit rate, not by flipping a switch.</li>
+        </ul>
+      </section>
+
+      <section id="get-started" class="container start">
+        <p class="eyebrow">Get started</p>
+        <h2>One Linux host, one Compose stack</h2>
+        <p class="lead">
+          Tendworks is pre-1.0 and built for one operator on one Linux host. Install a release on Ubuntu 24.04 with Docker
+          Engine, bring your own configuration, and let the agents work.
+        </p>
+        <div class="actions">
+          <a class="button primary" href={operatorGuide}>Read the operator guide</a>
+          <a class="button" href={status}>What works today</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="container footer">
+      <p>Tendworks · open source under the Apache License 2.0</p>
+      <a href={repo}>github.com/mtiews/tendworks</a>
+    </footer>
+  </body>
+</html>
+
+<style>
+  .nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 1.25rem;
+  }
+
+  .brand :global(svg) {
+    display: block;
+    height: 2.5rem;
+    width: auto;
+  }
+
+  .nav nav {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .nav nav a:not(.button) {
+    color: var(--color-muted);
+    text-decoration: none;
+    font-weight: 500;
+  }
+
+  .nav nav a:not(.button):hover {
+    color: var(--color-text);
+  }
+
+  .nav .button {
+    padding: 0.45rem 1rem;
+  }
+
+  @media (max-width: 760px) {
+    .nav nav a:not(.button) {
+      display: none;
+    }
+  }
+
+  .hero {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    align-items: center;
+    gap: 3rem;
+    padding-top: clamp(3rem, 7vw, 5rem);
+  }
+
+  @media (max-width: 900px) {
+    .hero {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .accent {
+    color: var(--color-accent);
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 2rem;
+  }
+
+  .terminal {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    box-shadow: 0 30px 80px -30px rgb(95 179 138 / 0.25);
+    overflow: hidden;
+  }
+
+  .terminal-bar {
+    display: flex;
+    gap: 0.4rem;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface-raised);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .terminal-bar span {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--color-border);
+  }
+
+  .terminal pre {
+    margin: 0;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    line-height: 1.8;
+  }
+
+  .terminal code {
+    color: var(--color-text);
+  }
+
+  .prompt {
+    color: var(--color-accent);
+  }
+
+  .comment {
+    color: var(--color-muted);
+  }
+
+  .quote {
+    background: var(--color-stem);
+    padding-block: 3rem;
+  }
+
+  .quote-inner {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+  }
+
+  .quote-inner :global(.quote-mark) {
+    flex: none;
+    width: 4.5rem;
+    height: auto;
+  }
+
+  .quote p {
+    margin: 0;
+    font-family: var(--font-heading);
+    font-size: clamp(1.2rem, 2.4vw, 1.6rem);
+    line-height: 1.4;
+    color: #fff;
+  }
+
+  .quote em {
+    color: var(--color-leaf);
+    font-style: normal;
+    font-weight: 800;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+    gap: 1.25rem;
+    margin-top: 3rem;
+  }
+
+  .card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1.75rem;
+    transition: border-color 0.15s;
+  }
+
+  .card:hover {
+    border-color: var(--color-stem);
+  }
+
+  .card h3 {
+    color: var(--color-leaf);
+  }
+
+  .card p {
+    margin: 0;
+    color: var(--color-muted);
+  }
+
+  .steps {
+    list-style: none;
+    counter-reset: step;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: 1.5rem;
+    padding: 0;
+    margin: 2.5rem 0 3rem;
+  }
+
+  .steps li {
+    counter-increment: step;
+    border-top: 2px solid var(--color-stem);
+    padding-top: 1rem;
+  }
+
+  .steps h3::before {
+    content: counter(step, decimal-leading-zero) " ";
+    color: var(--color-accent);
+  }
+
+  .steps p {
+    color: var(--color-muted);
+    margin: 0;
+  }
+
+  .diagram {
+    margin: 0;
+    padding: 1.5rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+  }
+
+  .diagram img {
+    display: block;
+    width: 100%;
+  }
+
+  .factory {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr;
+    gap: 3rem;
+    align-items: start;
+  }
+
+  @media (max-width: 900px) {
+    .factory {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .muted {
+    color: var(--color-muted);
+  }
+
+  .principles {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1rem;
+  }
+
+  .principles li {
+    background: var(--color-surface);
+    border-left: 3px solid var(--color-accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 1rem 1.25rem;
+  }
+
+  .principles strong {
+    color: var(--color-leaf);
+  }
+
+  .start {
+    text-align: center;
+  }
+
+  .start .lead {
+    margin-inline: auto;
+  }
+
+  .start .actions {
+    justify-content: center;
+  }
+
+  .footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-block: 2rem 3rem;
+    border-top: 1px solid var(--color-border);
+    color: var(--color-muted);
+    font-size: 0.95rem;
+  }
+
+  .footer p {
+    margin: 0;
+  }
+</style>
