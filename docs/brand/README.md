@@ -34,3 +34,7 @@ The wordmark is set in [Nunito](https://fonts.google.com/specimen/Nunito) (SIL O
 ## Web UI
 
 `apps/web/public/` holds `favicon.svg` and PNGs rendered from these SVGs: `apple-touch-icon.png` (180 px, from `app-icon-maskable.svg`), `icon-192.png` and `icon-512.png` (from `app-icon.svg`), `icon-maskable-512.png` (from `app-icon-maskable.svg`). Render them again when the mark changes. The PWA manifest (`manifest.webmanifest`) uses the UI's background `#0b0e12` for `background_color` and `theme_color`, as does `theme-color` in `index.html`.
+
+## Website
+
+The website (`site/`) imports logo, mark and diagrams from here and keeps `favicon.svg` and PNGs rendered from these SVGs in `site/public/`: `social-1200x630.png` (from `social-1200x630.svg`) and `apple-touch-icon.png` (180 px, from `app-icon-maskable.svg`). Render them again when the mark changes; see `site/README.md`.
