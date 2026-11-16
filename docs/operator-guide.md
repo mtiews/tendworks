@@ -738,7 +738,7 @@ The smoke tests in [docs/platform-implementation.md](platform-implementation.md)
 | Ask why a run failed | Analyze on a finished run in the web UI: a chat with the platform assistant on that run, which reads its steps and transcripts (`get_run`, `get_run_transcript`); or `tend chat` and name the run |
 | Retry a run (each issue fires once) | `tend run retry <id> [--follow]`, or Retry on the run in the web UI: a finished run (failed or completed) starts again as a new run with the same input and origin, `retryOf` naming it; each retry is another paid run |
 | Approvals | `tend approval list --pending`, `tend approval get <id>` (question, links, answers), `tend approval answer <id> "<answer>"` |
-| Notifications, triggers, workspaces, agents | `tend notification list` (delivery per channel), `tend trigger list` (last check per binding), `tend workspace list` (kind and assistant), `tend agent list` (active sessions per profile) |
+| Notifications, triggers, workspaces, agents | `tend notification list` (delivery per channel), `tend trigger list` (last check per binding), `tend workspace list` (kind, assistant and its branch prefixes), `tend agent list` (active sessions per profile) |
 | Chats | `tend chat` (the platform assistant), `tend chat <profile>`, `tend chat --workspace <name>`, `tend chat --workspace <name> --branch <branch>`, `tend workspace list`, `tend chat list`, `tend chat attach <id>`, `tend chat end <id>` |
 | Live sandboxes | `docker ps --filter label=dev.tendworks.installation=tendworks --filter label=dev.tendworks.sandbox` |
 | After a configuration change | `docker compose -f deploy/compose.yaml restart server worker` |

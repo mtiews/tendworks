@@ -203,6 +203,16 @@ export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }:
       record(chatId, { type: "input-required", message: reply, ...(total ? { cost: total } : {}) });
       update(chatId, { status: "input-required", message: reply, ...(total ? { cost: total } : {}) });
     },
+    /** The chat's workspace checkout fails with git's output (e.g. a branch the remote does not have), and so the chat. */
+    failCheckout(chatId: string, output: string) {
+      const chat = chats.get(chatId)!;
+      record(chatId, { type: "workspace-checkout", workspace: { url: `https://git.example/${chat.workspace}.git`, ...(chat.branch === undefined ? {} : { branch: chat.branch }) }, exitCode: 128, output });
+      const message = `workspace checkout failed (exit code 128): ${output}`;
+      record(chatId, { type: "task-ended", state: "TASK_STATE_FAILED", message });
+      const at = now();
+      update(chatId, { status: "failed", message, endedAt: at, lastActivityAt: at });
+      runtime.end(chatId);
+    },
     async startChat({ agent: profile, workspace, branch, text }: StartChatRequest) {
       const id = crypto.randomUUID();
       let agent = profile ?? "";

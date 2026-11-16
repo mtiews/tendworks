@@ -287,6 +287,20 @@ describe("tend chat", () => {
     expect(agentRuntime.chats.size).toBe(0);
   });
 
+  it("shows git's reason when a read-only chat's branch does not exist on the remote", async () => {
+    const { exitCode, input, agentRuntime, out } = chat(["--workspace", "app", "--branch", "prototype/gone"], "never");
+
+    await until(() => out().includes("> "));
+    input.type("Review the prototype.");
+    await until(() => out().includes("on branch prototype/gone;"));
+    const [started] = agentRuntime.chats.values();
+    agentRuntime.failCheckout(started!.id, "fatal: Remote branch prototype/gone not found in upstream origin");
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toMatch(/checkout\s+https:\/\/git\.example\/app\.git prototype\/gone \(exit code 128\)\n\s+fatal: Remote branch prototype\/gone not found in upstream origin\n/);
+    expect(out()).toMatch(/chat \S+ has ended/);
+  });
+
   it("leaves without starting a chat when nothing was typed", async () => {
     const { exitCode, input, agentRuntime, out } = chat(["assistant"], []);
 

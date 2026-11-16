@@ -537,7 +537,7 @@ function formatChat(chat: Chat): string {
     ["TITLE", shortTitle(chat.title, Infinity)],
     ["AGENT", chat.agent],
     ...(chat.workspace ? [["WORKSPACE", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`]] : []),
-    ...(chat.branch ? [["BRANCH", chat.branch]] : []),
+    ...(chat.branch === undefined ? [] : [["BRANCH", chat.branch]]),
     ["STATUS", chat.status],
     ["STARTED", chat.startedAt],
     ["LAST ACTIVITY", chat.lastActivityAt],
