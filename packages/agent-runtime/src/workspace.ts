@@ -215,12 +215,21 @@ export function createWorkspaces(
   return (name) => byName.get(name);
 }
 
+/**
+ * A workspace's enabled assistant as its chats need it: its settings, and the default branch
+ * of a git workspace, which no chat works on; absent for a directory, which has no branches.
+ */
+export interface ChatAssistant extends WorkspaceAssistant {
+  defaultBranch?: string;
+}
+
 /** The enabled assistants of the configured workspaces by workspace name, defaults filled in; undefined for a workspace without one. */
-export function workspaceAssistants(definitions: readonly Kind.Workspace[]): (workspace: string) => WorkspaceAssistant | undefined {
+export function workspaceAssistants(definitions: readonly Kind.Workspace[]): (workspace: string) => ChatAssistant | undefined {
   const byName = new Map(
-    definitions.flatMap(({ metadata: { name }, spec }): [string, WorkspaceAssistant][] => {
+    definitions.flatMap(({ metadata: { name }, spec }): [string, ChatAssistant][] => {
       const assistant = enabledAssistant(spec.assistant);
-      return assistant ? [[name, assistant]] : [];
+      if (!assistant) return [];
+      return [[name, spec.git ? { ...assistant, defaultBranch: spec.git.defaultBranch } : assistant]];
     }),
   );
   return (workspace) => byName.get(workspace);
@@ -244,10 +253,12 @@ function credentialScope(url: string): string {
 // $1 URL, $2 credential scope (empty: none), $3 default branch (empty: the remote's),
 // $4 `push` or `no-push`, $5 branch (optional). A workspace that is already a checkout
 // (e.g. kept on a volume) stays as it is; otherwise the branch is continued if the remote
-// has it, or started from the default branch. Without a branch the checkout stays on the
-// default branch. `no-push` (a read-only session) points the remote's push URL nowhere, so
-// a push fails even where the remote needs no credential; the boundary for a remote that
-// needs one is that the session never gets it, since the agent can change its own .git/config.
+// has it, or started from the default branch; a read-only (`no-push`) checkout never starts
+// one, so a branch the remote does not have fails it with git's reason. Without a branch the
+// checkout stays on the default branch. `no-push` (a read-only session) points the remote's
+// push URL nowhere, so a push fails even where the remote needs no credential; the boundary
+// for a remote that needs one is that the session never gets it, since the agent can change
+// its own .git/config.
 const CHECKOUT = `set -e
 url=$1 scope=$2 base=$3 push=$4
 if [ $# -ge 5 ]; then branch=$5; else branch=; fi
@@ -259,7 +270,7 @@ if [ ! -e .git ]; then
 fi
 if [ "$push" = no-push ]; then git config remote.origin.pushurl no-push://read-only-workspace; fi
 if [ -z "$branch" ] || [ "$(git branch --show-current)" = "$branch" ]; then exit 0; fi
-if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+if [ "$push" = no-push ] || git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
   git checkout --quiet -B "$branch" "origin/$branch"
 elif [ -n "$base" ]; then
   git checkout --quiet -b "$branch" "origin/$base"
@@ -283,6 +294,11 @@ export function workspaceRequestOf(message: A2A.Message): { request?: WorkspaceR
     };
   }
   return { request: { name, ...(branch === undefined ? {} : { branch }), ...(write === undefined ? {} : { write }) } };
+}
+
+/** Whether `branch` is a branch name a task or chat may ask for: no whitespace and no leading dash, so it cannot pass as an option. */
+export function isBranchName(branch: string): boolean {
+  return BRANCH.test(branch);
 }
 
 // Same rules as the contract: no value can pass as an option.

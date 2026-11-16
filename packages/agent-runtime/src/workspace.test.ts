@@ -173,6 +173,39 @@ describe("git workspace: checkout", { timeout: 20_000 }, () => {
     expect(allowed.status, allowed.stderr).toBe(0);
   });
 
+  async function readOnlyCheckout(workspace: string, url: string, branch: string) {
+    const result = (await createGitWorkspace({ name: "app", url, defaultBranch: "main" }, noSecrets).prepare({ taskId: "task-1", branch, readOnly: true })) as PreparedWorkspace;
+    return run(result.checkout!.command, workspace, result.checkout!.env);
+  }
+
+  it("checks out a branch the remote has read-only, also the default branch, with the push URL pointing nowhere", async () => {
+    const { origin, workspace } = remote();
+    const onDefault = remote();
+
+    const result = await readOnlyCheckout(workspace, origin, "tendworks/run-earlier");
+    const resumed = await readOnlyCheckout(workspace, origin, "tendworks/run-earlier");
+    const main = await readOnlyCheckout(onDefault.workspace, onDefault.origin, "main");
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(git(workspace, "branch", "--show-current")).toBe("tendworks/run-earlier");
+    expect(readFileSync(join(workspace, "progress.txt"), "utf8")).toBe("half done\n");
+    expect(git(workspace, "config", "--get", "remote.origin.pushurl")).toBe("no-push://read-only-workspace");
+    expect(resumed.status, resumed.stderr).toBe(0);
+    expect(main.status, main.stderr).toBe(0);
+    expect(git(onDefault.workspace, "branch", "--show-current")).toBe("main");
+  });
+
+  it("fails a read-only checkout of a branch the remote does not have with git's reason, and creates no branch", async () => {
+    const { origin, workspace } = remote();
+
+    const result = await readOnlyCheckout(workspace, origin, "prototype/missing");
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("prototype/missing");
+    expect(git(workspace, "branch", "--list", "prototype/missing")).toBe("");
+    expect(git(workspace, "branch", "--show-current")).toBe("main");
+  });
+
   it("lets git use the credential helper for the repository's host only, kept with the checkout", async () => {
     const { origin, workspace } = remote();
     const { checkout: https } = await prepared("https://git.example:8443/acme/app.git");

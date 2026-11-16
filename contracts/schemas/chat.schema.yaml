@@ -62,6 +62,20 @@ $defs:
         description: >-
           Whether the workspace assistant may change the workspace (its `assistant.write`
           when the chat started); present with `workspace`.
+      branch:
+        $ref: '#/$defs/chatBranch'
+        description: >-
+          The branch of the git workspace the chat works on: the one it was started on, or
+          `tendworks/chat-<chat id>` for a writing chat started without one. Absent when
+          the chat stays on the workspace's default branch (a read-only chat started
+          without `branch`), for a directory workspace, and in an empty workspace.
+  chatBranch:
+    title: ChatBranch
+    type: string
+    pattern: ^[^-\s]\S*$
+    description: >-
+      A branch name without whitespace or a leading dash, the same rule as for the branch
+      a workflow names for its workspace.
   chatStatus:
     title: ChatStatus
     description: >-
@@ -87,14 +101,17 @@ $defs:
     description: >-
       Exactly one of `agent` and `workspace`: a chat with an agent profile in an empty
       workspace (e.g. the platform assistant `assistant`), or with the assistant of a
-      configured workspace, by the workspace's name only (ADR 0022).
+      configured workspace, by the workspace's name only (ADR 0022). `branch` goes only
+      with `workspace`.
     type: object
     additionalProperties: false
     required: [text]
     oneOf:
       - required: [agent]
         not:
-          required: [workspace]
+          anyOf:
+            - required: [workspace]
+            - required: [branch]
       - required: [workspace]
         not:
           required: [agent]
@@ -107,6 +124,17 @@ $defs:
         description: >-
           Name of a configured workspace whose assistant is enabled (`assistant.enabled`);
           the chat is held with the assistant's profile, on the workspace.
+      branch:
+        $ref: '#/$defs/chatBranch'
+        description: >-
+          The branch of the git workspace the chat works on (ADR 0029), only with
+          `workspace`. A writing chat continues the branch when the remote has it, and
+          starts it from the default branch otherwise; the branch must start with one of
+          the workspace's `assistant.branchPrefixes` and is never the default branch.
+          Without it, a writing chat works on `tendworks/chat-<chat id>`. A read-only chat
+          checks out any branch the remote has, regardless of the prefixes, and never
+          creates one: a branch the remote does not have fails the chat with git's reason.
+          Several chats may work on the same branch. Refused for a directory workspace.
       text:
         type: string
         minLength: 1

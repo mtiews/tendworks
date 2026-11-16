@@ -244,8 +244,11 @@ describe("agent runtime API: chats", () => {
     const runtime = createAgentRuntime({
       profiles: [assistant, slow],
       sleep: () => new Promise<void>((resolve) => turns.push(resolve)),
-      workspaces: (name) => (name === "app" || name === "docs" ? createEmptyWorkspace() : undefined),
-      assistants: (name) => (name === "app" ? { profile: "assistant", write: false } : undefined),
+      workspaces: (name) => (name === "app" || name === "docs" || name === "proto" ? createEmptyWorkspace() : undefined),
+      assistants: (name) =>
+        name === "app" || name === "proto"
+          ? { profile: "assistant", write: name === "proto", branchPrefixes: ["prototype/"], defaultBranch: "main" }
+          : undefined,
     });
     const api = createAgentRuntimeApi({ runtime });
     const call = (method: string, path: string, body?: unknown) =>
@@ -339,6 +342,24 @@ describe("agent runtime API: chats", () => {
     expect(started.status).toBe(201);
     expect(chat).toMatchObject({ agent: "assistant", workspace: "app", write: false });
     expect(await (await call("GET", `/chats/${chat.id}`)).json()).toMatchObject({ workspace: "app", write: false });
+  });
+
+  it("starts a writing chat on a branch under a listed prefix, and refuses a branch it may not work on or one with a profile", async () => {
+    const { call } = setup();
+
+    const started = await call("POST", "/chats", { workspace: "proto", branch: "prototype/login-flow", text: "Hello" });
+    const outside = await call("POST", "/chats", { workspace: "proto", branch: "release/1.0", text: "Hello" });
+    const withProfile = await call("POST", "/chats", { agent: "assistant", branch: "prototype/x", text: "Hello" });
+    const notText = await call("POST", "/chats", { workspace: "proto", branch: 42, text: "Hello" });
+
+    expect(started.status).toBe(201);
+    expect(await started.json()).toMatchObject({ workspace: "proto", write: true, branch: "prototype/login-flow" });
+    expect(outside.status).toBe(400);
+    expect(await outside.json()).toMatchObject({ title: "Branch not allowed", detail: expect.stringContaining("must start with one of its assistant.branchPrefixes (prototype/)") });
+    for (const refused of [withProfile, notText]) {
+      expect(refused.status).toBe(400);
+      expect(await refused.json()).toMatchObject({ title: "Invalid request" });
+    }
   });
 
   it("refuses a workspace without an enabled assistant, an unknown one, a repository URL, and both a profile and a workspace", async () => {

@@ -487,7 +487,7 @@ The former roadmap steps 2–6 move back by one.
 
 The platform serves many repositories and use cases with three generic building blocks:
 
-- **Workspaces** are declared once, by name: `git` on any host with the workspace's own credential, or a `directory` under roots the operator allows (ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). A workspace may enable a workspace assistant, read-only by default; the platform assistant answers questions about the platform.
+- **Workspaces** are declared once, by name: `git` on any host with the workspace's own credential, or a `directory` under roots the operator allows (ADR 0022 (workspaces-are-declared-once-with-their-own-credentials)). A workspace may enable a workspace assistant, read-only by default; a writing one works on its own chat branch or on a branch under the prefixes the workspace lists (ADR 0029 (chats-work-on-a-chosen-branch-of-a-git-workspace)). The platform assistant answers questions about the platform.
 - **Trigger bindings** start a workflow per workspace when their trigger fires (`schedule`, `github-issues`, or `manual`, fired by hand through the API), with trigger sources as pluggable implementations behind a port (ADR 0023 (trigger-bindings-start-a-workflow-per-workspace-from-pluggable-sources), ADR 0028 (manual-trigger-bindings-start-a-workflow-by-hand)).
 - **Notifications** reach the operator through notification channels, Pushover first, carrying the run's artifacts (ADR 0025 (notification-channels-deliver-selected-events-through-adapters)).
 

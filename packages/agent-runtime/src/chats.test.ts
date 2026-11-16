@@ -8,6 +8,7 @@ import { parse } from "yaml";
 import { dyingWorker, refusingRemovals, scriptedSandboxes, scriptedTemplate, type AgentScript } from "./claude-code/scripted-acp-agent.stub.js";
 import {
   AssistantNotEnabledError,
+  ChatBranchError,
   ChatBusyError,
   ChatEndedError,
   ChatNotAllowedError,
@@ -22,7 +23,7 @@ import {
   UnknownWorkspaceError,
 } from "./index.js";
 import { toChat, type ChatFacts } from "./chats.js";
-import { createGitWorkspace, type Workspace } from "./workspace.js";
+import { createGitWorkspace, type ChatAssistant, type Workspace } from "./workspace.js";
 
 const assistant: AgentProfile.AgentProfile = {
   apiVersion: "tendworks.dev/v1",
@@ -71,7 +72,7 @@ function setup(
     cancelGraceMs?: number;
     profiles?: AgentProfile.AgentProfile[];
     workspaces?: (name: string) => Workspace | undefined;
-    assistants?: (workspace: string) => { profile: string; write: boolean } | undefined;
+    assistants?: (workspace: string) => ChatAssistant | undefined;
   } = {},
 ) {
   const { store = createInMemoryTaskStore(), transcripts = createInMemoryTranscriptStore(), sandboxes = scriptedSandboxes(script, platform.exec), api = sandboxes.api } = platform;
@@ -572,11 +573,19 @@ describe("chats with a workspace's assistant", () => {
   const url = "https://git.example/acme/app.git";
   const workspaceAssistant: AgentProfile.AgentProfile = { ...assistant, metadata: { name: "workspace-assistant" } };
   const app = createGitWorkspace({ name: "app", url, defaultBranch: "main", credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" }, env: "GH_TOKEN" } }, secrets);
-  /** Workspaces `app` (assistant `write` as given), `docs` (assistant disabled). */
+  /**
+   * Workspaces `app` (git, assistant `write` as given, branches under `prototype/` and `main`
+   * allowed), `docs` (assistant disabled), `notes` (a directory, its assistant writing).
+   */
   const configured = (write: boolean) => ({
     profiles: [assistant, workspaceAssistant],
-    workspaces: (name: string) => (name === "app" || name === "docs" ? app : undefined),
-    assistants: (name: string) => (name === "app" ? { profile: "workspace-assistant", write } : undefined),
+    workspaces: (name: string) => (name === "app" || name === "docs" || name === "notes" ? app : undefined),
+    assistants: (name: string): ChatAssistant | undefined =>
+      name === "app"
+        ? { profile: "workspace-assistant", write, branchPrefixes: ["prototype/", "main"], defaultBranch: "main" }
+        : name === "notes"
+          ? { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/"] }
+          : undefined,
   });
 
   it("starts a read-only chat by the workspace's name: the checkout gets the credential, the session never", async () => {
@@ -599,9 +608,99 @@ describe("chats with a workspace's assistant", () => {
     const started = await runtime.startChat({ workspace: "app" }, say("Fix the typo"));
     await waiting(runtime, started.id);
 
-    expect(started).toMatchObject({ workspace: "app", write: true });
+    expect(started).toMatchObject({ workspace: "app", write: true, branch: `tendworks/chat-${started.id}` });
     expect(sandboxes.execs[0]?.request.command.at(-1)).toBe(`tendworks/chat-${started.id}`);
     expect(sandboxes.attached[0]?.request.env).toMatchObject({ ...helperEnv, GH_TOKEN: token });
+  });
+
+  it("works on a branch the writing chat was started on under a listed prefix, and a later chat continues it", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Built."] }, configured(true));
+
+    const first = await runtime.startChat({ workspace: "app", branch: "prototype/login-flow" }, say("Build a prototype"));
+    const chat = await waiting(runtime, first.id);
+    const later = await runtime.startChat({ workspace: "app", branch: "prototype/login-flow" }, say("Go on"));
+    await waiting(runtime, later.id);
+
+    expect(first).toMatchObject({ workspace: "app", write: true, branch: "prototype/login-flow" });
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect(sandboxes.execs.map(({ request }) => request.command.at(-1))).toEqual(["prototype/login-flow", "prototype/login-flow"]);
+    expect((await runtime.listChats()).map((listed) => listed.branch)).toEqual(["prototype/login-flow", "prototype/login-flow"]);
+  });
+
+  it("checks out any branch a read-only chat was started on, also outside the prefixes and the default branch, without the session getting the credential", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Reviewed."] }, configured(false));
+
+    const review = await runtime.startChat({ workspace: "app", branch: "tendworks/issue-42" }, say("Review this branch"));
+    const chat = await waiting(runtime, review.id);
+    const onDefault = await runtime.startChat({ workspace: "app", branch: "main" }, say("And the default branch"));
+    await waiting(runtime, onDefault.id);
+
+    expect(review).toMatchObject({ workspace: "app", write: false, branch: "tendworks/issue-42" });
+    expect(isChat(chat), JSON.stringify(isChat.errors)).toBe(true);
+    expect(sandboxes.execs.map(({ request }) => request.command.slice(-2))).toEqual([
+      ["no-push", "tendworks/issue-42"],
+      ["no-push", "main"],
+    ]);
+    expect(sandboxes.execs[0]?.request.env).toEqual(helperEnv);
+    expect(Object.values(sandboxes.attached[0]?.request.env ?? {})).not.toContain(token);
+  });
+
+  it("checks out a read-only chat's branch again, read-only, when it resumes in a new sandbox", async () => {
+    const first = setup({ reply: ["Hi"] }, configured(false));
+    const { id } = await first.runtime.startChat({ workspace: "app", branch: "tendworks/issue-42" }, say("Hello"));
+    await waiting(first.runtime, id);
+
+    const second = setup({ reply: ["Again"] }, { ...configured(false), store: first.store, transcripts: first.transcripts });
+    await second.runtime.sendChatMessage(id, say("Hello again"));
+    await waiting(second.runtime, id);
+
+    expect(second.sandboxes.execs[0]?.request.command.slice(-2)).toEqual(["no-push", "tendworks/issue-42"]);
+    expect(Object.values(second.sandboxes.attached[0]?.request.env ?? {})).not.toContain(token);
+    expect(await second.runtime.getChat(id)).toMatchObject({ write: false, branch: "tendworks/issue-42" });
+  });
+
+  it("keeps a read-only chat without a branch on the default branch", async () => {
+    const { runtime, sandboxes } = setup({ reply: ["Read it."] }, configured(false));
+
+    const started = await runtime.startChat({ workspace: "app" }, say("What is in the README?"));
+    await waiting(runtime, started.id);
+
+    expect(started.branch).toBeUndefined();
+    expect(sandboxes.execs[0]?.request.command.at(-1)).toBe("no-push");
+  });
+
+  it("refuses a branch it may not work on before anything starts, saying why", async () => {
+    const writing = setup({}, configured(true));
+    const refused = (workspace: string, branch: string, runtime = writing.runtime) => runtime.startChat({ workspace, branch }, say("Hello"));
+
+    await expect(refused("app", "release/1.0")).rejects.toThrow(ChatBranchError);
+    await expect(refused("app", "release/1.0")).rejects.toThrow("branch release/1.0 is not allowed for chats with the assistant of workspace app: it must start with one of its assistant.branchPrefixes (prototype/, main)");
+    await expect(refused("app", "prototype")).rejects.toThrow("must start with one of its assistant.branchPrefixes");
+    await expect(refused("app", "main")).rejects.toThrow("branch main is the default branch of workspace app; a chat cannot work on it");
+    await expect(refused("app", "-x")).rejects.toThrow("branch -x is no valid branch name: no whitespace and no leading dash");
+    await expect(refused("app", "prototype/a b")).rejects.toThrow("no valid branch name");
+    await expect(refused("notes", "prototype/x")).rejects.toThrow("workspace notes is a directory, which has no branches; start the chat without branch");
+    const readOnly = setup({}, configured(false));
+    await expect(refused("app", "-x", readOnly.runtime)).rejects.toThrow("branch -x is no valid branch name: no whitespace and no leading dash");
+    await expect(refused("app", "feature/a b", readOnly.runtime)).rejects.toThrow(ChatBranchError);
+    await expect(refused("ghost", "prototype/x")).rejects.toThrow(UnknownWorkspaceError);
+
+    expect(writing.sandboxes.created).toEqual([]);
+    expect(readOnly.sandboxes.created).toEqual([]);
+    expect(await writing.runtime.listChats()).toEqual([]);
+  });
+
+  it("checks out the chat's branch again when it resumes in a new sandbox, e.g. after a restart", async () => {
+    const first = setup({ reply: ["Hi"] }, configured(true));
+    const { id } = await first.runtime.startChat({ workspace: "app", branch: "prototype/login-flow" }, say("Hello"));
+    await waiting(first.runtime, id);
+
+    const second = setup({ reply: ["Again"] }, { ...configured(true), store: first.store, transcripts: first.transcripts });
+    await second.runtime.sendChatMessage(id, say("Hello again"));
+    await waiting(second.runtime, id);
+
+    expect(second.sandboxes.execs[0]?.request.command.at(-1)).toBe("prototype/login-flow");
+    expect(await second.runtime.getChat(id)).toMatchObject({ branch: "prototype/login-flow" });
   });
 
   it("stays read-only in the next process, e.g. after a restart", async () => {

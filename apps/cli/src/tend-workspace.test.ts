@@ -9,6 +9,7 @@ async function tend(args: string[]) {
       workspaces: [
         { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "app" }, spec: { git: { url: "https://git.example/acme/app.git", defaultBranch: "main" }, assistant: { enabled: true } } },
         { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "notes" }, spec: { directory: { path: "/srv/workspaces/notes" }, assistant: { enabled: true, write: true } } },
+        { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "proto" }, spec: { git: { url: "https://git.example/acme/proto.git", defaultBranch: "main" }, assistant: { enabled: true, write: true, branchPrefixes: ["prototype/", "spike/"] } } },
         { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "site" }, spec: { git: { url: "https://git.example/acme/site.git", defaultBranch: "main" } } },
       ],
     }),
@@ -21,19 +22,20 @@ async function tend(args: string[]) {
 }
 
 describe("tend workspace list", () => {
-  it("shows every workspace with its kind and assistant, and whether the assistant may write", async () => {
+  it("shows every workspace with its kind and assistant, whether the assistant may write, and its branch prefixes", async () => {
     const { exitCode, stdout } = await tend(["workspace", "list"]);
 
     expect(exitCode).toBe(0);
-    expect(stdout).toMatch(/^NAME\s+KIND\s+ASSISTANT$/m);
-    expect(stdout).toMatch(/^app\s+git\s+workspace-assistant \(read-only\)$/m);
-    expect(stdout).toMatch(/^notes\s+directory\s+workspace-assistant \(may write\)$/m);
-    expect(stdout).toMatch(/^site\s+git\s+-$/m);
+    expect(stdout).toMatch(/^NAME\s+KIND\s+ASSISTANT\s+BRANCH PREFIXES$/m);
+    expect(stdout).toMatch(/^app\s+git\s+workspace-assistant \(read-only\)\s+-$/m);
+    expect(stdout).toMatch(/^notes\s+directory\s+workspace-assistant \(may write\)\s+-$/m);
+    expect(stdout).toMatch(/^proto\s+git\s+workspace-assistant \(may write\)\s+prototype\/, spike\/$/m);
+    expect(stdout).toMatch(/^site\s+git\s+-\s+-$/m);
   });
 
   it("prints the list as JSON", async () => {
     const { stdout } = await tend(["workspace", "list", "-o", "json"]);
 
-    expect(JSON.parse(stdout)).toMatchObject({ items: [{ name: "app", kind: "git", assistant: { profile: "workspace-assistant", write: false } }, { name: "notes" }, { name: "site" }] });
+    expect(JSON.parse(stdout)).toMatchObject({ items: [{ name: "app", kind: "git", assistant: { profile: "workspace-assistant", write: false } }, { name: "notes" }, { name: "proto", assistant: { branchPrefixes: ["prototype/", "spike/"] } }, { name: "site" }] });
   });
 });

@@ -62,6 +62,7 @@ export function ChatWindow({ chatId, phone }: { chatId: string; phone: boolean }
     ["Agent", chat.agent],
     ["Status", <span className={`status status-${chat.status}`}>{chat.status}</span>],
     ...(chat.workspace ? [["Workspace", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`] as [string, ReactNode]] : []),
+    ...(chat.branch ? [["Branch", chat.branch] as [string, ReactNode]] : []),
     ["Started", <Time value={chat.startedAt} />],
     ["Last activity", <Time value={chat.lastActivityAt} />],
     ...(chat.endedAt ? [["Ended", <Time value={chat.endedAt} />] as [string, ReactNode]] : []),

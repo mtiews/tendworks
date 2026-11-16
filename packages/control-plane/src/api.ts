@@ -268,21 +268,24 @@ export function createControlPlaneApi({
   app.post("/chats", authenticated, async (c) => {
     const body = (await c.req.json().catch(() => undefined)) as Record<string, unknown> | undefined;
     const text = textOf(body);
-    const { agent, workspace, ...rest } = body ?? {};
+    const { agent, workspace, branch, ...rest } = body ?? {};
     const valid =
       text !== undefined &&
       Object.keys(rest).every((key) => key === "text") &&
-      ((typeof agent === "string" && workspace === undefined) || (typeof workspace === "string" && agent === undefined));
+      ((typeof agent === "string" && workspace === undefined && branch === undefined) ||
+        (typeof workspace === "string" && agent === undefined && (branch === undefined || typeof branch === "string")));
     if (!valid) {
       return problem(
         400,
         "Invalid request",
-        "the body must be { agent, text } with the name of an agent profile that allows chats, or { workspace, text } with the name of a workspace whose assistant is enabled, and the first message",
+        "the body must be { agent, text } with the name of an agent profile that allows chats, or { workspace, branch?, text } with the name of a workspace whose assistant is enabled and the branch to work on, and the first message",
       );
     }
     return throughRuntime(async (runtime) => {
-      // The agent runtime decides whether the profile or the workspace's assistant allows the chat.
-      const chat = await runtime.startChat(typeof agent === "string" ? { agent, text } : { workspace: workspace as string, text });
+      // The agent runtime decides whether the profile or the workspace's assistant allows the chat, and on which branch.
+      const chat = await runtime.startChat(
+        typeof agent === "string" ? { agent, text } : { workspace: workspace as string, ...(typeof branch === "string" ? { branch } : {}), text },
+      );
       return c.json(chat satisfies Schemas["chat"], 201, { location: `/chats/${chat.id}` });
     });
   });

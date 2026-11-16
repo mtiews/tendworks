@@ -44,7 +44,7 @@ function keyboard() {
 function platform(answers: string[] | "never" = []) {
   const agentRuntime = createInMemoryAgentRuntime({
     chatAgents: ["assistant", "workspace-assistant"],
-    workspaces: { app: { profile: "workspace-assistant", write: false }, docs: undefined },
+    workspaces: { app: { profile: "workspace-assistant", write: false }, proto: { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/"] }, docs: undefined },
   });
   const api = createControlPlaneApi({
     agentRuntime,
@@ -242,6 +242,65 @@ describe("tend chat", () => {
     expect(agentRuntime.chats.size).toBe(0);
   });
 
+  it("starts a workspace chat on the branch given with --branch, and says so", async () => {
+    const { exitCode, input, agentRuntime, out } = chat(["--workspace", "proto", "--branch", "prototype/login-flow"], ["On it."]);
+
+    await until(() => out().includes("> "));
+    input.type("Build the login flow.");
+    await until(() => out().includes("On it."));
+    input.close();
+
+    expect(await exitCode).toBe(0);
+    const [started] = agentRuntime.chats.values();
+    expect(started).toMatchObject({ workspace: "proto", write: true, branch: "prototype/login-flow" });
+    expect(out()).toMatch(/chat \S+ with workspace-assistant on workspace proto \(may write\) on branch prototype\/login-flow;/);
+  });
+
+  it("refuses --branch without --workspace before anything starts", async () => {
+    const { exitCode, agentRuntime, err, out } = chat(["assistant", "--branch", "prototype/x"], []);
+
+    expect(await exitCode).toBe(1);
+    expect(err()).toMatch(/tend: --branch .*--workspace/);
+    expect(out()).not.toContain("> ");
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("prints the API's reason when it refuses the branch", async () => {
+    const { exitCode, input, agentRuntime, err, out } = chat(["--workspace", "proto", "--branch", "feature/x"], []);
+
+    await until(() => out().includes("> "));
+    input.type("Hello");
+
+    expect(await exitCode).toBe(1);
+    expect(err()).toMatch(/^tend: branch feature\/x is not allowed for chats with the assistant of workspace proto: it must start with one of its assistant\.branchPrefixes \(prototype\/\)$/m);
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("prints a clear message when the branch name is invalid", async () => {
+    const { exitCode, input, agentRuntime, err, out } = chat(["--workspace", "proto", "--branch", "prototype/a b"], []);
+
+    await until(() => out().includes("> "));
+    input.type("Hello");
+
+    expect(await exitCode).toBe(1);
+    expect(err()).toMatch(/^tend: branch prototype\/a b is no valid branch name/m);
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("shows git's reason when a read-only chat's branch does not exist on the remote", async () => {
+    const { exitCode, input, agentRuntime, out } = chat(["--workspace", "app", "--branch", "prototype/gone"], "never");
+
+    await until(() => out().includes("> "));
+    input.type("Review the prototype.");
+    await until(() => out().includes("on branch prototype/gone;"));
+    const [started] = agentRuntime.chats.values();
+    agentRuntime.failCheckout(started!.id, "fatal: Remote branch prototype/gone not found in upstream origin");
+
+    expect(await exitCode).toBe(0);
+    expect(out()).toMatch(/checkout\s+https:\/\/git\.example\/app\.git prototype\/gone \(exit code 128\)\n\s+fatal: Remote branch prototype\/gone not found in upstream origin\n/);
+    expect(out()).toMatch(/chat \S+ has ended/);
+  });
+
   it("leaves without starting a chat when nothing was typed", async () => {
     const { exitCode, input, agentRuntime, out } = chat(["assistant"], []);
 
@@ -254,17 +313,19 @@ describe("tend chat", () => {
 });
 
 describe("tend chat list, get and end", () => {
-  it("lists chats with title, profile, workspace, status, start, last activity and cost", async () => {
+  it("lists chats with title, profile, workspace, branch, status, start, last activity and cost", async () => {
     const { agentRuntime, tend } = platform();
     const id = await existingChat(agentRuntime, "Hi.");
     const inWorkspace = await agentRuntime.startChat({ workspace: "app", text: "Hello" });
+    const onBranch = await agentRuntime.startChat({ workspace: "proto", branch: "prototype/login-flow", text: "Hello" });
 
     const { exitCode, out } = tend(["chat", "list"]);
 
     expect(await exitCode).toBe(0);
-    expect(out()).toMatch(/^ID\s+TITLE\s+AGENT\s+WORKSPACE\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
-    expect(out()).toMatch(new RegExp(`^${id}\\s+Hello\\s+assistant\\s+-\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
-    expect(out()).toMatch(new RegExp(`^${inWorkspace.id}\\s+Hello\\s+workspace-assistant\\s+app\\s+working\\s`, "m"));
+    expect(out()).toMatch(/^ID\s+TITLE\s+AGENT\s+WORKSPACE\s+BRANCH\s+STATUS\s+STARTED\s+LAST ACTIVITY\s+COST$/m);
+    expect(out()).toMatch(new RegExp(`^${id}\\s+Hello\\s+assistant\\s+-\\s+-\\s+input-required\\s+\\S+\\s+\\S+\\s+0\\.01 USD$`, "m"));
+    expect(out()).toMatch(new RegExp(`^${inWorkspace.id}\\s+Hello\\s+workspace-assistant\\s+app\\s+-\\s+working\\s`, "m"));
+    expect(out()).toMatch(new RegExp(`^${onBranch.id}\\s+Hello\\s+workspace-assistant\\s+proto\\s+prototype/login-flow\\s+working\\s`, "m"));
   });
 
   it("shortens a long, multi-line title to one line in the list and shows it whole in get", async () => {
@@ -290,6 +351,27 @@ describe("tend chat list, get and end", () => {
 
     expect(await exitCode).toBe(0);
     expect(out()).toMatch(/^WORKSPACE\s+app \(read-only\)$/m);
+    expect(out()).not.toMatch(/^BRANCH/m);
+  });
+
+  it("shows the branch a chat works on, also as JSON and YAML", async () => {
+    const { agentRuntime, tend } = platform();
+    const { id } = await agentRuntime.startChat({ workspace: "proto", branch: "prototype/login-flow", text: "Hello" });
+
+    const got = tend(["chat", "get", id]);
+    const json = tend(["chat", "get", id, "-o", "json"]);
+    const yaml = tend(["chat", "get", id, "-o", "yaml"]);
+    const listed = tend(["chat", "list", "-o", "json"]);
+
+    expect(await got.exitCode).toBe(0);
+    expect(got.out()).toMatch(/^WORKSPACE\s+proto \(may write\)$/m);
+    expect(got.out()).toMatch(/^BRANCH\s+prototype\/login-flow$/m);
+    expect(await json.exitCode).toBe(0);
+    expect(JSON.parse(json.out())).toMatchObject({ id, workspace: "proto", branch: "prototype/login-flow" });
+    expect(await yaml.exitCode).toBe(0);
+    expect(yaml.out()).toContain("branch: prototype/login-flow");
+    expect(await listed.exitCode).toBe(0);
+    expect(JSON.parse(listed.out())).toMatchObject({ items: [{ id, branch: "prototype/login-flow" }] });
   });
 
   it("prints the chat list and one chat as JSON or YAML", async () => {
