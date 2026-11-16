@@ -353,13 +353,18 @@ export async function runTend(args: string[], io: TendIo): Promise<number> {
     )
     .argument("[profile]", `agent profile that allows chats (default: ${PLATFORM_ASSISTANT}, the platform assistant)`)
     .option("--workspace <name>", "chat with the assistant of this workspace about its contents (tend workspace list shows those with one; read-only unless the workspace allows writing)")
+    .option("--branch <branch>", "with --workspace: work on this branch of a git workspace; a writing chat only under the workspace's branch prefixes (tend workspace list), continuing the branch or starting it from the default branch, a read-only chat on any existing branch")
     .option("-v, --verbose", VERBOSE_HELP)
-    .action(async (profile: string | undefined, options: { workspace?: string; verbose?: boolean }, command: Command) => {
+    .action(async (profile: string | undefined, options: { workspace?: string; branch?: string; verbose?: boolean }, command: Command) => {
       if (profile !== undefined && options.workspace !== undefined) {
         throw new Error("give either a profile or --workspace: a workspace's assistant is held with the profile its workspace names");
       }
+      if (options.branch !== undefined && options.workspace === undefined) {
+        throw new Error("--branch goes only with --workspace: only a workspace's assistant works on a branch");
+      }
       const { baseUrl, client } = controlPlane(command);
-      const chatWith = options.workspace === undefined ? { agent: profile ?? PLATFORM_ASSISTANT } : { workspace: options.workspace };
+      const chatWith =
+        options.workspace === undefined ? { agent: profile ?? PLATFORM_ASSISTANT } : { workspace: options.workspace, ...(options.branch === undefined ? {} : { branch: options.branch }) };
       await startChat({ chatWith, client, baseUrl, io, verbose: options.verbose === true });
     });
 
@@ -500,15 +505,16 @@ function formatAgentList(list: AgentList): string {
 
 function formatChatList(list: ChatList): string {
   const rows = [
-    ["ID", "TITLE", "AGENT", "WORKSPACE", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
-    ...list.items.map((chat) => [chat.id, shortTitle(chat.title), chat.agent, chat.workspace ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
+    ["ID", "TITLE", "AGENT", "WORKSPACE", "BRANCH", "STATUS", "STARTED", "LAST ACTIVITY", "COST"],
+    ...list.items.map((chat) => [chat.id, shortTitle(chat.title), chat.agent, chat.workspace ?? "-", chat.branch ?? "-", chat.status, chat.startedAt, chat.lastActivityAt, chat.cost ? formatCost(chat.cost) : ""]),
   ];
   return table(rows);
 }
 
 function formatWorkspaceList(list: WorkspaceList): string {
   const assistantOf = ({ assistant }: WorkspaceList["items"][number]) => (assistant ? `${assistant.profile} (${assistant.write ? "may write" : "read-only"})` : "-");
-  return table([["NAME", "KIND", "ASSISTANT"], ...list.items.map((workspace) => [workspace.name, workspace.kind, assistantOf(workspace)])]);
+  const prefixesOf = ({ assistant }: WorkspaceList["items"][number]) => (assistant?.branchPrefixes.length ? assistant.branchPrefixes.join(", ") : "-");
+  return table([["NAME", "KIND", "ASSISTANT", "BRANCH PREFIXES"], ...list.items.map((workspace) => [workspace.name, workspace.kind, assistantOf(workspace), prefixesOf(workspace)])]);
 }
 
 function formatSubscriptionList(list: SubscriptionList): string {
@@ -519,9 +525,10 @@ function formatSubscriptionList(list: SubscriptionList): string {
   ]);
 }
 
-/** ` on workspace <name> (read-only)` for a chat with a workspace's assistant; empty otherwise. */
+/** ` on workspace <name> (read-only)[ on branch <branch>]` for a chat with a workspace's assistant; empty otherwise. */
 function onWorkspace(chat: Chat): string {
-  return chat.workspace === undefined ? "" : ` on workspace ${chat.workspace} (${chat.write ? "may write" : "read-only"})`;
+  if (chat.workspace === undefined) return "";
+  return ` on workspace ${chat.workspace} (${chat.write ? "may write" : "read-only"})${chat.branch === undefined ? "" : ` on branch ${chat.branch}`}`;
 }
 
 function formatChat(chat: Chat): string {
@@ -530,6 +537,7 @@ function formatChat(chat: Chat): string {
     ["TITLE", shortTitle(chat.title, Infinity)],
     ["AGENT", chat.agent],
     ...(chat.workspace ? [["WORKSPACE", `${chat.workspace} (${chat.write ? "may write" : "read-only"})`]] : []),
+    ...(chat.branch ? [["BRANCH", chat.branch]] : []),
     ["STATUS", chat.status],
     ["STARTED", chat.startedAt],
     ["LAST ACTIVITY", chat.lastActivityAt],
@@ -806,7 +814,7 @@ async function startChat({
   io,
   verbose,
 }: {
-  chatWith: { agent: string } | { workspace: string };
+  chatWith: { agent: string } | { workspace: string; branch?: string };
   client: ControlPlaneClient;
   baseUrl: string;
   io: TendIo;
