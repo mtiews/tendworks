@@ -213,7 +213,10 @@ export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }:
         if (!assistant) {
           throw new ChatRefusedError("Chat not allowed", `workspace ${workspace} has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it`);
         }
-        if (branch !== undefined && !(assistant.write && (assistant.branchPrefixes ?? []).some((prefix) => branch.startsWith(prefix)))) {
+        if (branch !== undefined && !assistant.write) {
+          throw new ChatRefusedError("Branch not allowed", `the assistant of workspace ${workspace} is read-only and stays on the default branch; start the chat without branch`);
+        }
+        if (branch !== undefined && !(assistant.branchPrefixes ?? []).some((prefix) => branch.startsWith(prefix))) {
           throw new ChatRefusedError("Branch not allowed", `branch ${branch} is not allowed for chats with the assistant of workspace ${workspace}: it must start with one of its assistant.branchPrefixes (${(assistant.branchPrefixes ?? []).join(", ")})`);
         }
         agent = assistant.profile;

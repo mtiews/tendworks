@@ -1,7 +1,7 @@
 import type { A2A, Chat as Contract } from "@tendworks/shared";
 import { COST, TRANSCRIPT } from "./agent-tasks.js";
 import type { Cost } from "./harness.js";
-import { isBranchName } from "./workspace.js";
+import { isBranchName, type ChatAssistant } from "./workspace.js";
 
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
@@ -96,18 +96,15 @@ export function chatBranch(chatId: string): string {
 
 /**
  * Why a chat with a workspace's assistant may not work on `branch` (ADR 0029), or undefined
- * when it may: a writing chat on its own branch or on one under a listed prefix of a git
- * workspace, never on the default branch. A read-only chat stays on the default branch.
+ * when it may: a writing chat on a branch under a listed prefix of a git workspace, never on
+ * the default branch. A read-only chat stays on the default branch.
  */
-export function chatBranchProblem(
-  branch: string,
-  { workspace, chatId, assistant }: { workspace: string; chatId: string; assistant: { write: boolean; branchPrefixes: readonly string[]; defaultBranch?: string } },
-): string | undefined {
+export function chatBranchProblem(branch: string, { workspace, assistant }: { workspace: string; assistant: ChatAssistant }): string | undefined {
   if (assistant.defaultBranch === undefined) return `workspace ${workspace} is a directory, which has no branches; start the chat without branch`;
   if (!isBranchName(branch)) return `branch ${branch} is no valid branch name: no whitespace and no leading dash`;
   if (!assistant.write) return `the assistant of workspace ${workspace} is read-only and stays on the default branch; start the chat without branch`;
   if (branch === assistant.defaultBranch) return `branch ${branch} is the default branch of workspace ${workspace}; a chat cannot work on it`;
-  if (branch === chatBranch(chatId) || assistant.branchPrefixes.some((prefix) => branch.startsWith(prefix))) return undefined;
+  if (assistant.branchPrefixes.some((prefix) => branch.startsWith(prefix))) return undefined;
   const allowed = assistant.branchPrefixes.length > 0 ? `one of its assistant.branchPrefixes (${assistant.branchPrefixes.join(", ")})` : "a prefix listed in its assistant.branchPrefixes, which lists none";
   return `branch ${branch} is not allowed for chats with the assistant of workspace ${workspace}: it must start with ${allowed}`;
 }

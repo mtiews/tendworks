@@ -453,7 +453,7 @@ export function createAgentRuntime({
         if (!workspaces(workspace)) throw new UnknownWorkspaceError(workspace);
         const assistant = assistants(workspace);
         if (!assistant) throw new AssistantNotEnabledError(workspace);
-        const problem = branch === undefined ? undefined : chatBranchProblem(branch, { workspace, chatId: id, assistant });
+        const problem = branch === undefined ? undefined : chatBranchProblem(branch, { workspace, assistant });
         if (problem !== undefined) throw new ChatBranchError(problem);
         agent = assistant.profile;
         // A writing chat in a git workspace works on its branch, kept so a resumed chat checks out the same one.
