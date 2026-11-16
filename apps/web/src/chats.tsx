@@ -113,7 +113,7 @@ function ChatGroup({ level, title, chats, readAt, selected }: { level: 1 | 2; ti
 
 function ChatItem({ chat, readAt, selected }: { chat: Chat; readAt: number; selected: boolean }) {
   const state = stateOf(chat);
-  const sub = [chat.agent, chat.workspace, chat.status === "failed" ? "failed" : undefined, chat.cost && formatCost(chat.cost)].filter(Boolean).join(" · ");
+  const sub = [chat.agent, chat.workspace, chat.branch, chat.status === "failed" ? "failed" : undefined, chat.cost && formatCost(chat.cost)].filter(Boolean).join(" · ");
   return (
     <Link to={`/chats/${encodeURIComponent(chat.id)}`} current={selected} className={`item item-${state}`}>
       <span className={`dot dot-${state}`} aria-hidden="true" />

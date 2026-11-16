@@ -377,6 +377,139 @@ describe("new chat", () => {
   });
 });
 
+/**
+ * A platform for choosing a chat's branch: workspace `proto` with a writing assistant that
+ * allows `prototype/` and `spike/` branches, `app` with a read-only one, and the directory
+ * workspace `notes` with a read-only one.
+ */
+function branchPlatform() {
+  const agentRuntime = createInMemoryAgentRuntime({
+    chatAgents: ["assistant", "workspace-assistant"],
+    workspaces: {
+      proto: { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/", "spike/"] },
+      app: { profile: "workspace-assistant", write: false },
+      notes: { profile: "workspace-assistant", write: false },
+    },
+  });
+  const configuration = emptyConfiguration({
+    agentProfiles: [profile("assistant", { chat: {} }), profile("workspace-assistant", { chat: {} })],
+    workspaces: [
+      workspace("proto", { enabled: true, write: true, branchPrefixes: ["prototype/", "spike/"] }),
+      workspace("app", { enabled: true }),
+      { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "notes" }, spec: { directory: { path: "/srv/notes" }, assistant: { enabled: true } } },
+    ],
+  });
+  signedIn();
+  const rendered = renderApp({ path: "/ui/chats/new", agentRuntime, configuration });
+  return { ...rendered, agentRuntime };
+}
+
+const branchChoice = () => screen.getByRole<HTMLSelectElement>("combobox", { name: "Branch" });
+const branchName = () => screen.queryByRole<HTMLInputElement>("textbox", { name: "Branch name" });
+const branchField = () => screen.queryByRole<HTMLInputElement>("textbox", { name: "Branch" });
+
+describe("new chat on a branch", () => {
+  it("offers a writing assistant its own chat branch, preselected, and the workspace's prefixes, and starts the chat on prefix + name", async () => {
+    const { user, platform: running, agentRuntime } = branchPlatform();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace proto (may write)");
+    expect(within(branchChoice()).getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "tendworks/chat-<chat id> (default)",
+      "prototype/…",
+      "spike/…",
+    ]);
+    expect(branchChoice().selectedOptions[0]!.textContent).toBe("tendworks/chat-<chat id> (default)");
+    expect(branchName()).toBeNull();
+
+    await user.selectOptions(branchChoice(), "prototype/…");
+    await user.type(branchName()!, "login-flow");
+    await user.type(newChatInput(), "Build the login flow");
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Build the login flow" });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "proto", branch: "prototype/login-flow", text: "Build the login flow" });
+    expect([...agentRuntime.chats.values()][0]).toMatchObject({ workspace: "proto", write: true, branch: "prototype/login-flow" });
+    expect(field("Branch")).toBe("prototype/login-flow");
+  });
+
+  it("starts a writing chat on its own branch without a choice, as before, and asks for a name once a prefix is chosen", async () => {
+    const { user, platform: running, agentRuntime } = branchPlatform();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace proto (may write)");
+    await user.type(newChatInput(), "Hello");
+    await user.selectOptions(branchChoice(), "spike/…");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Start chat" }).disabled).toBe(true);
+    await user.selectOptions(branchChoice(), screen.getByRole("option", { name: "tendworks/chat-<chat id> (default)" }));
+    expect(branchName()).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Hello" });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "proto", text: "Hello" });
+    const [chat] = [...agentRuntime.chats.values()];
+    expect(field("Branch")).toBe(`tendworks/chat-${chat!.id}`);
+  });
+
+  it("offers a read-only assistant a free branch field, empty for the default branch", async () => {
+    const { user, platform: running } = branchPlatform();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace app (read-only)");
+    expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
+    expect(branchField()!.value).toBe("");
+    await user.type(newChatInput(), "What does the README say?");
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+
+    await screen.findByRole("heading", { level: 1, name: "What does the README say?" });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "app", text: "What does the README say?" });
+    expect(screen.queryByText("Branch", { selector: "dt" })).toBeNull();
+  });
+
+  it("starts a read-only chat on the branch entered", async () => {
+    const { user, platform: running } = branchPlatform();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace app (read-only)");
+    await user.type(branchField()!, " agent/42 ");
+    await user.type(newChatInput(), "Review it");
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+
+    await screen.findByRole("heading", { level: 1, name: "Review it" });
+    expect(await posts(running.requests, "/chats")[0]!.json()).toEqual({ workspace: "app", branch: "agent/42", text: "Review it" });
+    expect(field("Branch")).toBe("agent/42");
+  });
+
+  it("offers no branch for a profile or a directory workspace", async () => {
+    const { user } = branchPlatform();
+
+    await screen.findByRole("combobox", { name: "Chat with" });
+    expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
+    expect(branchField()).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Chat with" }), "Workspace notes (read-only)");
+    expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
+    expect(branchField()).toBeNull();
+  });
+
+  it("shows why the platform refused the branch and starts nothing", async () => {
+    const { user, agentRuntime } = branchPlatform();
+
+    await user.selectOptions(await screen.findByRole("combobox", { name: "Chat with" }), "Workspace proto (may write)");
+    await user.selectOptions(branchChoice(), "prototype/…");
+    await user.type(branchName()!, "login flow");
+    await user.type(newChatInput(), "Hello");
+    await user.click(screen.getByRole("button", { name: "Start chat" }));
+
+    expect((await screen.findByRole("alert")).textContent).toBe("Branch not allowed: branch prototype/login flow is no valid branch name: no whitespace and no leading dash");
+    expect(branchName()!.value).toBe("login flow");
+    expect(agentRuntime.chats.size).toBe(0);
+  });
+
+  it("shows each chat's branch in the chat list", async () => {
+    const { agentRuntime } = branchPlatform();
+    await agentRuntime.startChat({ workspace: "proto", branch: "prototype/login-flow", text: "Build it" });
+
+    expect(await screen.findByRole("link", { name: /Build it/ })).toBeTruthy();
+    expect(group("Open")).toEqual([expect.stringMatching(/^Build it.*workspace-assistant · proto · prototype\/login-flow$/)]);
+  });
+});
+
 describe("chats in read-only mode", () => {
   it("lists chats but offers no new chat", async () => {
     const { agentRuntime, configuration } = platform();

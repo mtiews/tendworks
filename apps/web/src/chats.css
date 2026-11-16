@@ -136,3 +136,21 @@ a.button.list-action {
   position: static;
   padding-bottom: 0;
 }
+
+/* A writing chat's branch: the prefix and, once one is chosen, the name beside it; below each other where space is short. */
+.branch-choice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.branch-choice select {
+  flex: 0 1 auto;
+  width: auto;
+  max-width: 100%;
+}
+
+.branch-choice input {
+  flex: 1 1 12rem;
+  width: auto;
+}

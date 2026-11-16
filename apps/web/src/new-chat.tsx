@@ -12,10 +12,18 @@ export const PLATFORM_ASSISTANT = "assistant";
 /** Whom a new chat is with: a profile (`agent`) or a workspace's assistant (`workspace`), as `POST /chats` takes it. */
 type ChatWith = { agent: string } | { workspace: string };
 
+/**
+ * Which branch the operator may choose for a chat (spec #146): a writing assistant its own
+ * `tendworks/chat-<chat id>` or a name under one of the workspace's `branchPrefixes`, a
+ * read-only one any branch the repository has. Absent for a profile and a directory workspace.
+ */
+type BranchChoice = { write: true; prefixes: string[] } | { write: false };
+
 interface Choice {
   value: string;
   label: string;
   chatWith: ChatWith;
+  branch?: BranchChoice;
 }
 
 /**
@@ -24,7 +32,9 @@ interface Choice {
  * workspace that has one (`GET /workspaces`, ADR 0022), and the first message. A profile
  * that serves as a workspace's assistant is offered only through its workspaces (except
  * the platform assistant), so the operator picks the project; `tend chat <profile>` still
- * starts it in an empty workspace. The platform decides; its reason for a refusal shows here.
+ * starts it in an empty workspace. A git workspace's assistant also takes a branch (spec #146): a
+ * writing one a prefix and a name, a read-only one any branch. The platform decides; its
+ * reason for a refusal shows here.
  */
 export function NewChat() {
   const { client, canChange } = useApi();
@@ -37,8 +47,17 @@ export function NewChat() {
       const profiles = agents.items
         .filter((profile) => profile.chat !== undefined && (profile.name === PLATFORM_ASSISTANT || !assistantProfiles.has(profile.name)))
         .map(({ name }): Choice => ({ value: `agent:${name}`, label: name, chatWith: { agent: name } }));
-      const assistants = workspaces.items.flatMap(({ name, assistant }): Choice[] =>
-        assistant ? [{ value: `workspace:${name}`, label: `Workspace ${name} (${assistant.write ? "may write" : "read-only"})`, chatWith: { workspace: name } }] : [],
+      const assistants = workspaces.items.flatMap(({ name, kind, assistant }): Choice[] =>
+        assistant
+          ? [
+              {
+                value: `workspace:${name}`,
+                label: `Workspace ${name} (${assistant.write ? "may write" : "read-only"})`,
+                chatWith: { workspace: name },
+                ...(kind === "git" ? { branch: assistant.write ? { write: true, prefixes: assistant.branchPrefixes } : { write: false } } : {}),
+              },
+            ]
+          : [],
       );
       return [...profiles, ...assistants];
     }, [client]),
@@ -48,22 +67,36 @@ export function NewChat() {
     const workspace = new URLSearchParams(window.location.search).get("workspace");
     return workspace === null ? "" : `workspace:${workspace}`;
   });
+  // The branch as chosen: a writing chat's prefix ("" for its own branch) and name, a read-only chat's branch.
+  const [prefix, setPrefix] = useState("");
+  const [name, setName] = useState("");
   const [text, setText] = useState("");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
-  const ids = { chatWith: useId(), text: useId() };
+  const ids = { chatWith: useId(), branch: useId(), name: useId(), text: useId() };
 
   const chosen =
     choices?.find((choice) => choice.value === picked) ?? choices?.find((choice) => choice.value === `agent:${PLATFORM_ASSISTANT}`) ?? choices?.[0];
 
+  // A prefix the chosen workspace does not list (any longer) counts as none.
+  const chosenPrefix = chosen?.branch?.write && chosen.branch.prefixes.includes(prefix) ? prefix : "";
+  const branch = !chosen?.branch ? undefined : chosen.branch.write ? (chosenPrefix === "" ? undefined : chosenPrefix + name.trim()) : name.trim() || undefined;
+  const missingName = chosenPrefix !== "" && name.trim() === "";
+
+  const choose = (value: string) => {
+    setPicked(value);
+    setPrefix("");
+    setName("");
+  };
+
   const start = async (event: FormEvent) => {
     event.preventDefault();
     // The same rules as the button, which Enter shares.
-    if (!chosen || starting || text.trim() === "") return;
+    if (!chosen || starting || text.trim() === "" || missingName) return;
     setStarting(true);
     setRefusal(undefined);
     try {
-      const chat = await answer(client.POST("/chats", { body: { ...chosen.chatWith, text } }));
+      const chat = await answer(client.POST("/chats", { body: { ...chosen.chatWith, ...(branch === undefined ? {} : { branch }), text } }));
       navigate(`/chats/${encodeURIComponent(chat.id)}`);
     } catch (failure: unknown) {
       setRefusal(failure instanceof AnswerError ? failure.reason : failure instanceof Error ? failure.message : String(failure));
@@ -98,7 +131,7 @@ export function NewChat() {
         <form className="panel form" onSubmit={(event) => void start(event)}>
           <div className="field">
             <label htmlFor={ids.chatWith}>Chat with</label>
-            <select id={ids.chatWith} value={chosen.value} onChange={(event) => setPicked(event.target.value)}>
+            <select id={ids.chatWith} value={chosen.value} onChange={(event) => choose(event.target.value)}>
               {choices.map(({ value, label }) => (
                 <option key={value} value={value}>
                   {label}
@@ -107,6 +140,32 @@ export function NewChat() {
             </select>
             <p className="hint muted">A workspace&apos;s assistant talks about that workspace&apos;s contents; read-only unless the workspace allows writing.</p>
           </div>
+          {chosen.branch?.write === true && (
+            <div className="field">
+              <label htmlFor={ids.branch}>Branch</label>
+              <div className="branch-choice">
+                <select id={ids.branch} value={chosenPrefix} onChange={(event) => setPrefix(event.target.value)}>
+                  <option value="">tendworks/chat-&lt;chat id&gt; (default)</option>
+                  {chosen.branch.prefixes.map((listed) => (
+                    <option key={listed} value={listed}>
+                      {listed}…
+                    </option>
+                  ))}
+                </select>
+                {chosenPrefix !== "" && (
+                  <input id={ids.name} type="text" aria-label="Branch name" required value={name} onChange={(event) => setName(event.target.value)} />
+                )}
+              </div>
+              <p className="hint muted">A branch the repository has is continued, a new one starts from the default branch.</p>
+            </div>
+          )}
+          {chosen.branch?.write === false && (
+            <div className="field">
+              <label htmlFor={ids.branch}>Branch</label>
+              <input id={ids.branch} type="text" value={name} onChange={(event) => setName(event.target.value)} />
+              <p className="hint muted">Any branch the repository has; empty for its default branch.</p>
+            </div>
+          )}
           <div className="field">
             <label htmlFor={ids.text}>Message</label>
             <textarea id={ids.text} rows={4} required value={text} {...enterToSend.inputProps} onChange={(event) => setText(event.target.value)} />
@@ -117,7 +176,7 @@ export function NewChat() {
             </p>
           )}
           <div className="chat-buttons">
-            <button type="submit" className="primary" disabled={starting || text.trim() === ""}>
+            <button type="submit" className="primary" disabled={starting || text.trim() === "" || missingName}>
               Start chat
             </button>
             {enterToSend.hint}
