@@ -37,7 +37,8 @@ image (your Dockerfile, FROM tendworks/sandbox-claude-code)
 
 Keep in mind:
 
-- **`HOME` is `/session/home`, a fresh volume per session.** Anything a tool writes to `HOME` during the image build (caches, settings, logins) is hidden in the sandbox. Put caches and settings in directories of their own and point the tool there with `ENV` (as `PUB_CACHE` below).
+- **`HOME` is `/session/home`, a fresh volume per session.** Anything a tool writes to `HOME` during the image build (SDKs, tool caches, settings, logins) is hidden in the sandbox. Put what the build installs in directories of their own in the image and point the tool there with `ENV`.
+- **A sandbox is replaced, its volumes are not.** A session that resumes in a new sandbox (after idle time or a platform restart) keeps `/workspace` and `/session`, but everything else comes fresh from the image. A package cache the workspace points into (Dart's `.dart_tool/package_config.json` holds absolute paths into the pub cache) therefore belongs on the session volume, e.g. `/session/pub-cache`, not in the image: there it would come back empty and leave those paths dangling.
 - **The platform never pulls images.** Build the image on the sandbox host; the base image must be there too.
 - **No secrets in the image.** Anyone who can read the image can read them. Agents get repository credentials from their workspace and other secrets from the agent profile (`spec.env` with secret references, [operator guide](operator-guide.md#secrets)).
 - **Pin everything:** the base image by its exact tag, each tool by its exact version, downloads by their checksum.
@@ -80,14 +81,13 @@ RUN apt-get update \
  && echo "$FLUTTER_SHA256  /tmp/flutter.tar.xz" | sha256sum -c - \
  && tar -xJf /tmp/flutter.tar.xz -C /opt \
  && rm /tmp/flutter.tar.xz \
- && mkdir -p /opt/pub-cache \
- && chown -R 1000:1000 /opt/flutter /opt/pub-cache \
+ && chown -R 1000:1000 /opt/flutter \
  && rm -rf /var/lib/apt/lists/*
 
-# The pub cache lives in the image, not in HOME (a fresh volume per session), so
-# packages fetched during the build stay available.
+# The pub cache lives on the session volume, next to HOME, so it lasts as long as the
+# workspace whose .dart_tool/package_config.json points into it.
 ENV PATH=/opt/flutter/bin:$PATH \
-    PUB_CACHE=/opt/pub-cache
+    PUB_CACHE=/session/pub-cache
 
 # Flutter writes its tool cache into the SDK directory, so it runs as the sandbox user.
 USER 1000:1000
@@ -199,7 +199,7 @@ Android builds (`flutter build apk`, `appbundle`) need a JDK, the Android SDK an
 
 - Install the JDK from Debian (the base is Debian trixie) and the Android command-line tools from developer.android.com, pinned with their checksum; install the SDK packages (platform, build tools) with `sdkmanager` at fixed versions.
 - Accepting the SDK licenses in the Dockerfile (`sdkmanager --licenses`) is your acceptance as operator; read them.
-- Put `ANDROID_HOME` and the Gradle cache (`GRADLE_USER_HOME`) outside `HOME`, owned by `1000:1000`, for the same reason as `PUB_CACHE`.
+- Put `ANDROID_HOME` outside `HOME` in the image, owned by `1000:1000`, since the build installs it; put the Gradle cache (`GRADLE_USER_HOME`) on the session volume like the pub cache, e.g. `/session/gradle`.
 - Give it at least 8 GiB of memory; Gradle is hungry.
 
 Not possible in a sandbox:
@@ -223,7 +223,7 @@ A derived image does not follow the base's pin by itself: it is built from one e
 | --- | --- |
 | `cannot create a sandbox from template flutter: image ... is not on the sandbox host` | the image was not built on this host, or the tag in the template differs from the built one (`docker image ls local/sandbox-flutter`) |
 | `docker build` fails at `FROM`: image not found | build the base image first (`docker compose -f deploy/compose.yaml --profile sandbox-images build`) with the tag you pass as `BASE` |
-| `Permission denied` under `/opt/flutter` or the pub cache | a directory is not owned by `1000:1000`; `chown` it in the Dockerfile |
-| packages are downloaded again in every session | the cache sits under `HOME`; move it out with `ENV` (`PUB_CACHE`, `GRADLE_USER_HOME`) |
+| `Permission denied` under `/opt/flutter` | a directory is not owned by `1000:1000`; `chown` it in the Dockerfile |
+| after a session resumes, `flutter analyze` or a pre-commit hook cannot find packages that `.dart_tool/package_config.json` lists | the pub cache sits in the image and came back empty in the new sandbox; set `PUB_CACHE` to a directory under `/session` |
 | the agent cannot start (`claude-agent-acp` not found) | `PATH` was overwritten instead of extended |
 | the server stops with `neither a workflow nor a document with a kind` after adding the image | YAML from the image directory inside the configuration directory; move the image out ([Where the image lives](#where-the-image-lives)) |
