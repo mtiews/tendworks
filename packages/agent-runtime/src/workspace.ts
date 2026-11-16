@@ -253,8 +253,9 @@ function credentialScope(url: string): string {
 // $1 URL, $2 credential scope (empty: none), $3 default branch (empty: the remote's),
 // $4 `push` or `no-push`, $5 branch (optional). A workspace that is already a checkout
 // (e.g. kept on a volume) stays as it is; otherwise the branch is continued if the remote
-// has it, or started from the default branch. Without a branch the checkout stays on the
-// default branch. `no-push` (a read-only session) points the remote's push URL nowhere, so
+// has it, or started from the default branch; a read-only (`no-push`) checkout never starts
+// one, so a branch the remote does not have fails it with git's reason. Without a branch the
+// checkout stays on the default branch. `no-push` (a read-only session) points the remote's push URL nowhere, so
 // a push fails even where the remote needs no credential; the boundary for a remote that
 // needs one is that the session never gets it, since the agent can change its own .git/config.
 const CHECKOUT = `set -e
@@ -268,7 +269,7 @@ if [ ! -e .git ]; then
 fi
 if [ "$push" = no-push ]; then git config remote.origin.pushurl no-push://read-only-workspace; fi
 if [ -z "$branch" ] || [ "$(git branch --show-current)" = "$branch" ]; then exit 0; fi
-if git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
+if [ "$push" = no-push ] || git rev-parse --verify --quiet "refs/remotes/origin/$branch" >/dev/null; then
   git checkout --quiet -B "$branch" "origin/$branch"
 elif [ -n "$base" ]; then
   git checkout --quiet -b "$branch" "origin/$base"

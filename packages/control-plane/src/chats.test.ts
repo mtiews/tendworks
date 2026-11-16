@@ -80,6 +80,14 @@ describe("chats API", () => {
     expect(outside).toMatchObject({ status: 400, body: { title: "Branch not allowed", detail: expect.stringContaining("prototype/") } });
   });
 
+  it("starts a read-only chat on any branch, outside the prefixes too", async () => {
+    const { call } = setup();
+
+    const started = await call("POST", "/chats", { workspace: "app", branch: "tendworks/issue-42", text: "Review it" });
+
+    expect(started).toMatchObject({ status: 201, body: { workspace: "app", write: false, branch: "tendworks/issue-42" } });
+  });
+
   it("refuses a repository URL, both a profile and a workspace, neither, and a branch with a profile", async () => {
     const { call } = setup();
 

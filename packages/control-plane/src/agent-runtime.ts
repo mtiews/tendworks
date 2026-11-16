@@ -142,7 +142,7 @@ export interface InMemoryAgentRuntimeOptions {
   /**
    * Configured workspaces by name with their enabled assistant, or undefined for one without;
    * a chat with a workspace not listed is refused as unknown. A writing assistant's chat may
-   * be started on a branch under one of its `branchPrefixes`.
+   * be started on a branch under one of its `branchPrefixes`, a read-only one on any branch.
    */
   workspaces?: Record<string, { profile: string; write: boolean; branchPrefixes?: string[] } | undefined>;
 }
@@ -213,10 +213,7 @@ export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }:
         if (!assistant) {
           throw new ChatRefusedError("Chat not allowed", `workspace ${workspace} has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it`);
         }
-        if (branch !== undefined && !assistant.write) {
-          throw new ChatRefusedError("Branch not allowed", `the assistant of workspace ${workspace} is read-only and stays on the default branch; start the chat without branch`);
-        }
-        if (branch !== undefined && !(assistant.branchPrefixes ?? []).some((prefix) => branch.startsWith(prefix))) {
+        if (branch !== undefined && assistant.write && !(assistant.branchPrefixes ?? []).some((prefix) => branch.startsWith(prefix))) {
           throw new ChatRefusedError("Branch not allowed", `branch ${branch} is not allowed for chats with the assistant of workspace ${workspace}: it must start with one of its assistant.branchPrefixes (${(assistant.branchPrefixes ?? []).join(", ")})`);
         }
         agent = assistant.profile;

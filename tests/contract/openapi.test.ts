@@ -462,19 +462,22 @@ describe("control plane: chats, through the agent runtime", () => {
     expect(unknown.error).toMatchObject({ title: "Unknown workspace" });
   });
 
-  it("starts a writing chat on a branch under a listed prefix, and refuses one outside them or with a profile", async () => {
+  it("starts a writing chat on a branch under a listed prefix and a read-only one on any branch, and refuses one outside the prefixes or with a profile", async () => {
     const { client } = chatting();
 
     const started = await client.POST("/chats", { body: { workspace: "fake-prototypes", branch: "prototype/login-flow", text: "Build it" } });
     const outside = await client.POST("/chats", { body: { workspace: "fake-prototypes", branch: "release/1.0", text: "Build it" } });
-    const readOnly = await client.POST("/chats", { body: { workspace: "fake-playground", branch: "prototype/x", text: "Look" } });
+    const readOnly = await client.POST("/chats", { body: { workspace: "fake-playground", branch: "tendworks/issue-42", text: "Look" } });
+    const invalid = await client.POST("/chats", { body: { workspace: "fake-playground", branch: "-x", text: "Look" } });
     const withProfile = await client.POST("/chats", { body: { agent: "fake-assistant", branch: "prototype/x", text: "Hello" } });
 
     expect(started.response.status).toBe(201);
     expect(started.data).toMatchObject({ agent: "fake-assistant", workspace: "fake-prototypes", write: true, branch: "prototype/login-flow" });
     expect(outside.response.status).toBe(400);
     expect(outside.error).toMatchObject({ title: "Branch not allowed", detail: expect.stringContaining("assistant.branchPrefixes (prototype/)") });
-    expect(readOnly.error).toMatchObject({ title: "Branch not allowed", detail: expect.stringContaining("read-only") });
+    expect(readOnly.response.status).toBe(201);
+    expect(readOnly.data).toMatchObject({ workspace: "fake-playground", write: false, branch: "tendworks/issue-42" });
+    expect(invalid.error).toMatchObject({ title: "Branch not allowed", detail: expect.stringContaining("no valid branch name") });
     expect(withProfile.response.status).toBe(400);
     expect(withProfile.error).toMatchObject({ title: "Invalid request" });
   });

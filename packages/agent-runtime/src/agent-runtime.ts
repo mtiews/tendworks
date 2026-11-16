@@ -76,7 +76,8 @@ export interface AgentRuntime extends AgentTasks {
    * turns, either with the agent profile `chatWith` in an empty workspace, or with the
    * assistant of the workspace `{ workspace }` (ADR 0022), held with the assistant's
    * profile and read-only unless the assistant may write. A writing chat works on
-   * `branch` when given (ADR 0029), otherwise on its own `tendworks/chat-<id>`. Answers at
+   * `branch` when given (ADR 0029), otherwise on its own `tendworks/chat-<id>`; a read-only
+   * chat checks out `branch` when given, otherwise the default branch. Answers at
    * once with the chat working on `message`; after each turn the task waits in
    * `input-required`. Rejects for an unknown profile, with {@link ChatNotAllowedError} for
    * one without `spec.chat`, with {@link UnknownWorkspaceError} for a workspace that is not
@@ -192,13 +193,13 @@ export function createAgentRuntime({
     const harness = available[profile.spec.harness];
     if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
     const { record, written } = recorder(task.id, transcripts.open(task.id));
-    // The workspace whose assistant the chat is, read-only unless the assistant may write (then on the chat's branch).
+    // The workspace whose assistant the chat is, on the chat's branch, read-only unless the assistant may write.
     const inWorkspace =
       facts.workspace === undefined
         ? {}
         : {
             workspace: workspaces(facts.workspace) ?? missingWorkspace(facts.workspace),
-            ...(facts.write ? { branch: facts.branch ?? chatBranch(task.id) } : { readOnlyWorkspace: true }),
+            ...(facts.write ? { branch: facts.branch ?? chatBranch(task.id) } : { readOnlyWorkspace: true, ...(facts.branch === undefined ? {} : { branch: facts.branch }) }),
           };
     const chat: OpenChat = {
       profile,
@@ -456,8 +457,8 @@ export function createAgentRuntime({
         const problem = branch === undefined ? undefined : chatBranchProblem(branch, { workspace, assistant });
         if (problem !== undefined) throw new ChatBranchError(problem);
         agent = assistant.profile;
-        // A writing chat in a git workspace works on its branch, kept so a resumed chat checks out the same one.
-        const on = assistant.write && assistant.defaultBranch !== undefined ? (branch ?? chatBranch(id)) : undefined;
+        // A chat in a git workspace works on its branch, kept so a resumed chat checks out the same one; a read-only one without stays on the default branch.
+        const on = assistant.write && assistant.defaultBranch !== undefined ? (branch ?? chatBranch(id)) : branch;
         inWorkspace = { workspace, write: assistant.write, ...(on === undefined ? {} : { branch: on }) };
       }
       const profile = byName.get(agent);

@@ -26,7 +26,7 @@ A workspace's own chat partner about its contents (`assistant: { enabled, profil
 _Avoid_: repository chat, project assistant
 
 **Chat branch**:
-The branch of a git workspace a workspace assistant's chat works on, kept with the chat: `tendworks/chat-<id>` by default, or a branch the writing chat was started on under one of the workspace's `branchPrefixes` (ADR 0029). Several chats may share one.
+The branch of a git workspace a workspace assistant's chat works on, kept with the chat: `tendworks/chat-<id>` by default, or a branch the writing chat was started on under one of the workspace's `branchPrefixes` (ADR 0029); a read-only chat may be started on any branch the remote has, and stays on the default branch without one. Several chats may share one.
 
 **Transcript**:
 What happened in one agent session (messages, tool calls and results, turns, resumes), as product-neutral entries numbered by their position. Kept outside the sandbox and readable through the API while the session runs.

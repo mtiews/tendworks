@@ -131,8 +131,10 @@ $defs:
           `workspace`. A writing chat continues the branch when the remote has it, and
           starts it from the default branch otherwise; the branch must start with one of
           the workspace's `assistant.branchPrefixes` and is never the default branch.
-          Without it, a writing chat works on `tendworks/chat-<chat id>`. Several chats may work on the
-          same branch. Refused for a directory workspace, and for now for a read-only chat.
+          Without it, a writing chat works on `tendworks/chat-<chat id>`. A read-only chat
+          checks out any branch the remote has, regardless of the prefixes, and never
+          creates one: a branch the remote does not have fails the chat with git's reason.
+          Several chats may work on the same branch. Refused for a directory workspace.
       text:
         type: string
         minLength: 1

@@ -230,9 +230,10 @@ $defs:
       `name` (contracts/schemas/workspace.schema.yaml). For a git workspace an existing
       `branch` is checked out and a missing one is created from the workspace's default
       branch, so a task sent again for the same branch continues where the last attempt
-      left off; without `branch` the checkout stays on the default branch. The agent
-      reaches the repository with the workspace's own credential, never one of its
-      agent profile. A name no workspace is configured under fails the task.
+      left off; without `branch` the checkout stays on the default branch. A read-only
+      task (`write: false`) never creates a branch: one the remote does not have fails
+      the checkout. The agent reaches the repository with the workspace's own
+      credential, never one of its agent profile. A name no workspace is configured under fails the task.
     type: object
     additionalProperties: false
     required: [name]

@@ -31,8 +31,9 @@ export interface ChatFacts {
   write?: boolean;
   /**
    * The branch of the git workspace the chat works on, so a chat resumed in a new sandbox
-   * checks out the same one; absent on the default branch and for a directory. Writing
-   * chats started before it was kept work on {@link chatBranch}.
+   * checks out the same one; absent for a read-only chat started without one, which stays on
+   * the default branch, and for a directory. Writing chats started before it was kept work on
+   * {@link chatBranch}.
    */
   branch?: string;
 }
@@ -97,12 +98,13 @@ export function chatBranch(chatId: string): string {
 /**
  * Why a chat with a workspace's assistant may not work on `branch` (ADR 0029), or undefined
  * when it may: a writing chat on a branch under a listed prefix of a git workspace, never on
- * the default branch. A read-only chat stays on the default branch.
+ * the default branch; a read-only chat on any branch, whose checkout fails when the remote
+ * does not have it.
  */
 export function chatBranchProblem(branch: string, { workspace, assistant }: { workspace: string; assistant: ChatAssistant }): string | undefined {
   if (assistant.defaultBranch === undefined) return `workspace ${workspace} is a directory, which has no branches; start the chat without branch`;
   if (!isBranchName(branch)) return `branch ${branch} is no valid branch name: no whitespace and no leading dash`;
-  if (!assistant.write) return `the assistant of workspace ${workspace} is read-only and stays on the default branch; start the chat without branch`;
+  if (!assistant.write) return undefined;
   if (branch === assistant.defaultBranch) return `branch ${branch} is the default branch of workspace ${workspace}; a chat cannot work on it`;
   if (assistant.branchPrefixes.some((prefix) => branch.startsWith(prefix))) return undefined;
   const allowed = assistant.branchPrefixes.length > 0 ? `one of its assistant.branchPrefixes (${assistant.branchPrefixes.join(", ")})` : "a prefix listed in its assistant.branchPrefixes, which lists none";
