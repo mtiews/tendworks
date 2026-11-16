@@ -8,6 +8,7 @@ import {
   AssistantNotEnabledError,
   CHAT,
   chatBranch,
+  checkoutBranch,
   ChatBranchError,
   chatBranchProblem,
   ChatBusyError,
@@ -194,12 +195,14 @@ export function createAgentRuntime({
     if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
     const { record, written } = recorder(task.id, transcripts.open(task.id));
     // The workspace whose assistant the chat is, on the chat's branch, read-only unless the assistant may write.
+    const branch = checkoutBranch(facts, task.id);
     const inWorkspace =
       facts.workspace === undefined
         ? {}
         : {
             workspace: workspaces(facts.workspace) ?? missingWorkspace(facts.workspace),
-            ...(facts.write ? { branch: facts.branch ?? chatBranch(task.id) } : { readOnlyWorkspace: true, ...(facts.branch === undefined ? {} : { branch: facts.branch }) }),
+            ...(facts.write ? {} : { readOnlyWorkspace: true }),
+            ...(branch === undefined ? {} : { branch }),
           };
     const chat: OpenChat = {
       profile,

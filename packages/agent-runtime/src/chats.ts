@@ -96,6 +96,14 @@ export function chatBranch(chatId: string): string {
 }
 
 /**
+ * The branch a chat checks out in its workspace: the one kept with it, or a writing chat's
+ * own one when it started before the branch was kept; undefined for the default branch.
+ */
+export function checkoutBranch(facts: ChatFacts, chatId: string): string | undefined {
+  return facts.branch ?? (facts.write ? chatBranch(chatId) : undefined);
+}
+
+/**
  * Why a chat with a workspace's assistant may not work on `branch` (ADR 0029), or undefined
  * when it may: a writing chat on a branch under a listed prefix of a git workspace, never on
  * the default branch; a read-only chat on any branch, whose checkout fails when the remote

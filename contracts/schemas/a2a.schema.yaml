@@ -233,7 +233,8 @@ $defs:
       left off; without `branch` the checkout stays on the default branch. A read-only
       task (`write: false`) never creates a branch: one the remote does not have fails
       the checkout. The agent reaches the repository with the workspace's own
-      credential, never one of its agent profile. A name no workspace is configured under fails the task.
+      credential, never one of its agent profile. A name no workspace is configured
+      under fails the task.
     type: object
     additionalProperties: false
     required: [name]

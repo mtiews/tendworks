@@ -255,9 +255,10 @@ function credentialScope(url: string): string {
 // (e.g. kept on a volume) stays as it is; otherwise the branch is continued if the remote
 // has it, or started from the default branch; a read-only (`no-push`) checkout never starts
 // one, so a branch the remote does not have fails it with git's reason. Without a branch the
-// checkout stays on the default branch. `no-push` (a read-only session) points the remote's push URL nowhere, so
-// a push fails even where the remote needs no credential; the boundary for a remote that
-// needs one is that the session never gets it, since the agent can change its own .git/config.
+// checkout stays on the default branch. `no-push` (a read-only session) points the remote's
+// push URL nowhere, so a push fails even where the remote needs no credential; the boundary
+// for a remote that needs one is that the session never gets it, since the agent can change
+// its own .git/config.
 const CHECKOUT = `set -e
 url=$1 scope=$2 base=$3 push=$4
 if [ $# -ge 5 ]; then branch=$5; else branch=; fi

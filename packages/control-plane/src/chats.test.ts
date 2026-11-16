@@ -86,6 +86,7 @@ describe("chats API", () => {
     const started = await call("POST", "/chats", { workspace: "app", branch: "tendworks/issue-42", text: "Review it" });
 
     expect(started).toMatchObject({ status: 201, body: { workspace: "app", write: false, branch: "tendworks/issue-42" } });
+    expect(await call("POST", "/chats", { workspace: "app", branch: "-x", text: "Review it" })).toMatchObject({ status: 400, body: { title: "Branch not allowed" } });
   });
 
   it("refuses a repository URL, both a profile and a workspace, neither, and a branch with a profile", async () => {
