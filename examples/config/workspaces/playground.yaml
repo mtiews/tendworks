@@ -16,6 +16,10 @@ spec:
     env: GH_TOKEN
   # Its workspace assistant (agent profile workspace-assistant): `tend chat --workspace
   # playground`. Read-only: the credential is used only for the checkout, so the chat cannot
-  # push. `write: true` would let it push to its own branch tendworks/chat-<id>.
+  # push. `write: true` would let it push to its own branch tendworks/chat-<id>, and with
+  # `branchPrefixes` to a branch the chat is started on under one of them (ADR 0029), e.g.
+  # prototype/login-flow; protect main through the repository's rules.
   assistant:
     enabled: true
+    # write: true
+    # branchPrefixes: [prototype/, spike/]

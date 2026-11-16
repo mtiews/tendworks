@@ -3,7 +3,7 @@ import type { A2A, AgentRuntime as Contract } from "@tendworks/shared";
 import { Hono } from "hono";
 import type { AgentRuntime } from "./agent-runtime.js";
 import { AgentNotFoundError } from "./agent-tasks.js";
-import { AssistantNotEnabledError, ChatBusyError, ChatEndedError, ChatNotAllowedError, UnknownWorkspaceError, type Chat } from "./chats.js";
+import { AssistantNotEnabledError, ChatBranchError, ChatBusyError, ChatEndedError, ChatNotAllowedError, UnknownWorkspaceError, type Chat } from "./chats.js";
 import type { TranscriptEntry } from "./transcripts/transcript-store.js";
 
 type Schemas = Contract.components["schemas"];
@@ -41,7 +41,7 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
       return problem(
         400,
         "Invalid request",
-        "the body must be { agent, text } with the name of an agent profile, or { workspace, text } with the name of a workspace whose assistant is enabled, and the first message",
+        "the body must be { agent, text } with the name of an agent profile, or { workspace, branch?, text } with the name of a workspace whose assistant is enabled and the branch to work on, and the first message",
       );
     }
     try {
@@ -51,6 +51,7 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
       if (error instanceof AgentNotFoundError) return problem(400, "Unknown agent profile", error.message);
       if (error instanceof ChatNotAllowedError || error instanceof AssistantNotEnabledError) return problem(400, "Chat not allowed", error.message);
       if (error instanceof UnknownWorkspaceError) return problem(400, "Unknown workspace", error.message);
+      if (error instanceof ChatBranchError) return problem(400, "Branch not allowed", error.message);
       throw error;
     }
   });
@@ -118,13 +119,16 @@ export function createAgentRuntimeApi({ runtime, keepAliveMs = 15_000 }: AgentRu
 
 /**
  * Whom a start-chat body asks to chat with: exactly one of an agent profile (`agent`) and a
- * workspace's assistant (`workspace`), and nothing else besides the text; undefined otherwise.
+ * workspace's assistant (`workspace`, with a `branch` to work on if any), and nothing else
+ * besides the text; undefined otherwise.
  */
-function chatWithOf(body: Record<string, unknown> | undefined): string | { workspace: string } | undefined {
-  if (!body || Object.keys(body).some((key) => key !== "agent" && key !== "workspace" && key !== "text")) return undefined;
-  const { agent, workspace } = body;
-  if (typeof agent === "string" && workspace === undefined) return agent;
-  if (typeof workspace === "string" && agent === undefined) return { workspace };
+function chatWithOf(body: Record<string, unknown> | undefined): string | { workspace: string; branch?: string } | undefined {
+  if (!body || Object.keys(body).some((key) => key !== "agent" && key !== "workspace" && key !== "branch" && key !== "text")) return undefined;
+  const { agent, workspace, branch } = body;
+  if (typeof agent === "string" && workspace === undefined && branch === undefined) return agent;
+  if (typeof workspace === "string" && agent === undefined && (branch === undefined || typeof branch === "string")) {
+    return { workspace, ...(branch === undefined ? {} : { branch }) };
+  }
   return undefined;
 }
 

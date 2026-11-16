@@ -5,7 +5,7 @@ import { createAgentRuntimeClient, createControlPlaneApi, createInMemoryAgentRun
 function setup(
   agentRuntime: AgentRuntimePort | "none" = createInMemoryAgentRuntime({
     chatAgents: ["assistant", "workspace-assistant"],
-    workspaces: { app: { profile: "workspace-assistant", write: false }, docs: undefined },
+    workspaces: { app: { profile: "workspace-assistant", write: false }, proto: { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/"] }, docs: undefined },
   }),
 ) {
   const api = createControlPlaneApi({
@@ -69,15 +69,28 @@ describe("chats API", () => {
     expect(unknown).toMatchObject({ status: 400, body: { title: "Unknown workspace", detail: "no workspace 'ghost' is configured" } });
   });
 
-  it("refuses a repository URL, both a profile and a workspace, and neither", async () => {
+  it("starts a writing chat on a branch, and refuses one it may not work on with the agent runtime's reason", async () => {
+    const { call } = setup();
+
+    const started = await call("POST", "/chats", { workspace: "proto", branch: "prototype/login-flow", text: "Build it" });
+    const outside = await call("POST", "/chats", { workspace: "proto", branch: "release/1.0", text: "Build it" });
+
+    expect(started).toMatchObject({ status: 201, body: { workspace: "proto", write: true, branch: "prototype/login-flow" } });
+    expect(await call("GET", `/chats/${started.body.id}`)).toMatchObject({ body: { branch: "prototype/login-flow" } });
+    expect(outside).toMatchObject({ status: 400, body: { title: "Branch not allowed", detail: expect.stringContaining("prototype/") } });
+  });
+
+  it("refuses a repository URL, both a profile and a workspace, neither, and a branch with a profile", async () => {
     const { call } = setup();
 
     const repository = await call("POST", "/chats", { agent: "assistant", text: "Hello", repository: "https://git.example/acme/app.git" });
     const both = await call("POST", "/chats", { agent: "assistant", workspace: "app", text: "Hello" });
     const neither = await call("POST", "/chats", { text: "Hello" });
     const malformed = await call("POST", "/chats", { workspace: ["app"], text: "Hello" });
+    const branchWithProfile = await call("POST", "/chats", { agent: "assistant", branch: "prototype/x", text: "Hello" });
+    const branchNoText = await call("POST", "/chats", { workspace: "proto", branch: ["prototype/x"], text: "Hello" });
 
-    for (const refused of [repository, both, neither, malformed]) expect(refused).toMatchObject({ status: 400, body: { title: "Invalid request" } });
+    for (const refused of [repository, both, neither, malformed, branchWithProfile, branchNoText]) expect(refused).toMatchObject({ status: 400, body: { title: "Invalid request" } });
   });
 
   it("refuses a message while a turn runs with 409, and takes it once the turn ended", async () => {

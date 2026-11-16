@@ -62,6 +62,16 @@ describe("loadWorkspaces", () => {
     ]);
   });
 
+  it("reads the assistant's branch prefixes and refuses an empty one", () => {
+    const dir = folder({ "workspaces/app.yaml": workspace("app", "assistant: { enabled: true, write: true, branchPrefixes: [prototype/, spike/] }") });
+
+    expect(loadWorkspaces(dir)[0]?.spec.assistant?.branchPrefixes).toEqual(["prototype/", "spike/"]);
+    expect(issuesOf(folder({ "workspaces/app.yaml": workspace("app", 'assistant: { enabled: true, write: true, branchPrefixes: [prototype/, ""] }') }))).toEqual([
+      "workspaces/app.yaml: /spec/assistant/branchPrefixes/1: must NOT have fewer than 1 characters",
+      `workspaces/app.yaml: /spec/assistant/branchPrefixes/1: must match pattern "^[^-\\s]\\S*$"`,
+    ]);
+  });
+
   it("refuses credentials for a git workspace whose URL is not https, and reads an http URL without them", () => {
     const dir = folder({
       "workspaces/plain.yaml": workspace("plain", "credentials: { secretRef: { name: TENDWORKS_AGENT_APP_TOKEN } }").replace("https://", "http://"),

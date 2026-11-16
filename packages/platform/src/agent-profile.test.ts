@@ -15,14 +15,22 @@ describe("agent profile defaults", () => {
 
 describe("workspace assistant defaults", () => {
   const schema = parse(readFileSync(new URL("../../../contracts/schemas/workspace.schema.yaml", import.meta.url), "utf8")) as {
-    $defs: { workspaceAssistant: { properties: { enabled: { default: boolean }; profile: { default: string }; write: { default: boolean } } } };
+    $defs: {
+      workspaceAssistant: {
+        properties: { enabled: { default: boolean }; profile: { default: string }; write: { default: boolean }; branchPrefixes: { default: string[] } };
+      };
+    };
   };
   const { properties } = schema.$defs.workspaceAssistant;
 
-  it("holds an enabled assistant with the profile and write mode the workspace schema names as defaults", () => {
+  it("holds an enabled assistant with the profile, write mode and branch prefixes the workspace schema names as defaults", () => {
     expect(DEFAULT_WORKSPACE_ASSISTANT_PROFILE).toBe(properties.profile.default);
-    expect(enabledAssistant({ enabled: true })).toEqual({ profile: properties.profile.default, write: properties.write.default });
-    expect(enabledAssistant({ enabled: true, profile: "app-assistant", write: true })).toEqual({ profile: "app-assistant", write: true });
+    expect(enabledAssistant({ enabled: true })).toEqual({ profile: properties.profile.default, write: properties.write.default, branchPrefixes: properties.branchPrefixes.default });
+    expect(enabledAssistant({ enabled: true, profile: "app-assistant", write: true, branchPrefixes: ["prototype/"] })).toEqual({
+      profile: "app-assistant",
+      write: true,
+      branchPrefixes: ["prototype/"],
+    });
   });
 
   it("has no assistant unless it is enabled", () => {

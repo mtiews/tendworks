@@ -19,9 +19,9 @@ function setup(workspaces: Workspace.Workspace[]) {
 }
 
 describe("workspaces API", () => {
-  it("lists the configured workspaces with their kind and enabled assistant, defaults filled in, never their location or credential", async () => {
+  it("lists the configured workspaces with their kind and enabled assistant with its branch prefixes, defaults filled in, never their location or credential", async () => {
     const list = setup([
-      workspace("app", { git: { url: "https://git.example/acme/app.git", defaultBranch: "main" }, credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" } }, assistant: { enabled: true } }),
+      workspace("app", { git: { url: "https://git.example/acme/app.git", defaultBranch: "main" }, credentials: { secretRef: { name: "TENDWORKS_AGENT_APP_TOKEN" } }, assistant: { enabled: true, write: true, branchPrefixes: ["prototype/", "spike/"] } }),
       workspace("docs", { directory: { path: "/srv/workspaces/docs" }, assistant: { enabled: true, profile: "docs-assistant", write: true } }),
       workspace("site", { git: { url: "https://git.example/acme/site.git", defaultBranch: "main" }, assistant: { enabled: false, profile: "docs-assistant" } }),
     ]);
@@ -31,8 +31,8 @@ describe("workspaces API", () => {
     expect(status).toBe(200);
     expect(body).toEqual({
       items: [
-        { name: "app", kind: "git", assistant: { profile: "workspace-assistant", write: false } },
-        { name: "docs", kind: "directory", assistant: { profile: "docs-assistant", write: true } },
+        { name: "app", kind: "git", assistant: { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/", "spike/"] } },
+        { name: "docs", kind: "directory", assistant: { profile: "docs-assistant", write: true, branchPrefixes: [] } },
         { name: "site", kind: "git" },
       ],
     });

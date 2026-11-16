@@ -141,9 +141,10 @@ export interface InMemoryAgentRuntimeOptions {
   chatAgents?: string[];
   /**
    * Configured workspaces by name with their enabled assistant, or undefined for one without;
-   * a chat with a workspace not listed is refused as unknown.
+   * a chat with a workspace not listed is refused as unknown. A writing assistant's chat may
+   * be started on a branch under one of its `branchPrefixes`.
    */
-  workspaces?: Record<string, { profile: string; write: boolean } | undefined>;
+  workspaces?: Record<string, { profile: string; write: boolean; branchPrefixes?: string[] } | undefined>;
 }
 
 /**
@@ -202,20 +203,24 @@ export function createInMemoryAgentRuntime({ chatAgents = [], workspaces = {} }:
       record(chatId, { type: "input-required", message: reply, ...(total ? { cost: total } : {}) });
       update(chatId, { status: "input-required", message: reply, ...(total ? { cost: total } : {}) });
     },
-    async startChat({ agent: profile, workspace, text }: StartChatRequest) {
+    async startChat({ agent: profile, workspace, branch, text }: StartChatRequest) {
+      const id = crypto.randomUUID();
       let agent = profile ?? "";
-      let inWorkspace: Pick<Chat, "workspace" | "write"> = {};
+      let inWorkspace: Pick<Chat, "workspace" | "write" | "branch"> = {};
       if (workspace !== undefined) {
         if (!(workspace in workspaces)) throw new ChatRefusedError("Unknown workspace", `no workspace '${workspace}' is configured`);
         const assistant = workspaces[workspace];
         if (!assistant) {
           throw new ChatRefusedError("Chat not allowed", `workspace ${workspace} has no enabled assistant: set spec.assistant.enabled in the workspace to chat with it`);
         }
+        if (branch !== undefined && !(assistant.write && (assistant.branchPrefixes ?? []).some((prefix) => branch.startsWith(prefix)))) {
+          throw new ChatRefusedError("Branch not allowed", `branch ${branch} is not allowed for chats with the assistant of workspace ${workspace}: it must start with one of its assistant.branchPrefixes (${(assistant.branchPrefixes ?? []).join(", ")})`);
+        }
         agent = assistant.profile;
-        inWorkspace = { workspace, write: assistant.write };
+        const on = branch ?? (assistant.write ? `tendworks/chat-${id}` : undefined);
+        inWorkspace = { workspace, write: assistant.write, ...(on === undefined ? {} : { branch: on }) };
       }
       if (!chatAgents.includes(agent)) throw new ChatRefusedError("Chat not allowed", `agent profile ${agent} does not allow chats: its agent profile has no spec.chat`);
-      const id = crypto.randomUUID();
       const startedAt = now();
       chats.set(id, { id, agent, title: text, status: "working", startedAt, lastActivityAt: startedAt, transcript: `memory:${id}`, ...inWorkspace });
       running.add(id);

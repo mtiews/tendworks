@@ -1,11 +1,12 @@
 import type { A2A, Chat as Contract } from "@tendworks/shared";
 import { COST, TRANSCRIPT } from "./agent-tasks.js";
 import type { Cost } from "./harness.js";
+import { isBranchName } from "./workspace.js";
 
 /** A chat as clients see it (contracts/schemas/chat.schema.yaml). */
 export type Chat = Contract.Chat;
 
-/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, title, harness, startedAt, traceparent, workspace?, write? }`. */
+/** `Task.metadata` key of a chat's task: what the chat is, `{ agent, title, harness, startedAt, traceparent, workspace?, write?, branch? }`. */
 export const CHAT = "dev.tendworks/chat";
 
 export interface ChatFacts {
@@ -28,6 +29,12 @@ export interface ChatFacts {
   workspace?: string;
   /** Whether the workspace's assistant may change the workspace, as its settings said when the chat started. */
   write?: boolean;
+  /**
+   * The branch of the git workspace the chat works on, so a chat resumed in a new sandbox
+   * checks out the same one; absent on the default branch and for a directory. Writing
+   * chats started before it was kept work on {@link chatBranch}.
+   */
+  branch?: string;
 }
 
 /** The chat a task is, or undefined for a task of a run. */
@@ -50,7 +57,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
   const message = task.status.message?.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
   const cost = task.metadata?.[COST] as Cost | undefined;
   const transcript = task.metadata?.[TRANSCRIPT];
-  const { workspace, write } = facts;
+  const { workspace, write, branch } = facts;
   return {
     id: task.id,
     agent: facts.agent,
@@ -63,6 +70,7 @@ export function toChat(task: A2A.Task, facts: ChatFacts): Chat {
     ...(cost ? { cost: { amount: cost.amount, currency: cost.currency } } : {}),
     ...(typeof transcript === "string" ? { transcript } : {}),
     ...(workspace === undefined ? {} : { workspace, write: write ?? false }),
+    ...(branch === undefined ? {} : { branch }),
   };
 }
 
@@ -84,6 +92,32 @@ export function addCost(total: Cost | undefined, turn: Cost | undefined): Cost |
 /** The branch a writing workspace assistant works on in a git workspace. */
 export function chatBranch(chatId: string): string {
   return `tendworks/chat-${chatId}`;
+}
+
+/**
+ * Why a chat with a workspace's assistant may not work on `branch` (ADR 0029), or undefined
+ * when it may: a writing chat on its own branch or on one under a listed prefix of a git
+ * workspace, never on the default branch. A read-only chat stays on the default branch.
+ */
+export function chatBranchProblem(
+  branch: string,
+  { workspace, chatId, assistant }: { workspace: string; chatId: string; assistant: { write: boolean; branchPrefixes: readonly string[]; defaultBranch?: string } },
+): string | undefined {
+  if (assistant.defaultBranch === undefined) return `workspace ${workspace} is a directory, which has no branches; start the chat without branch`;
+  if (!isBranchName(branch)) return `branch ${branch} is no valid branch name: no whitespace and no leading dash`;
+  if (!assistant.write) return `the assistant of workspace ${workspace} is read-only and stays on the default branch; start the chat without branch`;
+  if (branch === assistant.defaultBranch) return `branch ${branch} is the default branch of workspace ${workspace}; a chat cannot work on it`;
+  if (branch === chatBranch(chatId) || assistant.branchPrefixes.some((prefix) => branch.startsWith(prefix))) return undefined;
+  const allowed = assistant.branchPrefixes.length > 0 ? `one of its assistant.branchPrefixes (${assistant.branchPrefixes.join(", ")})` : "a prefix listed in its assistant.branchPrefixes, which lists none";
+  return `branch ${branch} is not allowed for chats with the assistant of workspace ${workspace}: it must start with ${allowed}`;
+}
+
+/** A chat with a workspace's assistant was asked for on a branch it may not work on. */
+export class ChatBranchError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "ChatBranchError";
+  }
 }
 
 /** A chat was asked for by the name of a workspace that is not configured. */

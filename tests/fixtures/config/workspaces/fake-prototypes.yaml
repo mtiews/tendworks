@@ -1,0 +1,15 @@
+# A workspace whose fake assistant may write, on branches under prototype/ besides its own
+# (contract tests of chats on a chosen branch, ADR 0029).
+apiVersion: tendworks.dev/v1
+kind: Workspace
+metadata:
+  name: fake-prototypes
+spec:
+  git:
+    url: https://git.example/example/playground.git
+    defaultBranch: main
+  assistant:
+    enabled: true
+    profile: fake-assistant
+    write: true
+    branchPrefixes: [prototype/]

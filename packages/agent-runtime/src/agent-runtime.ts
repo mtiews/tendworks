@@ -1,4 +1,4 @@
-import { DEFAULT_CHAT_IDLE_MINUTES, newTraceparent, type WorkspaceAssistant } from "@tendworks/platform";
+import { DEFAULT_CHAT_IDLE_MINUTES, newTraceparent } from "@tendworks/platform";
 import type { A2A, AgentProfile } from "@tendworks/shared";
 import type { LoadedAgentProfile } from "./agent-profiles.js";
 import { AgentNotFoundError, COST, TRANSCRIPT, type AgentTasks, type SendMessageOptions } from "./agent-tasks.js";
@@ -8,6 +8,8 @@ import {
   AssistantNotEnabledError,
   CHAT,
   chatBranch,
+  ChatBranchError,
+  chatBranchProblem,
   ChatBusyError,
   ChatEndedError,
   chatFacts,
@@ -17,7 +19,7 @@ import {
   type Chat,
   type ChatFacts,
 } from "./chats.js";
-import { workspaceRequestOf, type Workspace } from "./workspace.js";
+import { workspaceRequestOf, type ChatAssistant, type Workspace } from "./workspace.js";
 import { createFakeHarness } from "./fake-agent.js";
 import type { Cost, Harness, HarnessResult, HarnessSession, HarnessTurn, OpenSession } from "./harness.js";
 import { activeSession, runStepOf, type AgentSession } from "./sessions.js";
@@ -52,7 +54,7 @@ export interface AgentRuntimeOptions {
   /** The configured workspaces by name (ADR 0022), e.g. from {@link createWorkspaces}; none by default. */
   workspaces?: (name: string) => Workspace | undefined;
   /** The enabled assistant of a configured workspace by the workspace's name, e.g. from {@link workspaceAssistants}; none by default. */
-  assistants?: (workspace: string) => WorkspaceAssistant | undefined;
+  assistants?: (workspace: string) => ChatAssistant | undefined;
 }
 
 const TERMINAL: ReadonlySet<A2A.TaskState> = new Set(TERMINAL_STATES);
@@ -73,14 +75,16 @@ export interface AgentRuntime extends AgentTasks {
    * Starts a chat (ADR 0015): a task without a run whose agent session stays open across
    * turns, either with the agent profile `chatWith` in an empty workspace, or with the
    * assistant of the workspace `{ workspace }` (ADR 0022), held with the assistant's
-   * profile and read-only unless the assistant may write. Answers at once with the chat
-   * working on `message`; after each turn the task waits in `input-required`. Rejects for
-   * an unknown profile, with {@link ChatNotAllowedError} for one without `spec.chat`, with
-   * {@link UnknownWorkspaceError} for a workspace that is not configured and with
-   * {@link AssistantNotEnabledError} for one without an enabled assistant. The same
+   * profile and read-only unless the assistant may write. A writing chat works on
+   * `branch` when given (ADR 0029), otherwise on its own `tendworks/chat-<id>`. Answers at
+   * once with the chat working on `message`; after each turn the task waits in
+   * `input-required`. Rejects for an unknown profile, with {@link ChatNotAllowedError} for
+   * one without `spec.chat`, with {@link UnknownWorkspaceError} for a workspace that is not
+   * configured, with {@link AssistantNotEnabledError} for one without an enabled assistant
+   * and with {@link ChatBranchError} for a branch the chat may not work on. The same
    * message sent again returns the same chat.
    */
-  startChat(chatWith: string | { workspace: string }, message: A2A.Message): Promise<Chat>;
+  startChat(chatWith: string | { workspace: string; branch?: string }, message: A2A.Message): Promise<Chat>;
   /**
    * The next message of a chat (A2A `SendMessage` to its task): starts the next turn in
    * the same agent session and answers at once. Rejects with {@link ChatBusyError}
@@ -188,13 +192,13 @@ export function createAgentRuntime({
     const harness = available[profile.spec.harness];
     if (!harness?.open) throw new ChatNotAllowedError(profile.metadata.name, `harness ${profile.spec.harness} cannot hold a session across turns`);
     const { record, written } = recorder(task.id, transcripts.open(task.id));
-    // The workspace whose assistant the chat is, read-only unless the assistant may write (then on the chat's own branch).
+    // The workspace whose assistant the chat is, read-only unless the assistant may write (then on the chat's branch).
     const inWorkspace =
       facts.workspace === undefined
         ? {}
         : {
             workspace: workspaces(facts.workspace) ?? missingWorkspace(facts.workspace),
-            ...(facts.write ? { branch: chatBranch(task.id) } : { readOnlyWorkspace: true }),
+            ...(facts.write ? { branch: facts.branch ?? chatBranch(task.id) } : { readOnlyWorkspace: true }),
           };
     const chat: OpenChat = {
       profile,
@@ -440,23 +444,27 @@ export function createAgentRuntime({
     },
     async startChat(chatWith, message) {
       let agent: string;
-      let inWorkspace: Pick<ChatFacts, "workspace" | "write"> = {};
+      const id = crypto.randomUUID();
+      let inWorkspace: Pick<ChatFacts, "workspace" | "write" | "branch"> = {};
       if (typeof chatWith === "string") {
         agent = chatWith;
       } else {
-        const { workspace } = chatWith;
+        const { workspace, branch } = chatWith;
         if (!workspaces(workspace)) throw new UnknownWorkspaceError(workspace);
         const assistant = assistants(workspace);
         if (!assistant) throw new AssistantNotEnabledError(workspace);
+        const problem = branch === undefined ? undefined : chatBranchProblem(branch, { workspace, chatId: id, assistant });
+        if (problem !== undefined) throw new ChatBranchError(problem);
         agent = assistant.profile;
-        inWorkspace = { workspace, write: assistant.write };
+        // A writing chat in a git workspace works on its branch, kept so a resumed chat checks out the same one.
+        const on = assistant.write && assistant.defaultBranch !== undefined ? (branch ?? chatBranch(id)) : undefined;
+        inWorkspace = { workspace, write: assistant.write, ...(on === undefined ? {} : { branch: on }) };
       }
       const profile = byName.get(agent);
       if (!profile) throw new AgentNotFoundError(agent);
       if (!profile.spec.chat) throw new ChatNotAllowedError(agent);
       if (!available[profile.spec.harness]?.open) throw new ChatNotAllowedError(agent, `harness ${profile.spec.harness} cannot hold a session across turns`);
 
-      const id = crypto.randomUUID();
       const startedAt = now().toISOString();
       const title = message.parts.flatMap((part) => ("text" in part ? [part.text] : [])).join("");
       const facts: ChatFacts = { agent, title, harness: profile.spec.harness, startedAt, traceparent: newTraceparent(), ...inWorkspace };

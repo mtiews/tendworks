@@ -215,12 +215,21 @@ export function createWorkspaces(
   return (name) => byName.get(name);
 }
 
+/**
+ * A workspace's enabled assistant as its chats need it: its settings, and the default branch
+ * of a git workspace, which no chat works on; absent for a directory, which has no branches.
+ */
+export interface ChatAssistant extends WorkspaceAssistant {
+  defaultBranch?: string;
+}
+
 /** The enabled assistants of the configured workspaces by workspace name, defaults filled in; undefined for a workspace without one. */
-export function workspaceAssistants(definitions: readonly Kind.Workspace[]): (workspace: string) => WorkspaceAssistant | undefined {
+export function workspaceAssistants(definitions: readonly Kind.Workspace[]): (workspace: string) => ChatAssistant | undefined {
   const byName = new Map(
-    definitions.flatMap(({ metadata: { name }, spec }): [string, WorkspaceAssistant][] => {
+    definitions.flatMap(({ metadata: { name }, spec }): [string, ChatAssistant][] => {
       const assistant = enabledAssistant(spec.assistant);
-      return assistant ? [[name, assistant]] : [];
+      if (!assistant) return [];
+      return [[name, spec.git ? { ...assistant, defaultBranch: spec.git.defaultBranch } : assistant]];
     }),
   );
   return (workspace) => byName.get(workspace);
@@ -283,6 +292,11 @@ export function workspaceRequestOf(message: A2A.Message): { request?: WorkspaceR
     };
   }
   return { request: { name, ...(branch === undefined ? {} : { branch }), ...(write === undefined ? {} : { write }) } };
+}
+
+/** Whether `branch` is a branch name a task or chat may ask for: no whitespace and no leading dash, so it cannot pass as an option. */
+export function isBranchName(branch: string): boolean {
+  return BRANCH.test(branch);
 }
 
 // Same rules as the contract: no value can pass as an option.

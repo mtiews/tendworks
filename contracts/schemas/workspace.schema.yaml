@@ -108,7 +108,8 @@ $defs:
       Read-only by default: a git credential is used only for the checkout and never reaches
       the agent session, so it cannot push, and a directory is bound read-only. With
       `write: true` the session gets the credential and works on the branch
-      `tendworks/chat-<chat id>`, and a directory is writable.
+      `tendworks/chat-<chat id>`, or on a branch under one of `branchPrefixes` the chat
+      was started on (ADR 0029), and a directory is writable.
     type: object
     additionalProperties: false
     examples:
@@ -116,6 +117,7 @@ $defs:
       - enabled: true
         profile: app-assistant
         write: true
+        branchPrefixes: [prototype/, spike/]
     properties:
       enabled:
         type: boolean
@@ -132,6 +134,19 @@ $defs:
         type: boolean
         default: false
         description: Whether the assistant may change the workspace (push to its chat branch, write to the directory).
+      branchPrefixes:
+        type: array
+        default: []
+        description: >-
+          Prefixes of the branches a writing chat may be started on (`POST /chats` with
+          `branch`) besides its own `tendworks/chat-<chat id>`, e.g. `prototype/`. The
+          branch must start with one of them; there is no wildcard, and the workspace's
+          default branch is never allowed. A token cannot be scoped to branches: protect
+          the branches that matter through the repository's rules.
+        items:
+          type: string
+          minLength: 1
+          pattern: ^[^-\s]\S*$
   workspaceCredentials:
     title: WorkspaceCredentials
     description: >-

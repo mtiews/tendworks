@@ -494,6 +494,17 @@ do:
     ]);
   });
 
+  it("reads a workspace assistant's branch prefixes and refuses an empty one", () => {
+    const files = { "agents/workspace-assistant.md": agent("workspace-assistant", "harness: fake\n  chat: {}") };
+    const prefixes = (list: string) => folder({ ...files, "workspaces/app.yaml": workspace("app", `assistant: { enabled: true, write: true, branchPrefixes: ${list} }`) });
+
+    expect(loadConfiguration(prefixes("[prototype/, spike/]")).workspaces[0]?.spec.assistant?.branchPrefixes).toEqual(["prototype/", "spike/"]);
+    expect(issuesOf(prefixes('[""]'))).toEqual([
+      "workspaces/app.yaml: /spec/assistant/branchPrefixes/0: must NOT have fewer than 1 characters",
+      `workspaces/app.yaml: /spec/assistant/branchPrefixes/0: must match pattern "^[^-\\s]\\S*$"`,
+    ]);
+  });
+
   it("refuses a workspace whose enabled assistant's profile is not configured or allows no chats", () => {
     const dir = folder({
       "agents/workspace-assistant.md": agent("workspace-assistant", "harness: fake\n  chat: {}"),

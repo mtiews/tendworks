@@ -34,7 +34,8 @@ paths:
         "400":
           description: >-
             The body is invalid, no such agent profile or workspace is configured, the
-            profile does not allow chats, or the workspace has no enabled assistant.
+            profile does not allow chats, the workspace has no enabled assistant, or the
+            chat may not work on the `branch` asked for.
           content:
             application/json:
               schema:

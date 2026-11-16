@@ -418,7 +418,8 @@ paths:
         "400":
           description: >-
             The body is invalid, no such agent profile or workspace is configured, the
-            profile does not allow chats, or the workspace has no enabled assistant.
+            profile does not allow chats, the workspace has no enabled assistant, or the
+            chat may not work on the `branch` asked for.
           content:
             application/json:
               schema:
@@ -1418,7 +1419,7 @@ components:
           description: >-
             The workspace's assistant, defaults filled in; missing when it has none enabled,
             so `POST /chats` refuses the workspace.
-          required: [profile, write]
+          required: [profile, write, branchPrefixes]
           additionalProperties: false
           properties:
             profile:
@@ -1427,6 +1428,14 @@ components:
             write:
               type: boolean
               description: Whether it may change the workspace.
+            branchPrefixes:
+              type: array
+              items:
+                type: string
+              description: >-
+                Prefixes of the branches a writing chat may be started on (`POST /chats`
+                with `branch`) besides its own `tendworks/chat-<chat id>`; empty when there
+                are none.
     SubscriptionList:
       type: object
       required: [items]

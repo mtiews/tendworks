@@ -536,13 +536,16 @@ spec:
     enabled: true
     # profile: workspace-assistant   # the default; any agent profile with spec.chat
     # write: false                   # the default
+    # branchPrefixes: [prototype/]   # with write: true, branches a chat may be started on
 ```
 
 Restart server and worker, then `tend chat --workspace <name>` or "New chat" in the web UI; `tend workspace list` shows which workspaces have one. The starter enables it on `playground`.
 
 - **`write: false`** (default): a git workspace is cloned with its credential, which then is neither in the session's environment nor in its credential helper, and the remote's push URL points nowhere, so the assistant cannot push. A directory is mounted read-only. The assistant may still change files in its git checkout; those changes stay in the chat's volume.
 - **`write: true`**: the session gets the credential like a workflow's agent and works on the branch `tendworks/chat-<chat id>`; a directory is writable. Scope the workspace's token so that a push to its default branch is refused where you can ([GitHub access](github-agent-access.md)).
-- A chat keeps the write mode it started with; a changed `write` applies to new chats.
+- **`branchPrefixes`** (default none): with `write: true`, a chat on a git workspace may be started on a named branch under one of these prefixes instead of its own (ADR 0029), through `POST /chats` with `{ "workspace": "<name>", "branch": "prototype/login-flow", "text": "..." }`. A branch the remote has is continued, so a later chat on the same branch picks up where the last one stopped; a new one starts from the default branch. The chat keeps its branch (`branch` on the chat) and checks it out again when it resumes. Several chats may work on the same branch; nothing locks it. Refused with `400 Branch not allowed` and the reason: a branch under no listed prefix, the default branch, an invalid branch name, a directory workspace, and for now a read-only assistant. There is no wildcard prefix.
+- **Protect your branches in the repository.** A token cannot be scoped to branches on most hosts: a writing assistant's token reaches every branch it can push to, and the prefixes only keep the platform from asking for others. Protect the default branch and release branches through the repository's rules (on GitHub: branch protection or rulesets), so a push there is refused whatever the agent does.
+- A chat keeps the write mode and branch it started with; a changed `write` or `branchPrefixes` applies to new chats.
 - A chat on a directory workspace holds the directory only while it has a sandbox: while it is idle, a run can use the directory, and a message sent while a run works there is answered with "the workspace is busy"; send it again later.
 - A chat with a workspace that has no enabled assistant is refused (`Chat not allowed`), as is an unknown workspace (`Unknown workspace`).
 
@@ -888,6 +891,7 @@ docker network rm tendworks-sandboxes
 | `<channel> failed for <id>: Pushover refused the message (HTTP 4xx): ...` | notifications | Pushover's reason, e.g. an invalid application token or user key; fix it in `deploy/.env`, `up -d --wait` |
 | no notification on the phone, `no channel` in `tend notification list` | notifications | no subscription matches that event; check its `spec.scope` (a run without a workspace is in `platform: {}`), `spec.events`, `spec.channels` and that the files end in `.yaml` (`*.yaml.example` is not read); the server log lists channels and subscriptions at start |
 | chat refused: `Unknown workspace` or `Chat not allowed` | `tend chat --workspace`, UI | no workspace of that name, or its assistant is not enabled (`spec.assistant.enabled: true`); `tend workspace list` |
+| chat refused: `Branch not allowed` | `POST /chats` with `branch` | the reason names it: a branch under none of the workspace's `assistant.branchPrefixes`, its default branch, an invalid name, a directory workspace, or a read-only assistant ([Workspace assistants](#workspace-assistants)); `tend workspace list -o yaml` shows the prefixes |
 | chat answers `the workspace is busy: ...` | chat | a run works in the same directory workspace; send the message again once it ended |
 | run or chat fails: `directory ... is in use by another agent session (task ...)` | `tend run get`, chat | only one session at a time per directory workspace; wait for the other one, or use a git workspace for parallel work |
 | run completes without `pullRequest` in its output | `tend run get`, `tend run logs <id>` | the agent opened or reported no pull request, e.g. the agent token lacks Contents or Pull requests write access |
