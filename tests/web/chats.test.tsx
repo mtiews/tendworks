@@ -380,7 +380,7 @@ describe("new chat", () => {
 /**
  * A platform for choosing a chat's branch: workspace `proto` with a writing assistant that
  * allows `prototype/` and `spike/` branches, `app` with a read-only one, and the directory
- * workspace `notes` with a read-only one.
+ * workspace `notes` with a read-only one, and `lab` with a writing one without prefixes.
  */
 function branchPlatform() {
   const agentRuntime = createInMemoryAgentRuntime({
@@ -389,6 +389,7 @@ function branchPlatform() {
       proto: { profile: "workspace-assistant", write: true, branchPrefixes: ["prototype/", "spike/"] },
       app: { profile: "workspace-assistant", write: false },
       notes: { profile: "workspace-assistant", write: false },
+      lab: { profile: "workspace-assistant", write: true },
     },
   });
   const configuration = emptyConfiguration({
@@ -397,6 +398,7 @@ function branchPlatform() {
       workspace("proto", { enabled: true, write: true, branchPrefixes: ["prototype/", "spike/"] }),
       workspace("app", { enabled: true }),
       { apiVersion: "tendworks.dev/v1", kind: "Workspace", metadata: { name: "notes" }, spec: { directory: { path: "/srv/notes" }, assistant: { enabled: true } } },
+      workspace("lab", { enabled: true, write: true }),
     ],
   });
   signedIn();
@@ -476,13 +478,16 @@ describe("new chat on a branch", () => {
     expect(field("Branch")).toBe("agent/42");
   });
 
-  it("offers no branch for a profile or a directory workspace", async () => {
+  it("offers no branch for a profile, a directory workspace or a writing assistant without prefixes", async () => {
     const { user } = branchPlatform();
 
     await screen.findByRole("combobox", { name: "Chat with" });
     expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
     expect(branchField()).toBeNull();
     await user.selectOptions(screen.getByRole("combobox", { name: "Chat with" }), "Workspace notes (read-only)");
+    expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
+    expect(branchField()).toBeNull();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Chat with" }), "Workspace lab (may write)");
     expect(screen.queryByRole("combobox", { name: "Branch" })).toBeNull();
     expect(branchField()).toBeNull();
   });

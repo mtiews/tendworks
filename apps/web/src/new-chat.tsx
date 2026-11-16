@@ -15,7 +15,8 @@ type ChatWith = { agent: string } | { workspace: string };
 /**
  * Which branch the operator may choose for a chat (spec #146): a writing assistant its own
  * `tendworks/chat-<chat id>` or a name under one of the workspace's `branchPrefixes`, a
- * read-only one any branch the repository has. Absent for a profile and a directory workspace.
+ * read-only one any branch the repository has. Absent for a profile, a directory workspace and
+ * a writing assistant without prefixes, which has nothing to choose.
  */
 type BranchChoice = { write: true; prefixes: string[] } | { write: false };
 
@@ -54,7 +55,9 @@ export function NewChat() {
                 value: `workspace:${name}`,
                 label: `Workspace ${name} (${assistant.write ? "may write" : "read-only"})`,
                 chatWith: { workspace: name },
-                ...(kind === "git" ? { branch: assistant.write ? { write: true, prefixes: assistant.branchPrefixes } : { write: false } } : {}),
+                ...(kind === "git" && !(assistant.write && assistant.branchPrefixes.length === 0)
+                  ? { branch: assistant.write ? { write: true, prefixes: assistant.branchPrefixes } : { write: false } }
+                  : {}),
               },
             ]
           : [],
@@ -69,24 +72,24 @@ export function NewChat() {
   });
   // The branch as chosen: a writing chat's prefix ("" for its own branch) and name, a read-only chat's branch.
   const [prefix, setPrefix] = useState("");
-  const [name, setName] = useState("");
+  const [branchName, setBranchName] = useState("");
   const [text, setText] = useState("");
   const [starting, setStarting] = useState(false);
   const [refusal, setRefusal] = useState<string>();
-  const ids = { chatWith: useId(), branch: useId(), name: useId(), text: useId() };
+  const ids = { chatWith: useId(), branch: useId(), text: useId() };
 
   const chosen =
     choices?.find((choice) => choice.value === picked) ?? choices?.find((choice) => choice.value === `agent:${PLATFORM_ASSISTANT}`) ?? choices?.[0];
 
   // A prefix the chosen workspace does not list (any longer) counts as none.
   const chosenPrefix = chosen?.branch?.write && chosen.branch.prefixes.includes(prefix) ? prefix : "";
-  const branch = !chosen?.branch ? undefined : chosen.branch.write ? (chosenPrefix === "" ? undefined : chosenPrefix + name.trim()) : name.trim() || undefined;
-  const missingName = chosenPrefix !== "" && name.trim() === "";
+  const branch = !chosen?.branch ? undefined : chosen.branch.write ? (chosenPrefix === "" ? undefined : chosenPrefix + branchName.trim()) : branchName.trim() || undefined;
+  const missingName = chosenPrefix !== "" && branchName.trim() === "";
 
   const choose = (value: string) => {
     setPicked(value);
     setPrefix("");
-    setName("");
+    setBranchName("");
   };
 
   const start = async (event: FormEvent) => {
@@ -153,7 +156,7 @@ export function NewChat() {
                   ))}
                 </select>
                 {chosenPrefix !== "" && (
-                  <input id={ids.name} type="text" aria-label="Branch name" required value={name} onChange={(event) => setName(event.target.value)} />
+                  <input type="text" aria-label="Branch name" required value={branchName} onChange={(event) => setBranchName(event.target.value)} />
                 )}
               </div>
               <p className="hint muted">A branch the repository has is continued, a new one starts from the default branch.</p>
@@ -162,7 +165,7 @@ export function NewChat() {
           {chosen.branch?.write === false && (
             <div className="field">
               <label htmlFor={ids.branch}>Branch</label>
-              <input id={ids.branch} type="text" value={name} onChange={(event) => setName(event.target.value)} />
+              <input id={ids.branch} type="text" value={branchName} onChange={(event) => setBranchName(event.target.value)} />
               <p className="hint muted">Any branch the repository has; empty for its default branch.</p>
             </div>
           )}
