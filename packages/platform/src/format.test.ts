@@ -1,10 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { formatCost, formatOrigin, formatSchedule, totalCost } from "./index.js";
+import { formatContext, formatCost, formatOrigin, formatSchedule, totalCost } from "./index.js";
 
 describe("formatting for clients", () => {
   it("shows a cost with at most four decimals", () => {
     expect(formatCost({ amount: 0.123456, currency: "USD" })).toBe("0.1235 USD");
     expect(formatCost({ amount: 0.1 + 0.2, currency: "USD" })).toBe("0.3 USD");
+  });
+
+  it("shows how full the context is in thousands of tokens, with the share of the window", () => {
+    expect(formatContext({ used: 84_321, size: 200_000 })).toBe("84k of 200k tokens (42%)");
+    expect(formatContext({ used: 1_250, size: 200_000 })).toBe("1.3k of 200k tokens (1%)");
+    expect(formatContext({ used: 10, size: 100 })).toBe("10 of 100 tokens (10%)");
+    expect(formatContext({ used: 0, size: 0 })).toBe("0 of 0 tokens");
   });
 
   it("sums costs per currency", () => {

@@ -593,6 +593,19 @@ describe("chat window", () => {
     expect(field("Status")).toBe("input-required");
   });
 
+  it("shows next to the input how full the agent's context is, live as the harness reports it", async () => {
+    const { agentRuntime, chat } = await openChat();
+    const usage = (used: number) =>
+      agentRuntime.append(chat.id, { position: agentRuntime.transcripts.get(chat.id)!.length, time: new Date().toISOString(), type: "usage", context: { used, size: 200_000 } });
+
+    expect(within(conversation()).queryByText(/^Context /)).toBeNull();
+
+    usage(84_321);
+    expect(await within(conversation()).findByText("Context 84k of 200k tokens (42%)")).toBeTruthy();
+    usage(150_000);
+    expect(await within(conversation()).findByText("Context 150k of 200k tokens (75%)")).toBeTruthy();
+  });
+
   it("sends with Enter", async () => {
     const { user, platform: running, chat } = await openChat();
 

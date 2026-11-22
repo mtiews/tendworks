@@ -119,12 +119,13 @@ describe("transcript", () => {
     expect(within(transcript).queryByText("Let me think about it.")).toBeNull();
   });
 
-  it("shows the task, turn ends with their cost, resumes as markers and how the task ended", async () => {
+  it("shows the task, turn ends with their cost and context, resumes as markers and how the task ended", async () => {
     const { transcript } = await showTranscript([
       { type: "task-started", agent: "developer", message: { messageId: "m-1", role: "ROLE_USER", parts: [{ text: "Fix issue #7" }] } },
       { type: "session-started", sessionId: "s-1", harness: { name: "claude-code", version: "2.1.0" } },
       { type: "usage", cost: { amount: 0.1, currency: "USD" } },
       { type: "usage", cost: { amount: 0.12, currency: "USD" } },
+      { type: "usage", context: { used: 84_321, size: 200_000 } },
       { type: "turn-ended", reason: "completed" },
       { type: "task-resumed", agent: "developer", message: { messageId: "m-1", role: "ROLE_USER", parts: [{ text: "Fix issue #7" }] } },
       { type: "session-resumed", sessionId: "s-1" },
@@ -143,7 +144,7 @@ describe("transcript", () => {
     expect(text).toEqual([
       "Task for developer: Fix issue #7",
       "Session started (claude-code 2.1.0)",
-      "Turn completed · 0.12 USD",
+      "Turn completed · 0.12 USD · context 84k of 200k tokens (42%)",
       "Resumed the task after an interruption",
       "Resumed the session in a new sandbox; processes the agent started before are gone",
       "Could not resume the session (the session expired); started a new one on the kept workspace",

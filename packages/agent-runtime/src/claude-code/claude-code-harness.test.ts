@@ -339,12 +339,12 @@ describe("Claude Code harness", () => {
       { type: "tool-call", toolCallId: "tool-1", title: "Write hello.txt" },
       { type: "message-chunk", text: "Created " },
       { type: "message-chunk", text: "hello.txt." },
-      { type: "usage", cost: { amount: 0.42, currency: "USD" } },
+      { type: "usage", cost: { amount: 0.42, currency: "USD" }, context: { used: 1000, size: 200000 } },
       { type: "turn-ended", reason: "completed" },
     ]);
   });
 
-  it("records the agent's thoughts, tool results and plan without protocol details", async () => {
+  it("records the agent's thoughts, tool results, plan and context usage without protocol details", async () => {
     const updates: acp.SessionUpdate[] = [
       { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Let me check." } },
       { sessionUpdate: "tool_call", toolCallId: "tool-2", title: "ls", kind: "execute", status: "pending" },
@@ -387,6 +387,7 @@ describe("Claude Code harness", () => {
           { content: "Write the file", status: "in-progress" },
         ],
       },
+      { type: "usage", context: { used: 10, size: 100 } },
     ]);
   });
 
