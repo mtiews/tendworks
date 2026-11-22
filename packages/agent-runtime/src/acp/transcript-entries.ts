@@ -43,7 +43,13 @@ export function transcriptEntries(update: acp.SessionUpdate, redact: (text: stri
     case "plan":
       return [{ type: "plan", steps: update.entries.map(({ content, status }) => ({ content: redact(content), status: PLAN_STATUS[status] })) }];
     case "usage_update":
-      return update.cost ? [{ type: "usage", cost: { amount: update.cost.amount, currency: update.cost.currency } }] : [];
+      return [
+        {
+          type: "usage",
+          ...(update.cost ? { cost: { amount: update.cost.amount, currency: update.cost.currency } } : {}),
+          context: { used: update.used, size: update.size },
+        },
+      ];
     // Nothing about the agent's work: echoed user input, plan edits the next `plan` repeats,
     // modes, commands, configuration, session metadata, compaction, subagents and notices.
     case "user_message_chunk":

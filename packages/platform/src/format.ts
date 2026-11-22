@@ -1,5 +1,5 @@
 /*
- * How clients (the `tend` CLI, the web UI) show costs and run origins, so both say it the
+ * How clients (the `tend` CLI, the web UI) show costs, context usage and run origins, so both say it the
  * same way. Typed structurally on the contract's shapes, without depending on them.
  */
 
@@ -7,6 +7,12 @@
 export interface Cost {
   amount: number;
   currency: string;
+}
+
+/** How full a model's context is, as the contract's `contextUsage` carries it. */
+export interface ContextUsage {
+  used: number;
+  size: number;
 }
 
 /** What started a run, as the contract's `runOrigin` carries it. */
@@ -17,6 +23,12 @@ export type Schedule = { cron: string } | { every: { days?: number; hours?: numb
 
 /** `0.1234 USD`: at most four decimals. */
 export const formatCost = ({ amount, currency }: Cost): string => `${Number(amount.toFixed(4))} ${currency}`;
+
+/** How full a model's context is, e.g. `84k of 200k tokens (42%)`. */
+export function formatContext({ used, size }: ContextUsage): string {
+  const tokens = (count: number) => (count >= 1000 ? `${Number((count / 1000).toFixed(count < 10_000 ? 1 : 0))}k` : String(count));
+  return `${tokens(used)} of ${tokens(size)} tokens${size > 0 ? ` (${Math.round((used / size) * 100)}%)` : ""}`;
+}
 
 /** Sums costs per currency, e.g. `0.52 USD` or `0.5 USD, 1 EUR`; empty without costs. */
 export function totalCost(costs: readonly Cost[]): string {

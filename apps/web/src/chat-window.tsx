@@ -4,7 +4,7 @@ import { AnswerError, answer, reasonOf } from "./answers.js";
 import { chatTitle, isOpen, type Chat } from "./chat-summary.js";
 import { Confirmation } from "./confirm.js";
 import { useEnterToSend } from "./enter-to-send.js";
-import { formatCost } from "@tendworks/platform";
+import { formatContext, formatCost, type ContextUsage } from "@tendworks/platform";
 import { TranscriptOf } from "./live-transcript.js";
 import { Time } from "./time.js";
 import type { TranscriptEntry } from "./transcript.js";
@@ -27,6 +27,15 @@ export function turnOf(entries: readonly TranscriptEntry[]): Turn {
     if (type === "task-started" || type === "task-resumed" || type === "message-received") return { state: "working", position };
   }
   return { state: "working", position: -1 };
+}
+
+/** How full the model's context is by the transcript's last report, if the harness made one. */
+export function contextOf(entries: readonly TranscriptEntry[]): ContextUsage | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index]!;
+    if (entry.type === "usage" && entry.context) return entry.context;
+  }
+  return undefined;
 }
 
 /**
@@ -97,6 +106,7 @@ function Conversation({ chat, changed, phone }: { chat: Chat; changed: () => voi
   const open = useCallback<OpenTranscriptStream>((header) => client.GET("/chats/{chatId}/transcript/stream", { params: { path: { chatId }, header }, parseAs: "stream" }), [client, chatId]);
   const view = useTranscript({ read, open, live: isOpen(chat), onEnded: changed });
   const turn = turnOf(view.phase === "shown" ? view.entries : []);
+  const context = contextOf(view.phase === "shown" ? view.entries : []);
   // The transcript (the page on a phone) follows its end while the operator is there; the input stays in view (`chats.css`).
   const scroller = useRef<HTMLDivElement>(null);
   const toEnd = useFollowEnd(view.phase === "shown" ? view.entries : undefined, view.phase === "shown", phone ? undefined : scroller);
@@ -117,14 +127,14 @@ function Conversation({ chat, changed, phone }: { chat: Chat; changed: () => voi
       ) : !canChange ? (
         <p className="muted">Read-only access: you can follow this chat but not write to it.</p>
       ) : (
-        <ChatActions chatId={chatId} turn={turn} following={view.phase === "shown"} changed={changed} sent={toEnd} />
+        <ChatActions chatId={chatId} turn={turn} context={context} following={view.phase === "shown"} changed={changed} sent={toEnd} />
       )}
     </section>
   );
 }
 
-/** The next message while the agent waits, cancelling the turn while it works, and ending the chat. */
-function ChatActions({ chatId, turn, following, changed, sent }: { chatId: string; turn: Turn; following: boolean; changed: () => void; sent: () => void }) {
+/** The next message while the agent waits, cancelling the turn while it works, how full the context is, and ending the chat. */
+function ChatActions({ chatId, turn, context, following, changed, sent }: { chatId: string; turn: Turn; context: ContextUsage | undefined; following: boolean; changed: () => void; sent: () => void }) {
   const { client } = useApi();
   const inputId = useId();
   const [text, setText] = useState("");
@@ -216,6 +226,7 @@ function ChatActions({ chatId, turn, following, changed, sent }: { chatId: strin
             </button>
           )}
           {!waiting && <span className="muted">{following ? "The agent is working…" : "Reading the chat…"}</span>}
+          {context && <span className="muted chat-context">Context {formatContext(context)}</span>}
           <button type="button" className="chat-end" disabled={confirming} onClick={() => setConfirming(true)}>
             End chat
           </button>

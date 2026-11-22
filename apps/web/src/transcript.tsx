@@ -1,6 +1,6 @@
 import type { ControlPlane } from "@tendworks/shared";
 import { useId, useMemo, useState, type ReactNode } from "react";
-import { formatCost, type Cost } from "@tendworks/platform";
+import { formatContext, formatCost, type ContextUsage, type Cost } from "@tendworks/platform";
 import { Markdown, safeHref } from "./markdown.js";
 
 /*
@@ -17,8 +17,8 @@ type Item =
   | { kind: "message"; key: string; time: string; text: string }
   | { kind: "thought"; key: string; time: string; text: string }
   | { kind: "tool"; key: string; call: Of<"tool-call">; result?: Of<"tool-result"> }
-  /** A turn ended: what that turn cost (the difference to the running total when the previous turn ended). */
-  | { kind: "turn"; key: string; entry: Of<"turn-ended">; cost?: Cost }
+  /** A turn ended: what that turn cost (the difference to the running total when the previous turn ended), and how full the context was. */
+  | { kind: "turn"; key: string; entry: Of<"turn-ended">; cost?: Cost; context?: ContextUsage }
   /** The agent waits for the next message: what the turn that just ended cost, and the total so far. */
   | { kind: "waiting"; key: string; entry: Of<"input-required">; turn?: Cost }
   | { kind: "entry"; key: string; entry: Exclude<TranscriptEntry, Of<"message-chunk" | "thought-chunk" | "tool-call" | "turn-ended" | "usage" | "input-required">> };
@@ -31,13 +31,15 @@ function difference(total: Cost, before: Cost | undefined): Cost | undefined {
 
 /**
  * Joins consecutive message and thought chunks, pairs tool calls with their results, gives
- * each turn end its turn's cost and each wait for the next message its turn's cost and the
- * total so far. Usage entries carry the session's running total, not a turn's.
+ * each turn end its turn's cost and how full the context last was, and each wait for the next
+ * message its turn's cost and the total so far. Usage entries carry the session's running
+ * total, not a turn's.
  */
 function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
   const items: Item[] = [];
   const tools = new Map<string, Extract<Item, { kind: "tool" }>>();
   let cost: Cost | undefined;
+  let context: ContextUsage | undefined;
   // The running total when the previous turn ended, where the next turn's cost starts.
   let endedAt: Cost | undefined;
   // The running total when the agent last waited for a message, where the next turn starts.
@@ -54,11 +56,12 @@ function itemsOf(entries: readonly TranscriptEntry[]): Item[] {
       tools.set(entry.toolCallId, item);
       items.push(item);
     } else if (entry.type === "usage") {
-      cost = entry.cost;
+      cost = entry.cost ?? cost;
+      context = entry.context ?? context;
     } else if (entry.type === "turn-ended") {
       const turn = cost && difference(cost, endedAt);
       endedAt = cost;
-      items.push({ kind: "turn", key, entry, ...(turn ? { cost: turn } : {}) });
+      items.push({ kind: "turn", key, entry, ...(turn ? { cost: turn } : {}), ...(context ? { context } : {}) });
     } else if (entry.type === "input-required") {
       const turn = entry.cost && difference(entry.cost, waitedAt);
       if (entry.cost) cost = waitedAt = entry.cost;
@@ -109,7 +112,7 @@ export interface TranscriptProps {
 /**
  * The transcript of an agent session (a run step or a chat): the agent's messages as
  * sanitized Markdown, tool calls as rows that expand to their output, thoughts and the
- * harness's own output on request, turn ends with their cost and resumes as markers.
+ * harness's own output on request, turn ends with their cost and context, resumes as markers.
  */
 export function Transcript({ entries }: TranscriptProps) {
   const items = useMemo(() => itemsOf(entries), [entries]);
@@ -165,6 +168,7 @@ export function Transcript({ entries }: TranscriptProps) {
                 <li key={item.key} className="entry entry-marker" title={item.entry.time}>
                   {TURN_ENDS[item.entry.reason]}
                   {withCost(item.cost)}
+                  {item.context && ` · context ${formatContext(item.context)}`}
                 </li>
               );
             case "waiting":

@@ -282,16 +282,35 @@ $defs:
               enum: [pending, in-progress, completed]
   usage:
     title: UsageEntry
-    description: What the agent session has cost so far.
+    description: >-
+      What the agent session has cost so far and how full the model's context is, as far
+      as the harness reports them; at least one of the two.
     type: object
     additionalProperties: false
-    required: [position, time, type, cost]
+    required: [position, time, type]
     properties:
       position: { $ref: '#/$defs/position' }
       time: { $ref: '#/$defs/time' }
       type: { const: usage }
       cost:
         $ref: './run.schema.yaml#/$defs/cost'
+      context:
+        $ref: '#/$defs/contextUsage'
+  contextUsage:
+    title: ContextUsage
+    description: >-
+      How full the model's context is: `used` tokens of a context window of `size` tokens.
+      When it fills up, the harness may compact the context on its own.
+    type: object
+    additionalProperties: false
+    required: [used, size]
+    properties:
+      used:
+        type: integer
+        minimum: 0
+      size:
+        type: integer
+        minimum: 0
   turnEnded:
     title: TurnEndedEntry
     description: >-

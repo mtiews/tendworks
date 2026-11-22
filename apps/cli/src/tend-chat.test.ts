@@ -510,7 +510,7 @@ describe("tend chat attach: concise and verbose output", () => {
     return client;
   }
 
-  /** A chat whose one turn used a tool, thought, hit a resumed session and an error, before it answered. */
+  /** A chat whose one turn used a tool, thought, hit a resumed session and an error, filled its context, before it answered. */
   async function busyChat(agentRuntime: ReturnType<typeof platform>["agentRuntime"]) {
     const chat = await agentRuntime.startChat({ agent: "assistant", text: "Hello" });
     const add = (entry: Record<string, unknown>) =>
@@ -522,11 +522,12 @@ describe("tend chat attach: concise and verbose output", () => {
     add({ type: "harness-output", text: "harness noise" });
     add({ type: "session-resumed", sessionId: "s1" });
     add({ type: "error", message: "something broke" });
+    add({ type: "usage", context: { used: 84_321, size: 200_000 } });
     agentRuntime.finishTurn(chat.id, "Two runs.", { amount: 0.01, currency: "USD" });
     return chat.id;
   }
 
-  it("shows the conversation, one line per turn, resume markers and errors by default", async () => {
+  it("shows the conversation, one line per turn with its cost and the context, resume markers and errors by default", async () => {
     const { agentRuntime, tend } = platform();
     const id = await busyChat(agentRuntime);
 
@@ -537,7 +538,7 @@ describe("tend chat attach: concise and verbose output", () => {
     expect(out()).toMatch(/agent\s+Two runs\./);
     expect(out()).toMatch(/session\s+resumed s1/);
     expect(out()).toMatch(/error\s+something broke/);
-    expect(out()).toMatch(/\(turn \d+s, 0\.01 USD; chat 0\.01 USD\)/);
+    expect(out()).toMatch(/\(turn \d+s, 0\.01 USD; chat 0\.01 USD; context 84k of 200k tokens \(42%\)\)/);
     for (const hidden of ["list_runs", "two runs", "Let me think", "harness noise", "started s1"]) expect(out()).not.toContain(hidden);
   });
 
@@ -548,7 +549,7 @@ describe("tend chat attach: concise and verbose output", () => {
     const { exitCode, out } = await attached(tend(["chat", "attach", id, "--verbose"]));
 
     expect(await exitCode).toBe(0);
-    for (const shown of ["list_runs", "two runs", "Let me think", "harness noise", "started s1", "resumed s1", "something broke", "(0.01 USD so far)"]) {
+    for (const shown of ["list_runs", "two runs", "Let me think", "harness noise", "started s1", "resumed s1", "something broke", "context 84k of 200k tokens (42%)", "(0.01 USD so far)"]) {
       expect(out()).toContain(shown);
     }
   });

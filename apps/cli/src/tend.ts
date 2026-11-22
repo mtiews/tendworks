@@ -1,5 +1,6 @@
 import {
   followTranscript as followPlatformTranscript,
+  formatContext,
   formatCost,
   formatOrigin,
   formatSchedule,
@@ -7,6 +8,7 @@ import {
   totalCost,
   TranscriptStreamRefusedError,
   TranscriptStreamUnreachableError,
+  type ContextUsage,
   type FollowTranscriptOptions,
   type FollowTranscriptOutcome,
 } from "@tendworks/platform";
@@ -915,9 +917,10 @@ async function converse({
     terminal.read();
   };
   const printer = entryPrinter(write, "table");
-  // The turn in progress: when it started; and the chat's cost when the last turn ended.
+  // The turn in progress: when it started; the chat's cost when the last turn ended; how full the context last was.
   let turnStart: string | undefined;
   let costBefore = 0;
+  let context: ContextUsage | undefined;
 
   /** The transcript so far; the position of its last entry. */
   const history = async (): Promise<number> => {
@@ -969,6 +972,7 @@ async function converse({
           return;
         case "entry": {
           const { entry } = event;
+          if (entry.type === "usage" && entry.context) context = entry.context;
           if (entry.type === "task-started" || entry.type === "message-received") {
             waiting = false;
             turnStart = entry.time;
@@ -981,7 +985,7 @@ async function converse({
               if (entry.cost) write(`(${formatCost(entry.cost)} so far)\n`);
             } else {
               const turn = [turnStart === undefined ? undefined : formatDuration(turnStart, entry.time), entry.cost ? formatCost({ ...entry.cost, amount: entry.cost.amount - costBefore }) : undefined];
-              const parts = [turn.filter(Boolean).join(", "), entry.cost ? `chat ${formatCost(entry.cost)}` : undefined].filter(Boolean);
+              const parts = [turn.filter(Boolean).join(", "), entry.cost ? `chat ${formatCost(entry.cost)}` : undefined, context ? `context ${formatContext(context)}` : undefined].filter(Boolean);
               if (parts.length > 0) write(`(turn ${parts.join("; ")})\n`);
             }
             if (entry.cost) costBefore = entry.cost.amount;
@@ -1138,7 +1142,7 @@ function formatTranscript(entries: TranscriptEntry[]): string[] {
         line(entry.time, "plan", entry.steps.map((step) => `[${step.status}] ${step.content}`).join("\n"));
         break;
       case "usage":
-        line(entry.time, "usage", `${formatCost(entry.cost)} so far`);
+        line(entry.time, "usage", [entry.cost && `${formatCost(entry.cost)} so far`, entry.context && `context ${formatContext(entry.context)}`].filter(Boolean).join(", "));
         break;
       case "turn-ended":
         line(entry.time, "turn", entry.reason);
